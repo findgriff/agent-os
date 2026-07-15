@@ -1,5 +1,7 @@
 <div align="center">
   <br/>
+  <img src="https://github.com/findgriff/agent-os/raw/main/public/og-image.jpg" alt="AGENT OS" width="100%" style="max-width: 900px; border-radius: 12px;" />
+  <br/><br/>
   <h1>🤖 AGENT OS</h1>
   <p><em>The Operating System for Autonomous Intelligence</em></p>
   
