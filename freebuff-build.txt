@@ -1,0 +1,45 @@
+Build two features for AGENT OS at /opt/agent-os/. The frontend is React + TypeScript with Tailwind CSS. The backend is a Python stdlib HTTP server. Follow the existing patterns in the codebase.
+
+## 1. HERMES ORACLE — News/Trends Agent
+
+### Backend (server/features.py)
+Add API endpoints:
+- POST /api/oracle/scan — scan for trending news {keywords?: string[], industry?: string}
+  Returns: {headlines: [{title, url, source, date, summary, relevance}]}
+- GET /api/oracle/history — past scans with generated ideas
+- DELETE /api/oracle/:id
+
+Use requests to fetch from RSS feeds. Generate content ideas from headlines using DeepSeek API (DEEPSEEK_API_KEY from env). Store in oracle_scans table (id, tenant_id, keywords, results_json, ideas_json, created_at).
+
+### Frontend (pages/Oracle.tsx)
+- Top: "Scan Now" button + keyword/industry input
+- Results area: grid of headline cards with title, source, date, summary
+- Click headline → expand with "Content Angle" and "Unique Title" suggestions
+- "Push to Pipeline" button
+- History sidebar
+
+### Route: /oracle, icon: travel_explore, colour: #F59E0B
+
+## 2. FIRE CORAL WEB SEARCH
+
+### Backend (server/features.py)
+- POST /api/search/query — search the web {query: string, top_k?: number}
+  Returns: {results: [{title, url, snippet, source}]}
+- POST /api/search/agents — search for an agent {agent_id: number, query: string}
+
+Use requests to search. Store in search_history table.
+
+### Frontend (pages/Search.tsx)
+- Search bar at top, results list below
+- "Search as agent" mode with dropdown
+- History sidebar
+
+### Route: /search, icon: search, colour: #38BDF8
+
+## Requirements
+- Update App.tsx with routes
+- Update Layout.tsx with sidebar nav items
+- Add tables to server/schema.sql
+- Register routes in server/app.py
+- Use the existing glass/dark theme
+- npm run build when done

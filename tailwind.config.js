@@ -1,0 +1,50 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: ['./index.html', './App.tsx', './main.tsx', './pages/**/*.tsx', './components/**/*.tsx'],
+  theme: {
+    extend: {
+      colors: {
+        bg: '#05080C',
+        surface: '#0D1520',
+        raised: '#141E2D',
+        accent: '#19C3E6',
+        sky: '#38BDF8',
+        violet: '#A78BFA',
+        amber: '#F59E0B',
+        rose: '#F43F5E',
+        emerald: '#22C55E',
+        kitt: '#EF4444',
+        ink: '#E8EDF5',
+        muted: '#7B8DA8',
+      },
+      fontFamily: {
+        display: ['"Space Grotesk"', 'system-ui', 'sans-serif'],
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+        mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+      },
+      keyframes: {
+        fadeInUp: { from: { opacity: '0', transform: 'translateY(12px)' }, to: { opacity: '1', transform: 'translateY(0)' } },
+        pulseGlow: { '0%,100%': { boxShadow: '0 0 4px var(--accent)' }, '50%': { boxShadow: '0 0 16px var(--accent), 0 0 32px var(--accent)' } },
+        twinkle: { '0%,100%': { opacity: '0.6', transform: 'scale(1)' }, '50%': { opacity: '1', transform: 'scale(1.1)' } },
+        float: { '0%,100%': { transform: 'translateY(0)' }, '50%': { transform: 'translateY(-8px)' } },
+        slideInRight: { from: { transform: 'translateX(100%)' }, to: { transform: 'translateX(0)' } },
+        aurora: { '0%': { backgroundPosition: '0% 50%' }, '50%': { backgroundPosition: '100% 50%' }, '100%': { backgroundPosition: '0% 50%' } },
+        scanner: { '0%': { left: '-18%' }, '50%': { left: '100%' }, '100%': { left: '-18%' } },
+        shimmer: { '0%': { backgroundPosition: '-200% 0' }, '100%': { backgroundPosition: '200% 0' } },
+        ticker: { from: { transform: 'translateX(0)' }, to: { transform: 'translateX(-50%)' } },
+      },
+      animation: {
+        fadeInUp: 'fadeInUp 0.5s ease-out both',
+        pulseGlow: 'pulseGlow 2s ease-in-out infinite',
+        twinkle: 'twinkle 3s ease-in-out infinite',
+        float: 'float 6s ease-in-out infinite',
+        slideInRight: 'slideInRight 0.3s ease-out both',
+        aurora: 'aurora 18s ease infinite',
+        scanner: 'scanner 6s ease-in-out infinite',
+        shimmer: 'shimmer 1.8s linear infinite',
+        ticker: 'ticker 40s linear infinite',
+      },
+    },
+  },
+  plugins: [],
+};

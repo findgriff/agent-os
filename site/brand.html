@@ -1,0 +1,1066 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AGENT OS — Brand Identity System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  /* ================= TOKENS ================= */
+  :root {
+    --bg:            #05080C;
+    --surface:       #0D1520;
+    --surface-2:     #141E2D;
+    --glass:         rgba(255,255,255,0.04);
+    --glass-border:  rgba(255,255,255,0.07);
+    --text:          #E8EDF5;
+    --muted:         #7B8DA8;
+    --primary-deep:  #0A1E2A;
+    --primary:       #19C3E6;
+    --accent:        #38BDF8;
+    --violet:        #A78BFA;
+    --amber:         #F59E0B;
+    --rose:          #F43F5E;
+    --emerald:       #22C55E;
+    --r-card: 12px;
+    --r-input: 8px;
+    --r-pill: 9999px;
+    --font-display: 'Space Grotesk', sans-serif;
+    --font-ui: 'Inter', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    background-image:
+      radial-gradient(ellipse 900px 600px at 15% -5%, rgba(25,195,230,0.07), transparent 60%),
+      radial-gradient(ellipse 800px 500px at 90% 15%, rgba(167,139,250,0.05), transparent 60%),
+      radial-gradient(ellipse 700px 700px at 50% 110%, rgba(10,30,42,0.9), transparent 70%),
+      linear-gradient(rgba(56,189,248,0.028) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(56,189,248,0.028) 1px, transparent 1px);
+    background-size: auto, auto, auto, 48px 48px, 48px 48px;
+  }
+
+  ::selection { background: rgba(56,189,248,0.35); }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 32px; }
+
+  /* ================= UTILITIES ================= */
+  .mono { font-family: var(--font-mono); }
+  .glass {
+    background: var(--glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--r-card);
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 5px 14px;
+    border-radius: var(--r-pill);
+    border: 1px solid var(--glass-border);
+    background: var(--glass);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--emerald);
+    box-shadow: 0 0 8px var(--emerald), 0 0 16px rgba(34,197,94,0.5);
+    animation: pulse 2.2s ease-in-out infinite;
+  }
+  .dot.cyan   { background: var(--accent); box-shadow: 0 0 8px var(--accent), 0 0 16px rgba(56,189,248,0.5); }
+  .dot.amber  { background: var(--amber);  box-shadow: 0 0 8px var(--amber),  0 0 16px rgba(245,158,11,0.5); }
+  .dot.violet { background: var(--violet); box-shadow: 0 0 8px var(--violet), 0 0 16px rgba(167,139,250,0.5); }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.55; transform: scale(0.82); }
+  }
+
+  /* ================= HEADER ================= */
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(5,8,12,0.72);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--glass-border);
+  }
+  .nav {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 64px;
+  }
+  .nav-logo { display: flex; align-items: center; gap: 12px; }
+  .nav-logo svg { display: block; overflow: visible; }
+  .nav-logo .wordmark {
+    font-family: var(--font-display);
+    font-weight: 600; font-size: 17px;
+    letter-spacing: 0.22em;
+  }
+  .nav-logo .wordmark b { font-weight: 700; color: var(--accent); }
+  .nav-links { display: flex; gap: 26px; }
+  .nav-links a {
+    color: var(--muted); text-decoration: none;
+    font-family: var(--font-mono); font-size: 11px;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    transition: color 0.2s;
+  }
+  .nav-links a:hover { color: var(--accent); }
+
+  /* ================= HERO ================= */
+  .hero {
+    padding: 110px 0 90px;
+    text-align: center;
+    position: relative;
+  }
+  .hero .pill { margin-bottom: 44px; }
+  .hero-logo { display: flex; align-items: baseline; justify-content: center; gap: 22px; flex-wrap: wrap; }
+  .hero-logo .agent {
+    font-family: var(--font-display);
+    font-size: clamp(48px, 8vw, 88px);
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    background: linear-gradient(180deg, #FFFFFF 20%, #9DB4CE 100%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .hero-logo .os {
+    display: inline-flex; align-items: center;
+    font-family: var(--font-display);
+    font-size: clamp(60px, 10vw, 110px);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--text);
+  }
+  .hero-logo .os svg { overflow: visible; margin-right: 0.06em; filter: drop-shadow(0 0 24px rgba(25,195,230,0.45)); }
+  .hero-tagline {
+    margin-top: 34px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .hero-tagline em { font-style: normal; color: var(--accent); }
+  .hero-coords {
+    margin-top: 60px;
+    display: flex; justify-content: center; gap: 40px; flex-wrap: wrap;
+    font-family: var(--font-mono); font-size: 11px;
+    letter-spacing: 0.12em; color: var(--muted);
+  }
+  .hero-coords span b { color: var(--text); font-weight: 500; }
+
+  /* ================= SECTIONS ================= */
+  section { padding: 72px 0; }
+  .sec-head {
+    display: flex; align-items: baseline; gap: 18px;
+    margin-bottom: 40px;
+    border-bottom: 1px solid var(--glass-border);
+    padding-bottom: 18px;
+  }
+  .sec-head .idx {
+    font-family: var(--font-mono); font-size: 12px;
+    color: var(--accent); letter-spacing: 0.2em;
+  }
+  .sec-head h2 {
+    font-family: var(--font-display);
+    font-size: 30px; font-weight: 600; letter-spacing: 0.04em;
+  }
+  .sec-head .sub {
+    margin-left: auto;
+    font-family: var(--font-mono); font-size: 11px;
+    color: var(--muted); letter-spacing: 0.14em; text-transform: uppercase;
+  }
+
+  /* ================= LOGO SECTION ================= */
+  .logo-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; }
+  @media (max-width: 860px) { .logo-grid { grid-template-columns: 1fr; } }
+  .logo-stage {
+    position: relative;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    min-height: 320px;
+    padding: 48px;
+    overflow: hidden;
+    background:
+      radial-gradient(ellipse 500px 300px at 50% 50%, rgba(25,195,230,0.06), transparent 70%),
+      linear-gradient(rgba(56,189,248,0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(56,189,248,0.035) 1px, transparent 1px);
+    background-size: auto, 32px 32px, 32px 32px;
+  }
+  .logo-stage .corner {
+    position: absolute; width: 14px; height: 14px;
+    border-color: rgba(56,189,248,0.4); border-style: solid;
+  }
+  .corner.tl { top: 14px; left: 14px; border-width: 1px 0 0 1px; }
+  .corner.tr { top: 14px; right: 14px; border-width: 1px 1px 0 0; }
+  .corner.bl { bottom: 14px; left: 14px; border-width: 0 0 1px 1px; }
+  .corner.br { bottom: 14px; right: 14px; border-width: 0 1px 1px 0; }
+  .stage-label {
+    position: absolute; top: 16px; left: 40px;
+    font-family: var(--font-mono); font-size: 10px;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted);
+  }
+  .stage-note {
+    position: absolute; bottom: 16px; right: 40px;
+    font-family: var(--font-mono); font-size: 10px;
+    letter-spacing: 0.14em; color: rgba(123,141,168,0.65);
+  }
+
+  .lockup-h { display: flex; align-items: baseline; gap: 14px; }
+  .lockup-h .agent {
+    font-family: var(--font-display); font-size: 46px; font-weight: 600;
+    letter-spacing: 0.16em;
+    background: linear-gradient(180deg, #FFFFFF 20%, #9DB4CE 100%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .lockup-h .os {
+    display: inline-flex; align-items: center;
+    font-family: var(--font-display); font-size: 58px; font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  .lockup-h .os svg { overflow: visible; margin-right: 0.06em; filter: drop-shadow(0 0 18px rgba(25,195,230,0.45)); }
+
+  .logo-usage {
+    margin-top: 40px;
+    display: flex; gap: 28px; flex-wrap: wrap; justify-content: center;
+    font-family: var(--font-mono); font-size: 10px;
+    letter-spacing: 0.14em; color: var(--muted); text-transform: uppercase;
+  }
+  .logo-usage span::before { content: "▸ "; color: var(--accent); }
+
+  .mark-stage { min-height: 320px; }
+  .mark-stage svg { filter: drop-shadow(0 0 30px rgba(25,195,230,0.5)); overflow: visible; }
+
+  .logo-specs {
+    margin-top: 24px;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px;
+  }
+  @media (max-width: 860px) { .logo-specs { grid-template-columns: 1fr; } }
+  .spec-card { padding: 22px 24px; }
+  .spec-card h4 {
+    font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+    letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 10px;
+  }
+  .spec-card p { font-size: 13.5px; color: var(--muted); line-height: 1.65; }
+
+  /* ================= PALETTE ================= */
+  .palette-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 18px;
+  }
+  .swatch { overflow: hidden; transition: transform 0.25s, box-shadow 0.25s; }
+  .swatch:hover { transform: translateY(-3px); }
+  .swatch .chip { height: 96px; position: relative; }
+  .swatch .chip .flare {
+    position: absolute; inset: 0;
+    background: linear-gradient(120deg, rgba(255,255,255,0.14), transparent 45%);
+  }
+  .swatch .meta { padding: 14px 16px 16px; }
+  .swatch .meta .name {
+    font-family: var(--font-display); font-weight: 600;
+    font-size: 14.5px; letter-spacing: 0.03em;
+  }
+  .swatch .meta .hex {
+    font-family: var(--font-mono); font-size: 11.5px;
+    color: var(--muted); margin-top: 2px; letter-spacing: 0.06em;
+  }
+  .swatch .meta .role {
+    font-family: var(--font-mono); font-size: 9.5px;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    color: rgba(123,141,168,0.75); margin-top: 8px;
+  }
+
+  /* ================= TYPOGRAPHY ================= */
+  .type-families { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-bottom: 24px; }
+  @media (max-width: 860px) { .type-families { grid-template-columns: 1fr; } }
+  .family-card { padding: 26px 28px; }
+  .family-card .glyph {
+    font-size: 54px; line-height: 1; margin-bottom: 14px;
+    background: linear-gradient(180deg, var(--text), var(--muted));
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .family-card.f-display .glyph { font-family: var(--font-display); font-weight: 700; }
+  .family-card.f-ui .glyph      { font-family: var(--font-ui); font-weight: 600; }
+  .family-card.f-mono .glyph    { font-family: var(--font-mono); font-weight: 500; }
+  .family-card .fname { font-family: var(--font-display); font-size: 16px; font-weight: 600; }
+  .family-card .frole {
+    font-family: var(--font-mono); font-size: 10px;
+    letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--accent); margin-top: 4px;
+  }
+  .family-card .fdesc { font-size: 13px; color: var(--muted); margin-top: 10px; }
+
+  .type-scale { padding: 8px 34px; }
+  .scale-row {
+    display: flex; align-items: baseline; gap: 28px;
+    padding: 22px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+  .scale-row:last-child { border-bottom: none; }
+  .scale-row .tag {
+    flex: 0 0 150px;
+    font-family: var(--font-mono); font-size: 10.5px;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted);
+  }
+  .scale-row .sample { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .s-display { font-family: var(--font-display); font-size: 52px; font-weight: 700; letter-spacing: 0.02em; line-height: 1.1; }
+  .s-h1      { font-family: var(--font-display); font-size: 36px; font-weight: 600; line-height: 1.15; }
+  .s-h2      { font-family: var(--font-display); font-size: 24px; font-weight: 600; line-height: 1.2; }
+  .s-body    { font-family: var(--font-ui); font-size: 16px; color: var(--text); }
+  .s-small   { font-family: var(--font-ui); font-size: 13px; color: var(--muted); }
+  .s-mono    { font-family: var(--font-mono); font-size: 13px; color: var(--primary); letter-spacing: 0.04em; }
+
+  /* ================= COMPONENTS ================= */
+  .comp-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 24px; align-items: start; }
+  @media (max-width: 900px) { .comp-grid { grid-template-columns: 1fr; } }
+
+  .mission-card {
+    border: 1px solid rgba(56,189,248,0.28);
+    box-shadow:
+      0 0 0 1px rgba(56,189,248,0.06),
+      0 0 32px rgba(56,189,248,0.12),
+      inset 0 1px 0 rgba(255,255,255,0.06);
+    padding: 24px 26px;
+    background: linear-gradient(180deg, rgba(20,30,45,0.75), rgba(13,21,32,0.9));
+  }
+  .mc-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+  .mc-title {
+    font-family: var(--font-mono); font-size: 11px;
+    letter-spacing: 0.22em; text-transform: uppercase; color: var(--accent);
+  }
+  .mc-agent { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+  .avatar {
+    width: 52px; height: 52px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display); font-weight: 700; font-size: 17px;
+    color: #fff; flex-shrink: 0;
+    letter-spacing: 0.04em;
+  }
+  .avatar.cyan {
+    background: radial-gradient(circle at 32% 28%, #5FD4FA, #0E7490);
+    box-shadow: 0 0 18px rgba(56,189,248,0.55), inset 0 1px 2px rgba(255,255,255,0.35);
+  }
+  .avatar.violet {
+    background: radial-gradient(circle at 32% 28%, #C4B5FD, #6D28D9);
+    box-shadow: 0 0 18px rgba(167,139,250,0.55), inset 0 1px 2px rgba(255,255,255,0.35);
+  }
+  .avatar.amber {
+    background: radial-gradient(circle at 32% 28%, #FCD34D, #B45309);
+    box-shadow: 0 0 18px rgba(245,158,11,0.55), inset 0 1px 2px rgba(255,255,255,0.35);
+  }
+  .mc-agent .who .name { font-family: var(--font-display); font-weight: 600; font-size: 17px; }
+  .mc-agent .who .role {
+    font-family: var(--font-mono); font-size: 10.5px;
+    color: var(--muted); letter-spacing: 0.12em; text-transform: uppercase; margin-top: 2px;
+  }
+  .mc-metrics {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+    margin-bottom: 20px;
+  }
+  .metric {
+    background: rgba(5,8,12,0.55);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: var(--r-input);
+    padding: 12px 14px;
+  }
+  .metric .k {
+    font-family: var(--font-mono); font-size: 9.5px;
+    letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted);
+  }
+  .metric .v {
+    font-family: var(--font-mono); font-size: 21px; font-weight: 500;
+    margin-top: 4px; color: var(--text);
+  }
+  .metric .v em { font-style: normal; font-size: 12px; color: var(--emerald); }
+  .mc-bars {
+    display: flex; align-items: flex-end; gap: 5px;
+    height: 54px; margin-bottom: 18px;
+    padding: 10px 12px 0;
+    border-bottom: 1px solid rgba(56,189,248,0.18);
+  }
+  .mc-bars i {
+    flex: 1; border-radius: 2px 2px 0 0;
+    background: linear-gradient(180deg, var(--primary), rgba(25,195,230,0.15));
+    box-shadow: 0 0 8px rgba(25,195,230,0.3);
+  }
+  .mc-bars-label {
+    font-family: var(--font-mono); font-size: 9.5px; color: var(--muted);
+    letter-spacing: 0.14em; text-transform: uppercase; margin: -12px 0 18px;
+    display: flex; justify-content: space-between;
+  }
+  .mc-alert {
+    display: flex; align-items: center; gap: 10px;
+    background: rgba(245,158,11,0.08);
+    border: 1px solid rgba(245,158,11,0.3);
+    border-radius: var(--r-input);
+    padding: 10px 14px;
+    font-family: var(--font-mono); font-size: 11.5px;
+    color: var(--amber); letter-spacing: 0.04em;
+  }
+
+  .avatar-panel { padding: 26px 28px; }
+  .avatar-panel h4 {
+    font-family: var(--font-mono); font-size: 11px;
+    letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 22px;
+  }
+  .avatar-row { display: flex; flex-direction: column; gap: 18px; }
+  .avatar-item { display: flex; align-items: center; gap: 14px; }
+  .avatar-item .info .n { font-family: var(--font-display); font-weight: 600; font-size: 15px; }
+  .avatar-item .info .r {
+    font-family: var(--font-mono); font-size: 10px;
+    color: var(--muted); letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .avatar-item .status { margin-left: auto; }
+  .comp-notes { margin-top: 22px; padding: 18px 22px; font-size: 13px; color: var(--muted); }
+  .comp-notes b { color: var(--text); font-weight: 600; }
+  .comp-notes code {
+    font-family: var(--font-mono); font-size: 11.5px;
+    color: var(--primary); background: rgba(25,195,230,0.08);
+    padding: 1px 6px; border-radius: 4px;
+  }
+
+  /* ================= GALAXY ================= */
+  .galaxy-stage {
+    position: relative;
+    overflow: hidden;
+    background:
+      radial-gradient(ellipse 700px 400px at 30% 30%, rgba(56,189,248,0.05), transparent 65%),
+      radial-gradient(ellipse 600px 400px at 75% 70%, rgba(167,139,250,0.05), transparent 65%),
+      #060a10;
+  }
+  .galaxy-stage svg { display: block; width: 100%; height: auto; }
+  .galaxy-hud {
+    position: absolute; top: 18px; left: 22px;
+    font-family: var(--font-mono); font-size: 10px;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted);
+  }
+  .galaxy-hud b { color: var(--accent); font-weight: 500; }
+  .galaxy-hud-r {
+    position: absolute; top: 18px; right: 22px;
+    font-family: var(--font-mono); font-size: 10px;
+    letter-spacing: 0.14em; color: rgba(123,141,168,0.7);
+    text-align: right;
+  }
+  .star-bright { animation: starPulse 3.4s ease-in-out infinite; }
+  @keyframes starPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+
+  .galaxy-legend {
+    margin-top: 22px;
+    display: flex; gap: 20px; flex-wrap: wrap; align-items: center;
+    padding: 18px 24px;
+  }
+  .gl-item {
+    display: flex; align-items: center; gap: 9px;
+    font-family: var(--font-mono); font-size: 10.5px;
+    letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted);
+  }
+  .gl-swatch { width: 10px; height: 10px; border-radius: 50%; }
+  .gl-sep { width: 1px; height: 20px; background: var(--glass-border); }
+  .gl-size { display: flex; align-items: center; gap: 7px; }
+  .gl-size i { border-radius: 50%; background: #E8EDF5; display: block; }
+
+  /* ================= FOOTER ================= */
+  footer {
+    border-top: 1px solid var(--glass-border);
+    padding: 44px 0 60px;
+    margin-top: 40px;
+  }
+  .foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px; }
+  .foot .sig {
+    font-family: var(--font-mono); font-size: 11px;
+    color: var(--muted); letter-spacing: 0.14em;
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ NAV (horizontal logo in situ) ============ -->
+<header>
+  <div class="wrap nav">
+    <div class="nav-logo">
+      <!-- Standalone mark, nav scale -->
+      <svg width="30" height="30" viewBox="0 0 120 120" aria-label="AGENT OS mark">
+        <defs>
+          <linearGradient id="ringNav" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#38BDF8"/><stop offset="1" stop-color="#A78BFA"/>
+          </linearGradient>
+        </defs>
+        <circle cx="60" cy="60" r="28" fill="none" stroke="#E8EDF5" stroke-width="9"/>
+        <g transform="rotate(-24 60 60)">
+          <ellipse cx="60" cy="60" rx="54" ry="17" fill="none" stroke="url(#ringNav)" stroke-width="4"/>
+          <circle cx="114" cy="60" r="6" fill="#19C3E6"/>
+        </g>
+      </svg>
+      <span class="wordmark">AGENT <b>OS</b></span>
+    </div>
+    <nav class="nav-links">
+      <a href="#logo">Identity</a>
+      <a href="#color">Colour</a>
+      <a href="#type">Type</a>
+      <a href="#components">Components</a>
+      <a href="#galaxy">Galaxy</a>
+    </nav>
+  </div>
+</header>
+
+<!-- ============ HERO ============ -->
+<div class="hero wrap">
+  <span class="pill"><span class="dot cyan"></span> BRAND SYSTEM · v1.0 · CLASSIFIED</span>
+  <div class="hero-logo">
+    <span class="agent">AGENT</span>
+    <span class="os">
+      <svg width="0.94em" height="0.94em" viewBox="0 0 120 120" style="width:0.94em;height:0.94em" aria-label="O with orbital ring">
+        <defs>
+          <linearGradient id="ringHero" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#38BDF8"/><stop offset="1" stop-color="#A78BFA"/>
+          </linearGradient>
+          <linearGradient id="oHero" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#B9CBE2"/>
+          </linearGradient>
+        </defs>
+        <circle cx="60" cy="60" r="34" fill="none" stroke="url(#oHero)" stroke-width="13"/>
+        <g transform="rotate(-24 60 60)">
+          <ellipse cx="60" cy="60" rx="57" ry="19" fill="none" stroke="url(#ringHero)" stroke-width="3.5"/>
+          <circle cx="117" cy="60" r="6.5" fill="#19C3E6"/>
+        </g>
+      </svg>S
+    </span>
+  </div>
+  <p class="hero-tagline">THE OPERATING SYSTEM FOR <em>AUTONOMOUS INTELLIGENCE</em></p>
+  <div class="hero-coords">
+    <span>LAT <b>51.5074°N</b></span>
+    <span>SYS <b>NOMINAL</b></span>
+    <span>FLEET <b>ONLINE</b></span>
+    <span>CMDR <b>GRIFF</b></span>
+  </div>
+</div>
+
+<!-- ============ 01 LOGO ============ -->
+<section id="logo" class="wrap">
+  <div class="sec-head">
+    <span class="idx">01 /</span>
+    <h2>Logo System</h2>
+    <span class="sub">Logotype · Orbital Mark</span>
+  </div>
+
+  <div class="logo-grid">
+    <!-- Horizontal lockup -->
+    <div class="glass logo-stage">
+      <span class="corner tl"></span><span class="corner tr"></span>
+      <span class="corner bl"></span><span class="corner br"></span>
+      <span class="stage-label">A · Horizontal Lockup</span>
+      <div class="lockup-h">
+        <span class="agent">AGENT</span>
+        <span class="os">
+          <svg width="0.94em" height="0.94em" viewBox="0 0 120 120" style="width:0.94em;height:0.94em" aria-hidden="true">
+            <defs>
+              <linearGradient id="ringLockup" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#38BDF8"/><stop offset="1" stop-color="#A78BFA"/>
+              </linearGradient>
+              <linearGradient id="oLockup" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#B9CBE2"/>
+              </linearGradient>
+            </defs>
+            <circle cx="60" cy="60" r="34" fill="none" stroke="url(#oLockup)" stroke-width="13"/>
+            <g transform="rotate(-24 60 60)">
+              <ellipse cx="60" cy="60" rx="57" ry="19" fill="none" stroke="url(#ringLockup)" stroke-width="3.5"/>
+              <circle cx="117" cy="60" r="6.5" fill="#19C3E6"/>
+            </g>
+          </svg>S
+        </span>
+      </div>
+      <div class="logo-usage">
+        <span>Nav bars</span><span>Docs headers</span><span>Splash screens</span>
+      </div>
+      <span class="stage-note">MIN-WIDTH 140PX · CLEARSPACE = HEIGHT OF "O"</span>
+    </div>
+
+    <!-- Standalone mark -->
+    <div class="glass logo-stage mark-stage">
+      <span class="corner tl"></span><span class="corner tr"></span>
+      <span class="corner bl"></span><span class="corner br"></span>
+      <span class="stage-label">B · Standalone Mark</span>
+      <svg width="150" height="150" viewBox="0 0 120 120" aria-label="AGENT OS orbital mark">
+        <defs>
+          <linearGradient id="ringMark" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#38BDF8"/><stop offset="1" stop-color="#A78BFA"/>
+          </linearGradient>
+          <linearGradient id="oMark" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#B9CBE2"/>
+          </linearGradient>
+          <radialGradient id="markCore" cx="0.5" cy="0.5" r="0.5">
+            <stop offset="0.55" stop-color="rgba(25,195,230,0.16)"/>
+            <stop offset="1" stop-color="rgba(25,195,230,0)"/>
+          </radialGradient>
+        </defs>
+        <circle cx="60" cy="60" r="34" fill="url(#markCore)"/>
+        <circle cx="60" cy="60" r="34" fill="none" stroke="url(#oMark)" stroke-width="13"/>
+        <g transform="rotate(-24 60 60)">
+          <ellipse cx="60" cy="60" rx="57" ry="19" fill="none" stroke="url(#ringMark)" stroke-width="3.5"/>
+          <circle cx="117" cy="60" r="6.5" fill="#19C3E6"/>
+        </g>
+      </svg>
+      <span class="stage-note">APP ICON · FAVICON · AVATAR</span>
+    </div>
+  </div>
+
+  <div class="logo-specs">
+    <div class="glass spec-card">
+      <h4>Construction</h4>
+      <p>"AGENT" is set in Space Grotesk 600 with +16% tracking — engineered, evenly-spaced, mission-patch calm. "OS" steps up in size and weight (700) so the product name lands on the platform, not the adjective.</p>
+    </div>
+    <div class="glass spec-card">
+      <h4>The Orbital O</h4>
+      <p>The "O" is a planetary body drawn as a pure ring; a 24°-inclined orbit sweeps around it, carrying a single satellite node — one agent, on-mission. The orbit shifts cyan → violet, the brand's energy gradient.</p>
+    </div>
+    <div class="glass spec-card">
+      <h4>Behaviour</h4>
+      <p>On dark surfaces only. The mark carries a soft cyan bloom (<span class="mono" style="font-size:11px;color:var(--primary)">drop-shadow 0 0 24px</span>); never boxed, never outlined. At &lt;24px, drop the satellite node and keep ring + O.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 02 COLOUR ============ -->
+<section id="color" class="wrap">
+  <div class="sec-head">
+    <span class="idx">02 /</span>
+    <h2>Colour Palette</h2>
+    <span class="sub">Deep Space · Neon Signal</span>
+  </div>
+
+  <div class="palette-grid">
+    <div class="glass swatch">
+      <div class="chip" style="background:linear-gradient(135deg,#0A1E2A 0%,#19C3E6 100%);box-shadow:inset 0 0 30px rgba(25,195,230,0.25)"><span class="flare"></span></div>
+      <div class="meta">
+        <div class="name">Primary — Deep Space Teal</div>
+        <div class="hex">#0A1E2A → #19C3E6</div>
+        <div class="role">Brand gradient · hero surfaces · charts</div>
+      </div>
+    </div>
+    <div class="glass swatch">
+      <div class="chip" style="background:#38BDF8;box-shadow:inset 0 0 30px rgba(255,255,255,0.15), 0 0 24px rgba(56,189,248,0.25)"><span class="flare"></span></div>
+      <div class="meta">
+        <div class="name">Accent — Electric Blue</div>
+        <div class="hex">#38BDF8</div>
+        <div class="role">Links · focus rings · glow borders</div>
+      </div>
+    </div>
+    <div class="glass swatch">
+      <div class="chip" style="background:#A78BFA;box-shadow:0 0 24px rgba(167,139,250,0.25)"><span class="flare"></span></div>
+      <div class="meta">
+        <div class="name">Secondary — Neon Violet</div>
+        <div class="hex">#A78BFA</div>
+        <div class="role">Secondary data · gradients · memory</div>
+      </div>
+    </div>
+    <div class="glass swatch">
+      <div class="chip" style="background:#F59E0B;box-shadow:0 0 24px rgba(245,158,11,0.25)"><span class="flare"></span></div>
+      <div class="meta">
+        <div class="name">Energy — Amber</div>
+        <div class="hex">#F59E0B</div>
+        <div class="role">Alerts · active states · warnings</div>
+      </div>
+    </div>
+    <div class="glass swatch">
+      <div class="chip" style="background:#F43F5E;box-shadow:0 0 24px rgba(244,63,94,0.25)"><span class="flare"></span></div>
+      <div class="meta">
+        <div class="name">Danger — Rose</div>
+        <div class="hex">#F43F5E</div>
+        <div class="role">Errors · destructive actions · aborts</div>
+      </div>
+    </div>
+    <div class="glass swatch">
+      <div class="chip" style="background:#22C55E;box-shadow:0 0 24px rgba(34,197,94,0.25)"><span class="flare"></span></div>
+      <div class="meta">
+        <div class="name">Success — Emerald</div>
+        <div class="hex">#22C55E</div>
+        <div class="role">Online · complete · nominal</div>
+      </div>
+    </div>
+    <div class="glass swatch">
+      <div class="chip" style="background:#05080C;border-bottom:1px solid var(--glass-border)"><span class="flare"></span></div>
+      <div class="meta">
+        <div class="name">Background — Void</div>
+        <div class="hex">#05080C</div>
+        <div class="role">App canvas · navy-tinted near-black</div>
+      </div>
+    </div>
+    <div class="glass swatch">
+      <div class="chip" style="background:#0D1520;border-bottom:1px solid var(--glass-border)"><span class="flare"></span></div>
+      <div class="meta">
+        <div class="name">Surface</div>
+        <div class="hex">#0D1520</div>
+        <div class="role">Cards · panels · consoles</div>
+      </div>
+    </div>
+    <div class="glass swatch">
+      <div class="chip" style="background:#141E2D;border-bottom:1px solid var(--glass-border)"><span class="flare"></span></div>
+      <div class="meta">
+        <div class="name">Surface Raised</div>
+        <div class="hex">#141E2D</div>
+        <div class="role">Hover states · popovers · modals</div>
+      </div>
+    </div>
+    <div class="glass swatch">
+      <div class="chip" style="background:#E8EDF5"><span class="flare"></span></div>
+      <div class="meta">
+        <div class="name">Text — Starlight</div>
+        <div class="hex">#E8EDF5</div>
+        <div class="role">Primary copy · headings · values</div>
+      </div>
+    </div>
+    <div class="glass swatch">
+      <div class="chip" style="background:#7B8DA8"><span class="flare"></span></div>
+      <div class="meta">
+        <div class="name">Muted — Dust</div>
+        <div class="hex">#7B8DA8</div>
+        <div class="role">Labels · captions · secondary copy</div>
+      </div>
+    </div>
+    <div class="glass swatch">
+      <div class="chip" style="background:rgba(255,255,255,0.04);backdrop-filter:blur(12px);border-bottom:1px solid var(--glass-border)"><span class="flare"></span></div>
+      <div class="meta">
+        <div class="name">Glass</div>
+        <div class="hex">rgba(255,255,255,0.04)</div>
+        <div class="role">+ backdrop-blur(12px) · overlays</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 03 TYPOGRAPHY ============ -->
+<section id="type" class="wrap">
+  <div class="sec-head">
+    <span class="idx">03 /</span>
+    <h2>Typography</h2>
+    <span class="sub">Display · UI · Instrumentation</span>
+  </div>
+
+  <div class="type-families">
+    <div class="glass family-card f-display">
+      <div class="glyph">Aa</div>
+      <div class="fname">Space Grotesk</div>
+      <div class="frole">Display — Logos · Headings · Hero</div>
+      <div class="fdesc">Geometric, slightly retro-futurist. Carries the voice of the brand at large sizes. Weights 500–700.</div>
+    </div>
+    <div class="glass family-card f-ui">
+      <div class="glyph">Aa</div>
+      <div class="fname">Inter</div>
+      <div class="frole">UI — Body · Labels · Data</div>
+      <div class="fdesc">Neutral and legible at every size. The workhorse for interface copy, forms and tables. Weights 400–600.</div>
+    </div>
+    <div class="glass family-card f-mono">
+      <div class="glyph">Aa</div>
+      <div class="fname">JetBrains Mono</div>
+      <div class="frole">Mono — Code · Metrics · Timestamps</div>
+      <div class="fdesc">Every number, coordinate and log line. Uppercase + letterspacing = instrumentation labels. Weights 400–500.</div>
+    </div>
+  </div>
+
+  <div class="glass type-scale">
+    <div class="scale-row">
+      <span class="tag">Display / 52 · 700</span>
+      <span class="sample s-display">Command the fleet</span>
+    </div>
+    <div class="scale-row">
+      <span class="tag">H1 / 36 · 600</span>
+      <span class="sample s-h1">Autonomous mission control</span>
+    </div>
+    <div class="scale-row">
+      <span class="tag">H2 / 24 · 600</span>
+      <span class="sample s-h2">Agents operating in deep orbit</span>
+    </div>
+    <div class="scale-row">
+      <span class="tag">Body / 16 · 400</span>
+      <span class="sample s-body">Seven agents dispatched. Telemetry is nominal, and every signal returns to the bridge.</span>
+    </div>
+    <div class="scale-row">
+      <span class="tag">Small / 13 · 400</span>
+      <span class="sample s-small">Last sync 14 JUL 2026 · 09:41:07 UTC — all channels secure</span>
+    </div>
+    <div class="scale-row">
+      <span class="tag">Mono / 13 · 400</span>
+      <span class="sample s-mono">agent.dispatch --target=orion --priority=1 ▸ ACK 0x2F</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 04 COMPONENTS ============ -->
+<section id="components" class="wrap">
+  <div class="sec-head">
+    <span class="idx">04 /</span>
+    <h2>Design System Preview</h2>
+    <span class="sub">Mission Control · Agents</span>
+  </div>
+
+  <div class="comp-grid">
+    <!-- Mission control card -->
+    <div class="glass mission-card">
+      <div class="mc-head">
+        <span class="mc-title">◈ Mission Control — Fleet Status</span>
+        <span class="pill" style="padding:3px 11px"><span class="dot"></span> LIVE</span>
+      </div>
+      <div class="mc-agent">
+        <div class="avatar cyan">AT</div>
+        <div class="who">
+          <div class="name">ATLAS</div>
+          <div class="role">Lead Orchestrator · Sector 7</div>
+        </div>
+        <span class="pill" style="margin-left:auto;padding:3px 11px;color:var(--emerald);border-color:rgba(34,197,94,0.3)">ONLINE</span>
+      </div>
+      <div class="mc-metrics">
+        <div class="metric">
+          <div class="k">Uptime</div>
+          <div class="v">99.98<em>%</em></div>
+        </div>
+        <div class="metric">
+          <div class="k">Active Agents</div>
+          <div class="v">12<em>/14</em></div>
+        </div>
+        <div class="metric">
+          <div class="k">Tasks / hr</div>
+          <div class="v">347<em>▲</em></div>
+        </div>
+      </div>
+      <div class="mc-bars" aria-hidden="true">
+        <i style="height:34%"></i><i style="height:52%"></i><i style="height:41%"></i>
+        <i style="height:66%"></i><i style="height:58%"></i><i style="height:79%"></i>
+        <i style="height:63%"></i><i style="height:88%"></i><i style="height:72%"></i>
+        <i style="height:95%"></i><i style="height:83%"></i><i style="height:100%"></i>
+      </div>
+      <div class="mc-bars-label"><span>T-12H</span><span>Throughput</span><span>NOW</span></div>
+      <div class="mc-alert">
+        <span class="dot amber"></span> ALERT · NOVA queue depth &gt; 40 — rebalancing in 00:02:14
+      </div>
+    </div>
+
+    <!-- Avatars -->
+    <div>
+      <div class="glass avatar-panel">
+        <h4>Agent Avatars</h4>
+        <div class="avatar-row">
+          <div class="avatar-item">
+            <div class="avatar cyan">AT</div>
+            <div class="info">
+              <div class="n">ATLAS</div>
+              <div class="r">Orchestrator</div>
+            </div>
+            <span class="status dot"></span>
+          </div>
+          <div class="avatar-item">
+            <div class="avatar violet">NV</div>
+            <div class="info">
+              <div class="n">NOVA</div>
+              <div class="r">Research &amp; Memory</div>
+            </div>
+            <span class="status dot violet"></span>
+          </div>
+          <div class="avatar-item">
+            <div class="avatar amber">OR</div>
+            <div class="info">
+              <div class="n">ORION</div>
+              <div class="r">Ops &amp; Dispatch</div>
+            </div>
+            <span class="status dot amber"></span>
+          </div>
+        </div>
+      </div>
+      <div class="glass comp-notes">
+        <b>Component rules.</b> Cards <code>radius 12px</code>, inputs <code>8px</code>, pills <code>9999px</code>. Accent borders glow via <code>box-shadow 0 0 32px rgba(56,189,248,.12)</code>. Status is always a glowing dot — pulsing when active. Data reads in JetBrains Mono, labels uppercase-tracked, like cockpit instrumentation.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 05 GALAXY MEMORY ============ -->
+<section id="galaxy" class="wrap">
+  <div class="sec-head">
+    <span class="idx">05 /</span>
+    <h2>Galaxy Memory</h2>
+    <span class="sub">Every fact is a star</span>
+  </div>
+
+  <div class="glass galaxy-stage">
+    <div class="galaxy-hud">◈ MEMORY CHART · <b>1,247 FACTS</b> · 4 CONSTELLATIONS</div>
+    <div class="galaxy-hud-r">DRIFT 0.02°/S · ANIMATED IN PRODUCT<br>STATIC PLATE · V1.0</div>
+    <svg viewBox="0 0 1000 560" role="img" aria-label="Galaxy memory concept: constellations of memory stars">
+      <!-- background micro-stars -->
+      <g fill="#E8EDF5">
+        <circle cx="55"  cy="80"  r="1"   opacity="0.28"/>
+        <circle cx="140" cy="330" r="1.3" opacity="0.2"/>
+        <circle cx="90"  cy="500" r="1"   opacity="0.3"/>
+        <circle cx="420" cy="60"  r="1.2" opacity="0.25"/>
+        <circle cx="500" cy="300" r="1"   opacity="0.35"/>
+        <circle cx="545" cy="120" r="1.4" opacity="0.2"/>
+        <circle cx="480" cy="480" r="1"   opacity="0.3"/>
+        <circle cx="600" cy="520" r="1.2" opacity="0.22"/>
+        <circle cx="910" cy="90"  r="1"   opacity="0.3"/>
+        <circle cx="950" cy="280" r="1.3" opacity="0.2"/>
+        <circle cx="880" cy="530" r="1"   opacity="0.28"/>
+        <circle cx="360" cy="290" r="1"   opacity="0.25"/>
+        <circle cx="640" cy="330" r="1.1" opacity="0.3"/>
+        <circle cx="60"  cy="230" r="1.2" opacity="0.22"/>
+        <circle cx="290" cy="40"  r="1"   opacity="0.3"/>
+        <circle cx="760" cy="280" r="1"   opacity="0.26"/>
+        <circle cx="990" cy="440" r="1.1" opacity="0.24"/>
+        <circle cx="200" cy="560" r="1"   opacity="0.2"/>
+        <circle cx="540" cy="410" r="1"   opacity="0.28"/>
+        <circle cx="830" cy="200" r="1"   opacity="0.3"/>
+      </g>
+
+      <!-- inter-cluster faint links -->
+      <g stroke="#E8EDF5" stroke-opacity="0.06" stroke-width="1">
+        <line x1="320" y1="210" x2="640" y2="100"/>
+        <line x1="250" y1="250" x2="240" y2="390"/>
+        <line x1="370" y1="400" x2="700" y2="370"/>
+        <line x1="790" y1="190" x2="830" y2="380"/>
+      </g>
+
+      <!-- CUSTOMER cluster (cyan) -->
+      <g stroke="#38BDF8" stroke-opacity="0.22" stroke-width="1">
+        <line x1="210" y1="90"  x2="180" y2="120"/>
+        <line x1="180" y1="120" x2="240" y2="170"/>
+        <line x1="240" y1="170" x2="300" y2="130"/>
+        <line x1="240" y1="170" x2="320" y2="210"/>
+        <line x1="240" y1="170" x2="160" y2="220"/>
+        <line x1="320" y1="210" x2="250" y2="250"/>
+        <line x1="160" y1="220" x2="250" y2="250"/>
+      </g>
+      <g>
+        <circle cx="210" cy="90"  r="2.4" fill="#38BDF8" opacity="0.75"/>
+        <circle cx="180" cy="120" r="8"   fill="#38BDF8" opacity="0.18"/>
+        <circle cx="180" cy="120" r="3.2" fill="#38BDF8"/>
+        <circle cx="300" cy="130" r="2.2" fill="#38BDF8" opacity="0.65"/>
+        <circle cx="240" cy="170" r="14"  fill="#38BDF8" opacity="0.16" class="star-bright"/>
+        <circle cx="240" cy="170" r="5"   fill="#38BDF8" class="star-bright"/>
+        <circle cx="240" cy="170" r="1.6" fill="#FFFFFF"/>
+        <circle cx="320" cy="210" r="3"   fill="#38BDF8" opacity="0.85"/>
+        <circle cx="160" cy="220" r="2.2" fill="#38BDF8" opacity="0.6"/>
+        <circle cx="250" cy="250" r="8"   fill="#38BDF8" opacity="0.16"/>
+        <circle cx="250" cy="250" r="3.4" fill="#38BDF8"/>
+      </g>
+      <text x="240" y="300" fill="#7B8DA8" font-family="JetBrains Mono, monospace" font-size="11" letter-spacing="3" text-anchor="middle" opacity="0.85">CUSTOMER</text>
+
+      <!-- PROPERTY cluster (violet) -->
+      <g stroke="#A78BFA" stroke-opacity="0.22" stroke-width="1">
+        <line x1="730" y1="60"  x2="700" y2="150"/>
+        <line x1="640" y1="100" x2="700" y2="150"/>
+        <line x1="700" y1="150" x2="760" y2="110"/>
+        <line x1="700" y1="150" x2="790" y2="190"/>
+        <line x1="700" y1="150" x2="680" y2="220"/>
+        <line x1="760" y1="110" x2="790" y2="190"/>
+      </g>
+      <g>
+        <circle cx="730" cy="60"  r="2.2" fill="#A78BFA" opacity="0.65"/>
+        <circle cx="640" cy="100" r="8"   fill="#A78BFA" opacity="0.16"/>
+        <circle cx="640" cy="100" r="3.2" fill="#A78BFA"/>
+        <circle cx="700" cy="150" r="13"  fill="#A78BFA" opacity="0.16" class="star-bright"/>
+        <circle cx="700" cy="150" r="4.6" fill="#A78BFA" class="star-bright"/>
+        <circle cx="700" cy="150" r="1.5" fill="#FFFFFF"/>
+        <circle cx="760" cy="110" r="2.6" fill="#A78BFA" opacity="0.8"/>
+        <circle cx="790" cy="190" r="3.2" fill="#A78BFA" opacity="0.9"/>
+        <circle cx="680" cy="220" r="2.2" fill="#A78BFA" opacity="0.6"/>
+      </g>
+      <text x="712" y="262" fill="#7B8DA8" font-family="JetBrains Mono, monospace" font-size="11" letter-spacing="3" text-anchor="middle" opacity="0.85">PROPERTY</text>
+
+      <!-- CREW cluster (emerald) -->
+      <g stroke="#22C55E" stroke-opacity="0.22" stroke-width="1">
+        <line x1="180" y1="440" x2="240" y2="390"/>
+        <line x1="240" y1="390" x2="300" y2="430"/>
+        <line x1="300" y1="430" x2="370" y2="400"/>
+        <line x1="300" y1="430" x2="350" y2="480"/>
+        <line x1="300" y1="430" x2="250" y2="470"/>
+        <line x1="250" y1="470" x2="180" y2="440"/>
+      </g>
+      <g>
+        <circle cx="180" cy="440" r="2.2" fill="#22C55E" opacity="0.6"/>
+        <circle cx="240" cy="390" r="8"   fill="#22C55E" opacity="0.16"/>
+        <circle cx="240" cy="390" r="3.2" fill="#22C55E"/>
+        <circle cx="300" cy="430" r="13"  fill="#22C55E" opacity="0.16" class="star-bright"/>
+        <circle cx="300" cy="430" r="4.6" fill="#22C55E" class="star-bright"/>
+        <circle cx="300" cy="430" r="1.5" fill="#FFFFFF"/>
+        <circle cx="370" cy="400" r="3"   fill="#22C55E" opacity="0.85"/>
+        <circle cx="350" cy="480" r="2.4" fill="#22C55E" opacity="0.7"/>
+        <circle cx="250" cy="470" r="2.6" fill="#22C55E" opacity="0.75"/>
+      </g>
+      <text x="285" y="525" fill="#7B8DA8" font-family="JetBrains Mono, monospace" font-size="11" letter-spacing="3" text-anchor="middle" opacity="0.85">CREW</text>
+
+      <!-- POLICY cluster (amber) -->
+      <g stroke="#F59E0B" stroke-opacity="0.22" stroke-width="1">
+        <line x1="700" y1="370" x2="760" y2="410"/>
+        <line x1="760" y1="410" x2="830" y2="380"/>
+        <line x1="760" y1="410" x2="810" y2="460"/>
+        <line x1="760" y1="410" x2="720" y2="470"/>
+        <line x1="830" y1="380" x2="880" y2="430"/>
+        <line x1="810" y1="460" x2="880" y2="430"/>
+      </g>
+      <g>
+        <circle cx="700" cy="370" r="2.6" fill="#F59E0B" opacity="0.75"/>
+        <circle cx="760" cy="410" r="13"  fill="#F59E0B" opacity="0.16" class="star-bright"/>
+        <circle cx="760" cy="410" r="4.6" fill="#F59E0B" class="star-bright"/>
+        <circle cx="760" cy="410" r="1.5" fill="#FFFFFF"/>
+        <circle cx="830" cy="380" r="8"   fill="#F59E0B" opacity="0.16"/>
+        <circle cx="830" cy="380" r="3.2" fill="#F59E0B"/>
+        <circle cx="810" cy="460" r="2.6" fill="#F59E0B" opacity="0.75"/>
+        <circle cx="720" cy="470" r="2.2" fill="#F59E0B" opacity="0.6"/>
+        <circle cx="880" cy="430" r="2.8" fill="#F59E0B" opacity="0.8"/>
+      </g>
+      <text x="790" y="512" fill="#7B8DA8" font-family="JetBrains Mono, monospace" font-size="11" letter-spacing="3" text-anchor="middle" opacity="0.85">POLICY</text>
+    </svg>
+  </div>
+
+  <div class="glass galaxy-legend">
+    <span class="gl-item"><span class="gl-swatch" style="background:#38BDF8;box-shadow:0 0 8px rgba(56,189,248,0.6)"></span> Customer</span>
+    <span class="gl-item"><span class="gl-swatch" style="background:#A78BFA;box-shadow:0 0 8px rgba(167,139,250,0.6)"></span> Property</span>
+    <span class="gl-item"><span class="gl-swatch" style="background:#22C55E;box-shadow:0 0 8px rgba(34,197,94,0.6)"></span> Crew</span>
+    <span class="gl-item"><span class="gl-swatch" style="background:#F59E0B;box-shadow:0 0 8px rgba(245,158,11,0.6)"></span> Policy</span>
+    <span class="gl-sep"></span>
+    <span class="gl-item gl-size">
+      <i style="width:4px;height:4px;opacity:0.5"></i>
+      <i style="width:7px;height:7px;opacity:0.75"></i>
+      <i style="width:11px;height:11px;box-shadow:0 0 10px rgba(232,237,245,0.7)"></i>
+      Star size &amp; glow = memory confidence
+    </span>
+    <span class="gl-sep"></span>
+    <span class="gl-item">Lines = related facts · Clusters = topics</span>
+  </div>
+</section>
+
+<!-- ============ FOOTER ============ -->
+<footer>
+  <div class="wrap foot">
+    <div class="nav-logo">
+      <svg width="24" height="24" viewBox="0 0 120 120" aria-hidden="true">
+        <circle cx="60" cy="60" r="28" fill="none" stroke="#E8EDF5" stroke-width="9"/>
+        <g transform="rotate(-24 60 60)">
+          <ellipse cx="60" cy="60" rx="54" ry="17" fill="none" stroke="#38BDF8" stroke-width="4"/>
+          <circle cx="114" cy="60" r="6" fill="#19C3E6"/>
+        </g>
+      </svg>
+      <span class="wordmark" style="font-size:14px">AGENT <b>OS</b></span>
+    </div>
+    <span class="sig">BRAND SYSTEM v1.0 · JUL 2026 · PREPARED FOR CMDR GRIFF · ALL SYSTEMS NOMINAL</span>
+  </div>
+</footer>
+
+</body>
+</html>

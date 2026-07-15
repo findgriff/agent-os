@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Apollo — Circular Equalizer</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Inter:wght@300;400&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { 
+  background: #08080d; 
+  display: flex; 
+  justify-content: center; 
+  align-items: center; 
+  min-height: 100vh; 
+  font-family: 'Space Grotesk', sans-serif;
+  overflow: hidden;
+}
+
+.container { 
+  display: flex; 
+  flex-direction: column; 
+  align-items: center; 
+  gap: 32px; 
+  position: relative;
+}
+
+/* Outer glow ring */
+.glow-ring {
+  position: absolute;
+  width: 380px;
+  height: 380px;
+  border-radius: 50%;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition: all 0.8s ease;
+}
+
+.orb-wrap {
+  position: relative;
+  width: 360px;
+  height: 360px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Dark circle housing */
+.orb-bg {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 45% 40%, #0f0f18, #06060a);
+  box-shadow: 
+    inset 0 0 80px rgba(0,0,0,0.9),
+    0 0 0 1px rgba(255,255,255,0.03);
+}
+
+/* Glass reflection overlay */
+.glass {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: linear-gradient(
+    160deg,
+    rgba(255,255,255,0.03) 0%,
+    rgba(255,255,255,0.01) 30%,
+    transparent 50%,
+    rgba(255,255,255,0.02) 70%,
+    transparent 100%
+  );
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Subtle inner shadow ring */
+.inner-ring {
+  position: absolute;
+  width: 88%;
+  height: 88%;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.03);
+  top: 6%;
+  left: 6%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+svg.cubes { 
+  position: absolute;
+  width: 88%; 
+  height: 88%; 
+  top: 6%; 
+  left: 6%;
+  z-index: 2;
+}
+
+/* Center dot */
+.dot {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+  transition: all 0.5s ease;
+}
+
+/* Status */
+.status-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.status {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.3em;
+  transition: all 0.3s ease;
+}
+.status.idle { color: rgba(245,158,11,0.3); }
+.status.listen { color: #38BDF8; text-shadow: 0 0 20px rgba(56,189,248,0.3); }
+.status.speak { color: #EF4444; text-shadow: 0 0 20px rgba(239,68,68,0.3); animation: textPulse 1.8s ease-in-out infinite; }
+
+@keyframes textPulse {
+  0%, 100% { opacity: 1; text-shadow: 0 0 20px rgba(239,68,68,0.3); }
+  50% { opacity: 0.6; text-shadow: 0 0 40px rgba(239,68,68,0.6); }
+}
+
+.sub { 
+  font-family: 'Inter', sans-serif;
+  font-size: 10px; 
+  color: rgba(255,255,255,0.1); 
+  letter-spacing: 0.1em;
+  font-weight: 300;
+}
+
+.btns { 
+  display: flex; 
+  gap: 6px; 
+  background: rgba(255,255,255,0.02);
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.04);
+}
+.btns button { 
+  padding: 7px 18px; 
+  border-radius: 7px; 
+  border: none; 
+  background: transparent; 
+  font-family: 'Space Grotesk'; 
+  font-size: 10px; 
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: rgba(255,255,255,0.2); 
+  cursor: pointer; 
+  transition: all 0.25s ease; 
+}
+.btns button:hover { color: rgba(255,255,255,0.5); }
+.btns button.active { 
+  background: rgba(239,68,68,0.1); 
+  color: #EF4444; 
+  box-shadow: 0 0 12px rgba(239,68,68,0.08);
+}
+.btns button.active-blue { 
+  background: rgba(56,189,248,0.1); 
+  color: #38BDF8; 
+  box-shadow: 0 0 12px rgba(56,189,248,0.08);
+}
+
+/* Tick marks around edge */
+.ticks { position: absolute; width: 94%; height: 94%; top: 3%; left: 3%; z-index: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="orb-wrap">
+    <div class="glow-ring" id="glowRing"></div>
+    <div class="orb-bg"></div>
+    
+    <!-- Subtle tick marks -->
+    <svg class="ticks" viewBox="0 0 260 260">
+      {Array.from({length: 36}).map((_, i) => {
+        const angle = (i/36)*360 - 90;
+        const rad = angle * Math.PI / 180;
+        const x1 = 130 + 126 * Math.cos(rad);
+        const y1 = 130 + 126 * Math.sin(rad);
+        const x2 = 130 + 130 * Math.cos(rad);
+        const y2 = 130 + 130 * Math.sin(rad);
+        return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>`;
+      }).join('')}
+    </svg>
+
+    <svg class="cubes" id="grid" viewBox="0 0 260 260"></svg>
+    <div class="glass"></div>
+    <div class="inner-ring"></div>
+    <div class="dot" id="dot"></div>
+  </div>
+
+  <div class="status-wrap">
+    <div class="status idle" id="status">TAP TO SPEAK</div>
+    <div class="sub" id="sub">Circular equalizer</div>
+  </div>
+
+  <div class="btns">
+    <button id="bIdle" class="active">IDLE</button>
+    <button id="bListen">LISTEN</button>
+    <button id="bSpeak">SPEAK</button>
+  </div>
+</div>
+
+<script>
+const svg = document.getElementById('grid');
+const cx = 130, cy = 130;
+const cubes = [];
+const centerDot = document.getElementById('dot');
+const glowRing = document.getElementById('glowRing');
+
+// 5 concentric rings — more cubes, better proportions
+const rings = [
+  { n: 12, r: 26, w: 10, h: 7 },
+  { n: 18, r: 48, w: 9, h: 7 },
+  { n: 24, r: 70, w: 8, h: 7 },
+  { n: 30, r: 92, w: 7, h: 7 },
+  { n: 36, r: 114, w: 6, h: 7 },
+];
+
+rings.forEach(ring => {
+  for (let i = 0; i < ring.n; i++) {
+    const angle = (i / ring.n) * 360 - 90;
+    const rad = (angle * Math.PI) / 180;
+    const x = cx + ring.r * Math.cos(rad);
+    const y = cy + ring.r * Math.sin(rad);
+    
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', x - ring.w/2);
+    rect.setAttribute('y', y - ring.h/2);
+    rect.setAttribute('width', ring.w);
+    rect.setAttribute('height', ring.h);
+    rect.setAttribute('rx', '1.5');
+    rect.setAttribute('ry', '1.5');
+    rect.setAttribute('transform', `rotate(${angle + 90}, ${x}, ${y})`);
+    
+    cubes.push({
+      el: rect, ringIdx: rings.indexOf(ring), angle, ringR: ring.r, i, n: ring.n,
+      phaseOff: (i / ring.n) * Math.PI * 2,
+      baseX: x, baseY: y, w: ring.w, h: ring.h,
+    });
+    svg.appendChild(rect);
+  }
+});
+
+// Glow filter
+const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+const filt = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
+filt.id = 'glo';
+const blur = document.createElementNS('http://www.w3.org/2000/svg', 'feGaussianBlur');
+blur.setAttribute('stdDeviation', '3');
+blur.setAttribute('result', 'b');
+const m = document.createElementNS('http://www.w3.org/2000/svg', 'feMerge');
+const mn1 = document.createElementNS('http://www.w3.org/2000/svg', 'feMergeNode'); mn1.setAttribute('in', 'b');
+const mn2 = document.createElementNS('http://www.w3.org/2000/svg', 'feMergeNode'); mn2.setAttribute('in', 'SourceGraphic');
+m.appendChild(mn1); m.appendChild(mn2);
+filt.appendChild(blur); filt.appendChild(m);
+defs.appendChild(filt);
+svg.appendChild(defs);
+
+// Gradient defs for 3D cube look
+const gradDefs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+['red', 'blue'].forEach((c, ci) => {
+  const g = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient');
+  g.id = `g${c}`;
+  g.setAttribute('x1', '0'); g.setAttribute('y1', '0'); g.setAttribute('x2', '0'); g.setAttribute('y2', '1');
+  const s1 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+  s1.setAttribute('offset', '0%');
+  s1.setAttribute('stop-color', ci === 0 ? '#FF6B6B' : '#5BC0FF');
+  const s2 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+  s2.setAttribute('offset', '100%');
+  s2.setAttribute('stop-color', ci === 0 ? '#CC2222' : '#1A7FBF');
+  g.appendChild(s1); g.appendChild(s2);
+  gradDefs.appendChild(g);
+});
+svg.appendChild(gradDefs);
+
+let mode = 'idle';
+let time = 0;
+
+function animate(ts) {
+  time = ts * 0.002;
+  
+  cubes.forEach(c => {
+    const relR = c.ringR / 114;
+    let val, isRed = true;
+    
+    if (mode === 'idle') {
+      val = 0.02 + Math.sin(time * 0.3 + c.phaseOff) * 0.02 + 0.03;
+      isRed = true;
+    } 
+    else if (mode === 'listen') {
+      // Blue concentric waves radiating outward — like sound waves
+      const wave1 = Math.sin(time * 2.5 - relR * 7 + c.phaseOff) * 0.5 + 0.5;
+      const wave2 = Math.sin(time * 1.8 + c.angle * 0.04) * 0.3 + 0.3;
+      const wave3 = Math.sin(time * 3.2 - relR * 4 + c.angle * 0.02) * 0.2 + 0.2;
+      val = 0.03 + (wave1 * 0.4 + wave2 * 0.2 + wave3 * 0.15);
+      isRed = false;
+    } 
+    else { // speak
+      // Complex spectrum — bands sweep around, outer rings catch higher "frequencies"
+      const band = Math.floor((c.angle + 90 + 15) / 30) % 12;
+      const sweep = Math.sin(time * 2.2 + band * 0.6) * 0.5 + 0.5;
+      const freq = Math.sin(time * 3.5 + relR * 8 + c.angle * 0.03) * 0.5 + 0.5;
+      const pop = Math.sin(time * 5 + c.phaseOff * 2) * 0.5 + 0.5;
+      const ringBoost = 0.3 + relR * 0.7;
+      val = 0.03 + (sweep * 0.3 + freq * 0.25 + pop * 0.15) * ringBoost;
+      isRed = true;
+    }
+    
+    val = Math.max(0.02, Math.min(val, 1));
+    const fillId = isRed ? 'url(#gred)' : 'url(#gblue)';
+    c.el.setAttribute('fill', fillId);
+    c.el.setAttribute('opacity', val);
+    c.el.setAttribute('filter', val > 0.3 ? 'url(#glo)' : 'none');
+    
+    // Subtle scale pulse on bright cubes
+    const scale = val > 0.5 ? 1 + (val - 0.5) * 0.2 : 1;
+    const xOff = (c.w * scale - c.w) / 2;
+    const yOff = (c.h * scale - c.h) / 2;
+    c.el.setAttribute('transform', `rotate(${c.angle + 90}, ${c.baseX}, ${c.baseY}) scale(${scale}) translate(${xOff}, ${yOff})`);
+  });
+  
+  // Update center dot + glow ring
+  if (mode === 'speak') {
+    centerDot.style.background = '#EF4444';
+    centerDot.style.boxShadow = '0 0 12px rgba(239,68,68,0.6)';
+    glowRing.style.background = 'radial-gradient(circle, rgba(239,68,68,0.06), transparent 70%)';
+    glowRing.style.opacity = 0.5 + Math.sin(time * 2) * 0.3;
+  } else if (mode === 'listen') {
+    centerDot.style.background = '#38BDF8';
+    centerDot.style.boxShadow = '0 0 12px rgba(56,189,248,0.5)';
+    glowRing.style.background = 'radial-gradient(circle, rgba(56,189,248,0.04), transparent 70%)';
+    glowRing.style.opacity = 0.3;
+  } else {
+    centerDot.style.background = 'rgba(245,158,11,0.2)';
+    centerDot.style.boxShadow = 'none';
+    glowRing.style.background = 'transparent';
+    glowRing.style.opacity = 0;
+  }
+  
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+
+function setMode(m) {
+  mode = m;
+  const st = document.getElementById('status');
+  const sb = document.getElementById('sub');
+  document.querySelectorAll('.btns button').forEach(b => b.className = '');
+  if (m === 'speak') {
+    st.textContent = 'SPEAKING'; st.className = 'status speak';
+    sb.textContent = 'Red spectrum sweeps the circle';
+    document.getElementById('bSpeak').className = 'active';
+  } else if (m === 'listen') {
+    st.textContent = 'LISTENING'; st.className = 'status listen';
+    sb.textContent = 'Blue waves radiate from centre';
+    document.getElementById('bListen').className = 'active-blue';
+  } else {
+    st.textContent = 'TAP TO SPEAK'; st.className = 'status idle';
+    sb.textContent = 'Equalizer standing by';
+    document.getElementById('bIdle').className = 'active';
+  }
+}
+
+document.getElementById('bIdle').onclick = () => setMode('idle');
+document.getElementById('bListen').onclick = () => setMode('listen');
+document.getElementById('bSpeak').onclick = () => setMode('speak');
+</script>
+</body>
+</html>

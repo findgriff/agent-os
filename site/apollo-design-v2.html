@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Apollo — Voice Agent · AGENT OS Design Mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* ============================================================
+     APOLLO · KITT-inspired voice dashboard — AGENT OS
+     Design mockup only. States: idle / listening / thinking / speaking
+     ============================================================ */
+  :root {
+    --bg: #0a0a0f;
+    --bg-raise: #10101a;
+    --glass: rgba(255, 255, 255, 0.04);
+    --glass-2: rgba(255, 255, 255, 0.06);
+    --stroke: rgba(255, 255, 255, 0.08);
+    --stroke-2: rgba(255, 255, 255, 0.14);
+    --text: #E8EDF5;
+    --text-dim: #7B8DA8;
+    --text-faint: #4A5870;
+    --amber: #F59E0B;
+    --amber-soft: #FCD34D;
+    --blue: #38BDF8;
+    --red: #FF3B30;
+    --red-deep: #B91C1C;
+    --green: #22C55E;
+    --font-display: 'Space Grotesk', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+    /* state-driven ambient (JS swaps these) */
+    --ambient: rgba(245, 158, 11, 0.05);
+    --ambient-2: rgba(245, 158, 11, 0.03);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-display);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---------- deep-space backdrop ---------- */
+  .space {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  }
+  .space::before { /* star field */
+    content: ""; position: absolute; inset: 0;
+    background-image:
+      radial-gradient(1px 1px at 12% 22%, rgba(255,255,255,.35) 50%, transparent 51%),
+      radial-gradient(1px 1px at 78% 14%, rgba(255,255,255,.22) 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 62% 68%, rgba(255,255,255,.18) 50%, transparent 51%),
+      radial-gradient(1px 1px at 32% 82%, rgba(255,255,255,.25) 50%, transparent 51%),
+      radial-gradient(1px 1px at 88% 54%, rgba(255,255,255,.20) 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 45% 8%, rgba(255,255,255,.15) 50%, transparent 51%),
+      radial-gradient(1px 1px at 8% 60%, rgba(255,255,255,.18) 50%, transparent 51%),
+      radial-gradient(1px 1px at 95% 85%, rgba(255,255,255,.22) 50%, transparent 51%);
+  }
+  .space::after { /* vignette */
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(ellipse 90% 70% at 50% 42%, transparent 40%, rgba(0,0,0,.55) 100%);
+  }
+
+  /* ambient glow that follows Apollo's state */
+  .ambient {
+    position: fixed; z-index: 0; pointer-events: none;
+    width: 900px; height: 900px; border-radius: 50%;
+    left: 50%; top: 44%; transform: translate(-50%, -50%);
+    background: radial-gradient(circle, var(--ambient) 0%, var(--ambient-2) 38%, transparent 68%);
+    transition: background 300ms ease;
+  }
+  .ambient.pulsing { animation: ambientPulse 2.2s ease-in-out infinite; }
+  @keyframes ambientPulse {
+    0%, 100% { opacity: .75; }
+    50% { opacity: 1; }
+  }
+
+  /* ---------- top bar ---------- */
+  header {
+    position: relative; z-index: 5;
+    height: 64px; padding: 0 24px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand .sigil {
+    width: 32px; height: 32px; border-radius: 10px;
+    background: linear-gradient(135deg, rgba(245,158,11,.22), rgba(245,158,11,.06));
+    border: 1px solid rgba(245,158,11,.35);
+    display: grid; place-items: center;
+    box-shadow: 0 0 18px rgba(245,158,11,.15);
+  }
+  .brand .sigil svg { width: 16px; height: 16px; }
+  .brand h1 { font-size: 15px; font-weight: 600; letter-spacing: .04em; }
+  .brand .sub {
+    font-size: 10px; letter-spacing: .22em; color: var(--text-dim);
+    text-transform: uppercase; margin-top: 1px;
+  }
+  .brand .live-dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--green);
+    box-shadow: 0 0 8px rgba(34,197,94,.8); margin-left: 4px;
+    animation: ambientPulse 2s ease-in-out infinite;
+  }
+
+  .top-controls { display: flex; align-items: center; gap: 10px; }
+  .pill, .icon-btn {
+    height: 36px; border-radius: 999px;
+    background: var(--glass); border: 1px solid var(--stroke);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    color: var(--text-dim); font-family: var(--font-display); font-size: 12.5px;
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    transition: border-color 200ms ease, color 200ms ease, background 200ms ease;
+  }
+  .pill { padding: 0 14px; }
+  .pill:hover, .icon-btn:hover { border-color: rgba(245,158,11,.4); color: var(--text); background: var(--glass-2); }
+  .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 8px rgba(245,158,11,.7); }
+  .pill .chev { opacity: .5; font-size: 9px; }
+  .icon-btn { width: 36px; justify-content: center; }
+  .icon-btn svg { width: 15px; height: 15px; }
+
+  /* ---------- layout ---------- */
+  main {
+    position: relative; z-index: 2;
+    height: calc(100vh - 64px);
+    display: flex;
+  }
+  .hero {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 0 32px 28px; gap: 0;
+  }
+
+  /* ============================================================
+     THE KITT DASH — hero element
+     ============================================================ */
+  .dash-wrap { position: relative; width: 280px; height: 280px; cursor: pointer; }
+
+  /* soft halo directly behind the dash */
+  .dash-halo {
+    position: absolute; inset: -70px; border-radius: 50%;
+    background: radial-gradient(circle, var(--ambient) 0%, transparent 62%);
+    transition: background 300ms ease;
+    pointer-events: none;
+  }
+
+  /* glass bezel */
+  .dash-bezel {
+    position: absolute; inset: 0; border-radius: 50%;
+    background:
+      radial-gradient(circle at 32% 26%, rgba(255,255,255,.07), transparent 42%),
+      radial-gradient(circle, rgba(16,16,26,.85) 58%, rgba(10,10,15,.4) 100%);
+    border: 1px solid var(--stroke);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.06),
+      inset 0 -18px 34px rgba(0,0,0,.55),
+      0 24px 60px rgba(0,0,0,.6);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  }
+
+  /* inner glass disc that holds the waveform */
+  .dash-inner {
+    position: absolute; inset: 42px; border-radius: 50%;
+    background:
+      radial-gradient(circle at 34% 28%, rgba(255,255,255,.05), transparent 46%),
+      radial-gradient(circle, #0b0b12 62%, #0e0e17 100%);
+    border: 1px solid rgba(255,255,255,.06);
+    box-shadow:
+      inset 0 2px 14px rgba(0,0,0,.7),
+      inset 0 0 40px rgba(0,0,0,.4);
+    transition: box-shadow 300ms ease, border-color 300ms ease;
+  }
+  body[data-state="listening"] .dash-inner {
+    border-color: rgba(56,189,248,.22);
+    box-shadow: inset 0 2px 14px rgba(0,0,0,.7), inset 0 0 46px rgba(56,189,248,.10);
+  }
+  body[data-state="thinking"] .dash-inner,
+  body[data-state="speaking"] .dash-inner {
+    border-color: rgba(255,59,48,.20);
+    box-shadow: inset 0 2px 14px rgba(0,0,0,.7), inset 0 0 46px rgba(255,59,48,.10);
+  }
+
+  canvas#dash {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    border-radius: 50%;
+  }
+
+  /* center readout — sits in the upper half of the disc, waveform below */
+  .dash-readout {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: flex-start; gap: 7px;
+    padding-top: 92px;
+    pointer-events: none; z-index: 3;
+  }
+  .dash-cta {
+    font-size: 13px; font-weight: 700; letter-spacing: .3em; text-indent: .3em;
+    color: var(--text); text-transform: uppercase;
+    transition: color 250ms ease, text-shadow 250ms ease;
+  }
+  .dash-sub {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: .18em;
+    color: var(--text-faint); text-transform: uppercase;
+    transition: color 250ms ease;
+  }
+  body[data-state="listening"] .dash-cta { color: var(--blue); text-shadow: 0 0 18px rgba(56,189,248,.6); }
+  body[data-state="listening"] .dash-sub { color: rgba(56,189,248,.55); }
+  body[data-state="thinking"] .dash-cta,
+  body[data-state="speaking"] .dash-cta { color: #FF6B61; text-shadow: 0 0 18px rgba(255,59,48,.6); }
+  body[data-state="thinking"] .dash-sub,
+  body[data-state="speaking"] .dash-sub { color: rgba(255,107,97,.55); }
+  body[data-state="speaking"] .dash-cta { animation: kittFlicker 1.15s steps(2, jump-none) infinite; }
+  @keyframes kittFlicker {
+    0%, 100% { opacity: 1; }
+    46% { opacity: 1; }
+    50% { opacity: .55; }
+    54% { opacity: 1; }
+    78% { opacity: .85; }
+  }
+
+  /* ---------- status under the dash ---------- */
+  .status { margin-top: 34px; text-align: center; }
+  .status .line {
+    font-size: 15px; font-weight: 500; color: var(--amber);
+    letter-spacing: .02em;
+    transition: color 250ms ease;
+  }
+  body[data-state="listening"] .status .line { color: var(--blue); }
+  body[data-state="thinking"] .status .line,
+  body[data-state="speaking"] .status .line { color: #FF6B61; }
+  .status .hint {
+    margin-top: 6px; font-size: 12px; color: var(--text-faint); letter-spacing: .03em;
+  }
+
+  /* mini equalizer bars */
+  .eq { margin-top: 20px; height: 26px; display: flex; align-items: center; gap: 4px; }
+  .eq span {
+    width: 3px; border-radius: 2px; height: 4px;
+    background: var(--amber);
+    transition: height 160ms ease, background 250ms ease, box-shadow 250ms ease, opacity 250ms ease;
+    opacity: .35;
+  }
+  body[data-state="listening"] .eq span { background: var(--blue); box-shadow: 0 0 6px rgba(56,189,248,.5); opacity: .9; }
+  body[data-state="thinking"] .eq span,
+  body[data-state="speaking"] .eq span { background: var(--red); box-shadow: 0 0 6px rgba(255,59,48,.5); opacity: .9; }
+
+  /* ---------- composer ---------- */
+  .composer {
+    margin-top: 34px; width: min(560px, 100%);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .composer .field {
+    flex: 1; height: 52px; border-radius: 999px;
+    background: var(--glass); border: 1px solid var(--stroke);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    display: flex; align-items: center; padding: 0 8px 0 20px; gap: 12px;
+    transition: border-color 250ms ease, box-shadow 250ms ease;
+  }
+  .composer .field:focus-within {
+    border-color: rgba(245,158,11,.45);
+    box-shadow: 0 0 0 3px rgba(245,158,11,.08), 0 8px 30px rgba(0,0,0,.4);
+  }
+  .composer input {
+    flex: 1; background: none; border: none; outline: none;
+    color: var(--text); font-family: var(--font-display); font-size: 14px;
+  }
+  .composer input::placeholder { color: var(--text-faint); }
+  .composer .kbd {
+    font-family: var(--font-mono); font-size: 10px; color: var(--text-faint);
+    border: 1px solid var(--stroke); border-radius: 6px; padding: 3px 7px;
+  }
+  .composer .mic-mini {
+    width: 38px; height: 38px; border-radius: 50%; flex: none;
+    display: grid; place-items: center; cursor: pointer;
+    color: var(--text-dim); background: transparent; border: none;
+    transition: color 200ms ease, background 200ms ease;
+  }
+  .composer .mic-mini:hover { color: var(--amber); background: rgba(245,158,11,.08); }
+  .composer .mic-mini svg { width: 16px; height: 16px; }
+  .send {
+    width: 52px; height: 52px; border-radius: 50%; border: none; cursor: pointer; flex: none;
+    background: linear-gradient(135deg, #FBBF24, var(--amber) 55%, #D97706);
+    box-shadow: 0 6px 22px rgba(245,158,11,.35), inset 0 1px 0 rgba(255,255,255,.35);
+    display: grid; place-items: center;
+    transition: transform 200ms ease, box-shadow 200ms ease;
+  }
+  .send:hover { transform: translateY(-1px) scale(1.03); box-shadow: 0 10px 28px rgba(245,158,11,.45), inset 0 1px 0 rgba(255,255,255,.35); }
+  .send svg { width: 18px; height: 18px; }
+
+  /* ============================================================
+     SIDE PANEL — conversation / latency / creations
+     ============================================================ */
+  aside {
+    width: 320px; flex: none; margin: 0 20px 20px 0;
+    border-radius: 20px;
+    background: var(--glass); border: 1px solid var(--stroke);
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  aside .panel-head {
+    padding: 16px 18px 12px; display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--stroke);
+  }
+  aside .panel-head h2 {
+    font-size: 11px; font-weight: 600; letter-spacing: .2em;
+    color: var(--text-dim); text-transform: uppercase;
+  }
+  aside .panel-head .clear { font-size: 11px; color: var(--text-faint); cursor: pointer; }
+  aside .panel-head .clear:hover { color: var(--amber); }
+
+  .convo { flex: 1; overflow-y: auto; padding: 16px 16px 8px; display: flex; flex-direction: column; gap: 12px; }
+  .convo::-webkit-scrollbar { width: 4px; }
+  .convo::-webkit-scrollbar-thumb { background: var(--stroke-2); border-radius: 4px; }
+
+  .msg { max-width: 88%; font-size: 12.5px; line-height: 1.5; padding: 9px 13px; border-radius: 14px; }
+  .msg .meta {
+    display: flex; gap: 6px; align-items: baseline; margin-bottom: 3px;
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--text-faint);
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: rgba(245,158,11,.10); border: 1px solid rgba(245,158,11,.22);
+    border-bottom-right-radius: 4px; color: #FDE9C8;
+  }
+  .msg.apollo {
+    align-self: flex-start;
+    background: var(--glass-2); border: 1px solid var(--stroke);
+    border-bottom-left-radius: 4px; color: var(--text);
+  }
+  .msg.apollo .meta b { color: var(--amber); font-weight: 500; }
+  .msg .action-chip {
+    display: inline-flex; align-items: center; gap: 5px; margin-top: 7px;
+    font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .05em;
+    color: var(--green); background: rgba(34,197,94,.08);
+    border: 1px solid rgba(34,197,94,.25); border-radius: 999px; padding: 3px 9px;
+  }
+  .msg .action-chip .tick { font-size: 8px; }
+  .msg.live {
+    border-color: rgba(255,59,48,.3);
+    background: rgba(255,59,48,.06);
+  }
+  .msg.live .cursor {
+    display: inline-block; width: 7px; height: 12px; margin-left: 2px;
+    background: rgba(255,107,97,.8); vertical-align: -1px;
+    animation: kittFlicker .9s steps(2, jump-none) infinite;
+  }
+
+  .stats {
+    border-top: 1px solid var(--stroke);
+    padding: 12px 18px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  }
+  .stat .k {
+    font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .16em;
+    color: var(--text-faint); text-transform: uppercase;
+  }
+  .stat .v { font-family: var(--font-mono); font-size: 14px; margin-top: 3px; color: var(--text); }
+  .stat .v em { font-style: normal; font-size: 9px; color: var(--text-faint); margin-left: 2px; }
+  .stat .v.good { color: var(--green); }
+  .stat .v.amber { color: var(--amber); }
+
+  .creations { border-top: 1px solid var(--stroke); padding: 12px 18px 16px; }
+  .creations .k {
+    font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .16em;
+    color: var(--text-faint); text-transform: uppercase; margin-bottom: 9px;
+  }
+  .creations .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .creations .chip {
+    font-size: 11px; color: var(--text-dim); cursor: pointer;
+    background: var(--glass-2); border: 1px solid var(--stroke);
+    border-radius: 999px; padding: 5px 11px; display: flex; align-items: center; gap: 6px;
+    transition: border-color 200ms ease, color 200ms ease;
+  }
+  .creations .chip:hover { border-color: rgba(245,158,11,.4); color: var(--text); }
+  .creations .chip .sq { width: 6px; height: 6px; border-radius: 2px; background: var(--amber); opacity: .8; }
+  .creations .chip:nth-child(2) .sq { background: var(--blue); }
+  .creations .chip:nth-child(3) .sq { background: var(--green); }
+
+  /* ---------- demo state switcher (mockup control) ---------- */
+  .demo {
+    position: fixed; left: 24px; bottom: 20px; z-index: 10;
+    display: flex; align-items: center; gap: 6px;
+    background: rgba(10,10,15,.7); border: 1px solid var(--stroke);
+    border-radius: 999px; padding: 5px;
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  }
+  .demo .lbl {
+    font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .18em;
+    color: var(--text-faint); text-transform: uppercase; padding: 0 8px 0 10px;
+  }
+  .demo button {
+    font-family: var(--font-display); font-size: 11px; font-weight: 500;
+    color: var(--text-dim); background: transparent; border: 1px solid transparent;
+    border-radius: 999px; padding: 6px 13px; cursor: pointer;
+    transition: all 200ms ease;
+  }
+  .demo button:hover { color: var(--text); }
+  .demo button.on { color: var(--text); background: var(--glass-2); border-color: var(--stroke-2); }
+  .demo button.on[data-s="idle"] { color: var(--amber); border-color: rgba(245,158,11,.4); }
+  .demo button.on[data-s="listening"] { color: var(--blue); border-color: rgba(56,189,248,.4); }
+  .demo button.on[data-s="thinking"],
+  .demo button.on[data-s="speaking"] { color: #FF6B61; border-color: rgba(255,59,48,.4); }
+
+  .demo-note {
+    position: fixed; right: 360px; bottom: 26px; z-index: 10;
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: .1em;
+    color: var(--text-faint); text-transform: uppercase;
+  }
+
+  @media (max-width: 1100px) { aside, .demo-note { display: none; } }
+</style>
+</head>
+<body data-state="idle">
+
+<div class="space"></div>
+<div class="ambient" id="ambient"></div>
+
+<!-- ═══════════ TOP BAR ═══════════ -->
+<header>
+  <div class="brand">
+    <div class="sigil">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2" stroke-linecap="round">
+        <path d="M12 3v10"/><path d="M8 8a4 4 0 0 0 8 0"/>
+        <path d="M6 13a6 6 0 0 0 12 0"/><path d="M12 19v2"/>
+      </svg>
+    </div>
+    <div>
+      <h1 style="display:flex;align-items:center;">Apollo <span class="live-dot"></span></h1>
+      <div class="sub">Voice Butler · Agent OS</div>
+    </div>
+  </div>
+
+  <div class="top-controls">
+    <div class="pill" title="Voice selector">
+      <span class="dot"></span> Apollo · Nova <span class="chev">▾</span>
+    </div>
+    <div class="icon-btn" title="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.09a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.09a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/>
+      </svg>
+    </div>
+    <div class="icon-btn" title="Collapse to floating panel">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="M14 10l7-7"/><path d="M3 21l7-7"/>
+      </svg>
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- ═══════════ HERO ═══════════ -->
+  <section class="hero">
+
+    <!-- THE KITT DASH -->
+    <div class="dash-wrap" id="dashWrap" title="Tap to cycle states (mockup)">
+      <div class="dash-halo"></div>
+      <div class="dash-bezel"></div>
+      <div class="dash-inner"></div>
+      <canvas id="dash"></canvas>
+      <div class="dash-readout">
+        <div class="dash-cta" id="cta">Tap to speak</div>
+        <div class="dash-sub" id="ctaSub">apollo·v2 online</div>
+      </div>
+    </div>
+
+    <div class="status">
+      <div class="line" id="statusLine">Apollo is ready</div>
+      <div class="hint" id="statusHint">Say “Apollo…” or tap the dash to begin</div>
+    </div>
+
+    <div class="eq" id="eq"></div>
+
+    <!-- composer -->
+    <div class="composer">
+      <div class="field">
+        <input type="text" placeholder="Or type a command for Apollo…">
+        <span class="kbd">⏎</span>
+        <button class="mic-mini" title="Push to talk">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+            <rect x="9" y="3" width="6" height="11" rx="3"/>
+            <path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/>
+          </svg>
+        </button>
+      </div>
+      <button class="send" title="Send">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#1a1206" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/>
+        </svg>
+      </button>
+    </div>
+  </section>
+
+  <!-- ═══════════ SIDE PANEL ═══════════ -->
+  <aside>
+    <div class="panel-head">
+      <h2>Conversation</h2>
+      <span class="clear">Clear</span>
+    </div>
+
+    <div class="convo">
+      <div class="msg user">
+        <div class="meta">You · 21:04</div>
+        Apollo, what's on the pipeline board today?
+      </div>
+      <div class="msg apollo">
+        <div class="meta"><b>Apollo</b> · 21:04 · 1.2s</div>
+        Three deals moved to negotiation overnight, sir. Meridian Group is the largest at $48k. Shall I brief you on each?
+        <div class="action-chip"><span class="tick">●</span> opened /pipelines</div>
+      </div>
+      <div class="msg user">
+        <div class="meta">You · 21:06</div>
+        Build me a quick timer for the standup.
+      </div>
+      <div class="msg apollo">
+        <div class="meta"><b>Apollo</b> · 21:06 · 3.8s</div>
+        Done — a 15-minute standup timer with an amber countdown. It's live in your creations.
+        <div class="action-chip"><span class="tick">●</span> created standup-timer</div>
+      </div>
+      <div class="msg apollo live">
+        <div class="meta"><b>Apollo</b> · now</div>
+        Certainly. Pulling the latest lead scores<span class="cursor"></span>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="k">STT</div><div class="v good">238<em>ms</em></div></div>
+      <div class="stat"><div class="k">Brain</div><div class="v amber">0.9<em>s</em></div></div>
+      <div class="stat"><div class="k">TTS</div><div class="v good">312<em>ms</em></div></div>
+    </div>
+
+    <div class="creations">
+      <div class="k">Recent creations</div>
+      <div class="chips">
+        <div class="chip"><span class="sq"></span> standup-timer</div>
+        <div class="chip"><span class="sq"></span> lead-scorer</div>
+        <div class="chip"><span class="sq"></span> unit-converter</div>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<!-- ═══════════ DEMO CONTROLS (design mockup only) ═══════════ -->
+<div class="demo">
+  <span class="lbl">States</span>
+  <button data-s="idle" class="on">Idle</button>
+  <button data-s="listening">Listening</button>
+  <button data-s="thinking">Thinking</button>
+  <button data-s="speaking">Speaking</button>
+</div>
+<div class="demo-note">design mockup · tap dash to cycle</div>
+
+<script>
+/* ================================================================
+   KITT DASH RENDERER
+   Outer ring: 64 red LED segments. Inner: state-coloured waveform.
+   All motion runs on one rAF loop; state changes crossfade over
+   ~280ms via eased interpolation (no hard cuts).
+   ================================================================ */
+const DPR = Math.min(window.devicePixelRatio || 1, 2);
+const SIZE = 280;
+const canvas = document.getElementById('dash');
+const ctx = canvas.getContext('2d');
+canvas.width = SIZE * DPR;
+canvas.height = SIZE * DPR;
+ctx.scale(DPR, DPR);
+
+const CX = SIZE / 2, CY = SIZE / 2;
+const SEGMENTS = 64;
+const RING_R = 126;          // led ring radius
+const SEG_LEN = 0.062;       // arc length of each led (radians)
+const WAVE_HALF = 78;        // waveform half-width inside the inner disc
+const WAVE_Y = CY + 32;      // waveform baseline, below the centre readout
+
+const COLORS = {
+  redCore:  [255, 59, 48],
+  redHot:   [255, 120, 100],
+  blue:     [56, 189, 248],
+  blueHot:  [140, 220, 255],
+  amberDim: [245, 158, 11],
+};
+
+/* per-state targets the renderer eases toward */
+const STATES = {
+  idle:      { ringBase: .10, ringMode: 'still',  wave: 'flat',   waveColor: 'amberDim', waveAmp: 1.5,  waveAlpha: .40, glow: 0  },
+  listening: { ringBase: .05, ringMode: 'still',  wave: 'dance',  waveColor: 'blue',     waveAmp: 24,   waveAlpha: .95, glow: 10 },
+  thinking:  { ringBase: .26, ringMode: 'orbit',  wave: 'pulse',  waveColor: 'redCore',  waveAmp: 9,    waveAlpha: .95, glow: 8  },
+  speaking:  { ringBase: .16, ringMode: 'scan',   wave: 'dance',  waveColor: 'redCore',  waveAmp: 20,   waveAlpha: .95, glow: 14 },
+};
+
+let state = 'idle';
+let blend = { ringBase: .10, waveAmp: 1.5, waveAlpha: .40, glow: 0 };
+let waveCol = COLORS.amberDim.slice();
+let t = 0, lastTs = null;
+
+const ease = (cur, target, dt) => cur + (target - cur) * Math.min(1, dt * 8); // ~280ms settle
+
+function rgba(c, a) { return `rgba(${c[0]},${c[1]},${c[2]},${a})`; }
+
+/* ---- outer LED ring ---- */
+function drawRing(s, now) {
+  ctx.lineWidth = 6.5;
+  ctx.lineCap = 'round';
+  for (let i = 0; i < SEGMENTS; i++) {
+    const ang = (i / SEGMENTS) * Math.PI * 2 - Math.PI / 2;
+    let a = blend.ringBase;
+
+    if (s.ringMode === 'scan') {
+      // KITT scanner: a hot band bouncing around the ring
+      const pos = Math.sin(now * 1.9) * Math.PI;
+      let d = Math.atan2(Math.sin(ang + Math.PI / 2 - pos), Math.cos(ang + Math.PI / 2 - pos));
+      const band = Math.max(0, 1 - Math.abs(d) / 0.9);
+      a = blend.ringBase + band * band * .95;
+    } else if (s.ringMode === 'orbit') {
+      // thinking: soft comet drifting round + gentle global pulse
+      const pos = now * 1.4;
+      let d = Math.atan2(Math.sin(ang - pos), Math.cos(ang - pos));
+      const comet = Math.max(0, 1 - Math.abs(d) / 1.6);
+      a = blend.ringBase * (0.75 + 0.25 * Math.sin(now * 2.4)) + comet * comet * .3;
+    } else {
+      // idle/listening: near-still, imperceptible shimmer so it feels alive
+      a = blend.ringBase * (0.9 + 0.1 * Math.sin(now * .8 + i * .4));
+    }
+
+    a = Math.min(1, a);
+    const hot = a > .5;
+    ctx.strokeStyle = rgba(hot ? COLORS.redHot : COLORS.redCore, a);
+    ctx.shadowColor = rgba(COLORS.redCore, a * .9);
+    ctx.shadowBlur = hot ? 14 : 4;
+    ctx.beginPath();
+    ctx.arc(CX, CY, RING_R, ang - SEG_LEN / 2, ang + SEG_LEN / 2);
+    ctx.stroke();
+  }
+  ctx.shadowBlur = 0;
+}
+
+/* ---- inner waveform ---- */
+function waveY(x, s, now) {
+  const n = x / WAVE_HALF; // -1..1
+  const env = Math.pow(Math.cos(n * Math.PI / 2), 1.4); // taper to edges
+  if (s.wave === 'flat') {
+    return Math.sin(x * .05 + now) * blend.waveAmp * env;
+  }
+  if (s.wave === 'pulse') {
+    const breath = (0.55 + 0.45 * Math.sin(now * 3.2));
+    return Math.sin(x * .085 + now * 2.2) * blend.waveAmp * breath * env;
+  }
+  // dance: layered harmonics = organic voice motion
+  return env * blend.waveAmp * (
+    Math.sin(x * .075 + now * 5.1) * .55 +
+    Math.sin(x * .16  - now * 3.7) * .30 +
+    Math.sin(x * .043 + now * 7.3) * .25
+  );
+}
+
+function drawWave(s, now) {
+  const col = waveCol;
+  // under-glow
+  ctx.beginPath();
+  for (let x = -WAVE_HALF; x <= WAVE_HALF; x += 2) {
+    const y = waveY(x, s, now);
+    x === -WAVE_HALF ? ctx.moveTo(CX + x, WAVE_Y + y) : ctx.lineTo(CX + x, WAVE_Y + y);
+  }
+  ctx.strokeStyle = rgba(col, .17 * blend.waveAlpha);
+  ctx.lineWidth = 7;
+  ctx.lineCap = 'round';
+  ctx.shadowColor = rgba(col, .8 * blend.waveAlpha);
+  ctx.shadowBlur = blend.glow + 6;
+  ctx.stroke();
+  // core line
+  ctx.beginPath();
+  for (let x = -WAVE_HALF; x <= WAVE_HALF; x += 2) {
+    const y = waveY(x, s, now);
+    x === -WAVE_HALF ? ctx.moveTo(CX + x, WAVE_Y + y) : ctx.lineTo(CX + x, WAVE_Y + y);
+  }
+  ctx.strokeStyle = rgba(col, blend.waveAlpha);
+  ctx.lineWidth = 2;
+  ctx.shadowBlur = blend.glow;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+}
+
+/* ---- mini equalizer under the status text ---- */
+const eq = document.getElementById('eq');
+const EQ_BARS = 24;
+const eqSpans = [];
+for (let i = 0; i < EQ_BARS; i++) {
+  const sp = document.createElement('span');
+  eq.appendChild(sp); eqSpans.push(sp);
+}
+let eqTick = 0;
+function drawEq(s, now) {
+  if ((eqTick++ % 9) !== 0) return; // ~7fps steps feel like level meters
+  for (let i = 0; i < EQ_BARS; i++) {
+    let h = 4;
+    const n = Math.abs(i - EQ_BARS / 2) / (EQ_BARS / 2);
+    if (s.wave === 'dance') h = 5 + Math.random() * 20 * (1 - n * .7);
+    else if (s.wave === 'pulse') h = 4 + (0.5 + 0.5 * Math.sin(now * 3.2 + i * .5)) * 8 * (1 - n * .5);
+    else h = 3 + Math.sin(now + i) * 1.2 + 1.5;
+    eqSpans[i].style.height = h.toFixed(1) + 'px';
+  }
+}
+
+/* ---- main loop ---- */
+function frame(ts) {
+  if (lastTs === null) lastTs = ts;
+  const dt = Math.min(0.05, (ts - lastTs) / 1000);
+  lastTs = ts;
+  t += dt;
+
+  const s = STATES[state];
+  blend.ringBase  = ease(blend.ringBase,  s.ringBase,  dt);
+  blend.waveAmp   = ease(blend.waveAmp,   s.waveAmp,   dt);
+  blend.waveAlpha = ease(blend.waveAlpha, s.waveAlpha, dt);
+  blend.glow      = ease(blend.glow,      s.glow,      dt);
+  const target = COLORS[s.waveColor];
+  for (let i = 0; i < 3; i++) waveCol[i] = ease(waveCol[i], target[i], dt);
+
+  ctx.clearRect(0, 0, SIZE, SIZE);
+  drawRing(s, t);
+  drawWave(s, t);
+  drawEq(s, t);
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* ================================================================
+   STATE WIRING (mockup): copy per state + ambient colour + demo UI
+   ================================================================ */
+const COPY = {
+  idle:      { cta: 'Tap to speak', sub: 'apollo·v2 online',   line: 'Apollo is ready',              hint: 'Say “Apollo…” or tap the dash to begin', amb: '245,158,11', ambA: .05, pulse: false },
+  listening: { cta: 'Listening',    sub: 'voice channel open', line: 'Go ahead, I’m listening', hint: 'Pause for 2.5s to send',                 amb: '56,189,248', ambA: .09, pulse: false },
+  thinking:  { cta: 'Processing',   sub: 'routing · reasoning',line: 'Working on it…',          hint: 'Apollo is thinking',                     amb: '255,59,48',  ambA: .06, pulse: false },
+  speaking:  { cta: 'Speaking',     sub: 'openai tts · nova',  line: 'Apollo is speaking',           hint: 'Tap the dash to interrupt',              amb: '255,59,48',  ambA: .10, pulse: true  },
+};
+const ORDER = ['idle', 'listening', 'thinking', 'speaking'];
+const ambient = document.getElementById('ambient');
+
+function setState(next) {
+  state = next;
+  document.body.dataset.state = next;
+  const c = COPY[next];
+  document.getElementById('cta').textContent = c.cta;
+  document.getElementById('ctaSub').textContent = c.sub;
+  document.getElementById('statusLine').textContent = c.line;
+  document.getElementById('statusHint').textContent = c.hint;
+  document.documentElement.style.setProperty('--ambient', `rgba(${c.amb},${c.ambA})`);
+  document.documentElement.style.setProperty('--ambient-2', `rgba(${c.amb},${c.ambA * .5})`);
+  ambient.classList.toggle('pulsing', c.pulse);
+  document.querySelectorAll('.demo button').forEach(b =>
+    b.classList.toggle('on', b.dataset.s === next));
+}
+
+document.querySelectorAll('.demo button').forEach(b =>
+  b.addEventListener('click', () => setState(b.dataset.s)));
+
+document.getElementById('dashWrap').addEventListener('click', () =>
+  setState(ORDER[(ORDER.indexOf(state) + 1) % ORDER.length]));
+</script>
+</body>
+</html>
