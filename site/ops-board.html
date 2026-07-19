@@ -191,6 +191,7 @@ h2.sect small{font-weight:600;letter-spacing:.2px;text-transform:none;color:var(
   <div class="logo">AGENT<b>OS</b></div>
   <span class="tag">ITIL 4 Service Desk</span>
   <div class="right">
+    <span class="chip on" id="live" title="Auto-refresh every 30s"><span class="dot"></span><span id="live-txt">live</span></span>
     <span class="clock" id="clock"></span>
     <button class="btn" id="refresh">↻ Refresh</button>
     <button class="btn primary" id="new-btn">+ New ticket</button>
@@ -260,6 +261,7 @@ h2.sect small{font-weight:600;letter-spacing:.2px;text-transform:none;color:var(
     <select id="f-proj"><option value="">All projects</option></select>
     <select id="f-pri"><option value="">All priorities</option><option>P1</option><option>P2</option><option>P3</option><option>P4</option><option>P5</option></select>
     <select id="f-type"><option value="">All types</option><option value="incident">Incident</option><option value="service_request">Service request</option><option value="problem">Problem</option><option value="change">Change</option></select>
+    <select id="f-sla"><option value="">All SLA</option><option value="breached">SLA breached</option></select>
     <span class="n" id="f-n"></span>
   </div>
 
@@ -314,7 +316,7 @@ h2.sect small{font-weight:600;letter-spacing:.2px;text-transform:none;color:var(
     <label for="m-desc">Description</label><textarea id="m-desc" rows="3"></textarea>
     <div class="grid2">
       <div><label for="m-proj">Project</label>
-        <select id="m-proj"><option value="agent-os">AGENT OS</option><option value="kssports">KS Sports Coaching</option><option value="maxgleam">Max Gleam</option><option value="magichairstyler">Magic Hair Styler</option><option value="dafc">DAFC Shop</option><option value="vps">VPS system</option><option value="general">General</option></select></div>
+        <select id="m-proj"><option value="agent-os">AGENT OS</option><option value="ks-sports">KS Sports Coaching</option><option value="max-gleam">Max Gleam</option><option value="magic-hair-styler">Magic Hair Styler</option><option value="dafc-shop">DAFC Shop</option><option value="general">General</option></select></div>
       <div><label for="m-type">Type</label>
         <select id="m-type"><option value="incident">Incident</option><option value="service_request">Service request</option><option value="problem">Problem</option><option value="change">Change</option></select></div>
       <div><label for="m-impact">Impact</label>
@@ -322,6 +324,8 @@ h2.sect small{font-weight:600;letter-spacing:.2px;text-transform:none;color:var(
       <div><label for="m-urgency">Urgency</label>
         <select id="m-urgency"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option><option value="critical">Critical</option></select></div>
     </div>
+    <label for="m-location">Location</label>
+    <input id="m-location" placeholder="Site / server / URL affected">
     <div class="pprev">ITIL priority: <b id="m-pprev">P3</b></div>
     <div class="row">
       <button class="btn" id="m-cancel">Cancel</button>
@@ -358,7 +362,7 @@ const COLS=[
 ];
 const OPEN=new Set(['pending_dispatch','in_progress','on_hold']);
 const TIERS={'1st_line':{n:'DeepSeek V4 Pro',cls:'tier1',short:'1st'},'2nd_line':{n:'Fable',cls:'tier2',short:'2nd'},'3rd_line':{n:'Griff',cls:'tier3',short:'3rd'}};
-const PROJ_LABEL={'agent-os':'AGENT OS',kssports:'KS Sports',maxgleam:'Max Gleam',magichairstyler:'Magic Hair Styler',dafc:'DAFC Shop',vps:'VPS',general:'General'};
+const PROJ_LABEL={'agent-os':'AGENT OS','ks-sports':'KS Sports','max-gleam':'Max Gleam','magic-hair-styler':'Magic Hair Styler','dafc-shop':'DAFC Shop',general:'General'};
 
 let tickets=[],current=null;
 
@@ -371,14 +375,18 @@ function rel(iso){
 }
 
 /* ── load + render ─────────────────────────────────────────── */
+let lastSync=null;
 async function load(){
   try{
-    const r=await fetch(API+'?order=created_at.desc&limit=500');
+    const r=await fetch(API+'?order=created_at.desc&limit=500',{cache:'no-store'});
     if(!r.ok)throw new Error('API '+r.status);
     tickets=await r.json();
-  }catch(e){toast('Could not load tickets: '+e.message,true);return}
+    lastSync=Date.now();
+    const lv=$('live');lv.className='chip act';setTimeout(()=>lv.className='chip on',900);
+  }catch(e){$('live').className='chip idle';$('live-txt').textContent='offline';toast('Could not load tickets: '+e.message,true);return}
   renderAll();
 }
+setInterval(()=>{if(lastSync)$('live-txt').textContent='live · '+Math.round((Date.now()-lastSync)/1000)+'s'},5000);
 function renderAll(){renderTiers();renderBoard();renderAssignments();renderFeed();renderProjOptions()}
 
 function renderTiers(){
@@ -393,15 +401,17 @@ function renderTiers(){
   }
 }
 
+const slaBreached=(t)=>!!t.sla_target&&OPEN.has(t.status)&&new Date(t.sla_target).getTime()<Date.now();
 function filtered(){
   const q=$('f-q').value.trim().toLowerCase(),tier=$('f-tier').value,proj=$('f-proj').value,
-        pri=$('f-pri').value,type=$('f-type').value;
+        pri=$('f-pri').value,type=$('f-type').value,sla=$('f-sla').value;
   return tickets.filter(t=>
     (!q||((t.title||'')+' '+(t.description||'')+' '+(t.project||'')).toLowerCase().includes(q))
     &&(!tier||t.assignment_tier===tier)
     &&(!proj||t.project===proj)
     &&(!pri||('P'+prio(t))===pri)
-    &&(!type||t.ticket_type===type));
+    &&(!type||t.ticket_type===type)
+    &&(sla!=='breached'||slaBreached(t)));
 }
 
 function slaHtml(t){
@@ -553,11 +563,12 @@ $('m-create').addEventListener('click',async()=>{
   const body={title,description:$('m-desc').value.trim(),project:$('m-proj').value,
     ticket_type:$('m-type').value,impact:$('m-impact').value,urgency:$('m-urgency').value,
     status:'pending_dispatch',assignment_tier:'1st_line',priority:$('m-urgency').value,
-    location:PROJ_LABEL[$('m-proj').value]||$('m-proj').value,contact_name:'Ops Board',business:'general'};
+    location:$('m-location').value.trim()||PROJ_LABEL[$('m-proj').value]||$('m-proj').value,
+    contact_name:'Ops Board',business:'general'};
   try{
     const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json','Prefer':'return=representation'},body:JSON.stringify(body)});
     if(!r.ok)throw new Error('create failed ('+r.status+')');
-    $('modal').classList.remove('show');$('m-title').value='';$('m-desc').value='';
+    $('modal').classList.remove('show');$('m-title').value='';$('m-desc').value='';$('m-location').value='';
     toast('Ticket created → 1st line (DeepSeek)');load();
   }catch(e){toast(e.message,true)}
 });
@@ -569,23 +580,32 @@ $('m-create').addEventListener('click',async()=>{
    times it; a rejection means unreachable. No invented uptime %,
    no fake disk/memory numbers — that needs a host agent. ── */
 const SITES=[
-  {id:'kssports',name:'KS Sports Coaching',url:'https://kssportscoaching.co.uk/',mode:'opaque'},
+  {id:'ks-sports',name:'KS Sports Coaching',url:'https://kssportscoaching.co.uk/',mode:'opaque'},
   {id:'agent-os',name:'AGENT OS',url:'/healthz',mode:'json'},
-  {id:'maxgleam',name:'Max Gleam',url:'https://maxgleam.com/',mode:'opaque'},
-  {id:'magichairstyler',name:'Magic Hair Styler',url:'https://magichairstyler.com/',mode:'opaque'},
-  {id:'dafc',name:'DAFC Shop',url:'https://darleyabbeyfc.com/',mode:'opaque'},
-  {id:'vps',name:'VPS System',mode:'agg'},
+  // The live Max Gleam SERVICE is the operator app, not the landing page.
+  {id:'max-gleam',name:'Max Gleam',url:'https://app.maxgleam.com/',mode:'opaque'},
+  // magichairstyler.com is canonical (www 301s to the apex — verified).
+  {id:'magic-hair-styler',name:'Magic Hair Styler',url:'https://magichairstyler.com/',mode:'opaque'},
+  {id:'dafc-shop',name:'DAFC Shop',url:'https://darleyabbeyfc.com/',mode:'opaque'},
+  {id:'vps',name:'VPS System',mode:'sys'},   // real metrics via /api/system
 ];
 const probeState={};
 function srvCard(s){
   const st=probeState[s.id];
   let dot='wait',info='Probing…';
   if(st){
-    if(s.mode==='agg'){
-      const others=SITES.filter(x=>x.mode!=='agg');
-      const up=others.filter(x=>probeState[x.id]&&probeState[x.id].up).length;
-      dot=up===others.length?'up':'down';
-      info=`<b>${up}/${others.length}</b> services reachable<br>disk · memory · load: <span style="color:var(--muted2)">needs host agent</span><br>checked <b>${st.when}</b>`;
+    if(s.mode==='sys'){
+      if(st.sys){
+        const y=st.sys;
+        const warn=(p)=>p>=90?'bad':p>=75?'':'ok';
+        dot=(y.disk_used_pct<90&&(y.mem_used_pct==null||y.mem_used_pct<95))?'up':'down';
+        info=`disk <b class="${warn(y.disk_used_pct)}">${y.disk_used_pct}%</b> · ${y.disk_free_gb}GB free<br>`
+            +`memory <b class="${warn(y.mem_used_pct)}">${y.mem_used_pct==null?'?':y.mem_used_pct+'%'}</b> of ${y.mem_total_gb}GB · load <b>${y.load.join(' / ')}</b> (${y.cpus} cpu)<br>`
+            +`checked <b>${st.when}</b>`;
+      }else{
+        dot='down';
+        info=`<span class="bad">● /api/system unavailable</span><br>${esc(st.err||'no data source')}<br>checked <b>${st.when}</b>`;
+      }
     }else if(st.up){
       dot='up';
       info=`<span class="ok">● Reachable</span> · SSL ok · <b>${st.ms}ms</b><br>${st.extra||''}checked <b>${st.when}</b>`;
@@ -599,7 +619,11 @@ function srvCard(s){
 function renderServers(){$('servers').innerHTML=SITES.map(srvCard).join('')}
 async function probeAll(){
   $('probe-note').textContent='probing…';
-  await Promise.all(SITES.filter(s=>s.mode!=='agg').map(async(s)=>{
+  // VPS: real host metrics from the same-origin backend.
+  fetch('/api/system',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(new Error('HTTP '+r.status)))
+    .then(sys=>{probeState.vps={sys,when:new Date().toLocaleTimeString('en-GB')};renderServers()})
+    .catch(e=>{probeState.vps={err:String(e.message||e).slice(0,60),when:new Date().toLocaleTimeString('en-GB')};renderServers()});
+  await Promise.all(SITES.filter(s=>s.mode==='opaque'||s.mode==='json').map(async(s)=>{
     const t0=performance.now();
     try{
       if(s.mode==='json'){
@@ -616,17 +640,15 @@ async function probeAll(){
     }
     renderServers();
   }));
-  probeState.vps={when:new Date().toLocaleTimeString('en-GB')};
-  renderServers();
-  $('probe-note').textContent='browser probes · reachability + TLS + latency · auto every 60s';
+  $('probe-note').textContent='browser probes + /api/system host metrics · auto every 60s';
 }
 
 /* ── wiring ── */
-['f-q','f-tier','f-proj','f-pri','f-type'].forEach(id=>$(id).addEventListener('input',renderBoard));
+['f-q','f-tier','f-proj','f-pri','f-type','f-sla'].forEach(id=>$(id).addEventListener('input',renderBoard));
 $('refresh').addEventListener('click',()=>{load();probeAll()});
 setInterval(()=>$('clock').textContent=new Date().toLocaleString('en-GB',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'}),1000);
 renderServers();load();probeAll();
-setInterval(load,60000);setInterval(probeAll,60000);
+setInterval(load,30000);setInterval(probeAll,60000);
 </script>
 </body>
 </html>
