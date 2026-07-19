@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Service Desk — AGENT OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#05080C;--surface:#0D1520;--surface-2:#0B1826;
+  --card:linear-gradient(180deg,#0e1826,#0b121c);--line:rgba(255,255,255,0.06);
+  --accent:#19C3E6;--accent-dim:rgba(25,195,230,0.1);
+  --ink:#e8edf5;--ink2:#c8d0dc;--muted:#7b8da8;--muted2:#5a6a82;
+  --green:#22C55E;--red:#EF4444;--amber:#F59E0B;--purple:#A78BFA;--blue:#38BDF8;--rose:#F43F5E;
+  --p1:#EF4444;--p2:#F59E0B;--p3:#38BDF8;--p4:#7b8da8;--p5:#3d4a5e;
+  --r:12px;--rl:16px;--font:'Inter',system-ui,sans-serif;
+}
+html{background:var(--bg)}
+body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:100vh;-webkit-font-smoothing:antialiased}
+::selection{background:rgba(25,195,230,.3);color:#eaf7fb}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-thumb{background:rgba(123,141,168,.28);border-radius:999px}
+::-webkit-scrollbar-thumb:hover{background:rgba(25,195,230,.45)}
+button{font-family:var(--font)}
+
+/* ── header ── */
+.hdr{position:sticky;top:0;z-index:90;display:flex;align-items:center;gap:14px;height:56px;padding:0 20px;
+     background:rgba(5,8,12,.85);backdrop-filter:blur(20px) saturate(160%);border-bottom:1px solid var(--line)}
+.hdr .logo{font-size:19px;font-weight:800;letter-spacing:-.3px}
+.hdr .logo b{color:var(--accent);font-weight:800}
+.hdr .tag{font-size:10px;font-weight:600;color:var(--muted);letter-spacing:1.2px;background:rgba(255,255,255,.04);
+          padding:3px 10px;border-radius:20px;text-transform:uppercase}
+.hdr .right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.clock{font-size:12px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:9px;font-size:12.5px;font-weight:700;
+     border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--ink2);cursor:pointer;transition:.18s}
+.btn:hover{border-color:rgba(25,195,230,.35);color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:transparent;color:#05242e}
+.btn.primary:hover{filter:brightness(1.1);color:#05242e}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+
+main{padding:18px 20px 40px;max-width:1680px;margin:0 auto}
+h2.sect{font-size:11px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;color:var(--muted);margin:22px 0 10px}
+h2.sect:first-child{margin-top:0}
+h2.sect small{font-weight:600;letter-spacing:.2px;text-transform:none;color:var(--muted2);margin-left:8px}
+
+/* ── tier cards ── */
+.tiers{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.tier{position:relative;overflow:hidden;background:var(--card);border:1px solid var(--line);border-radius:var(--rl);padding:16px;display:flex;gap:14px;align-items:center}
+.tier::after{content:"";position:absolute;inset:auto -30% -70% auto;width:220px;height:220px;border-radius:50%;filter:blur(50px);opacity:.14;pointer-events:none}
+.tier.t1::after{background:var(--accent)} .tier.t2::after{background:var(--purple)} .tier.t3::after{background:var(--rose)}
+.tier .avatar{width:52px;height:52px;border-radius:14px;display:grid;place-items:center;flex-shrink:0;border:1px solid var(--line)}
+.t1 .avatar{background:rgba(25,195,230,.1);color:var(--accent)}
+.t2 .avatar{background:rgba(167,139,250,.1);color:var(--purple)}
+.t3 .avatar{background:rgba(244,63,94,.1);color:var(--rose)}
+.tier .who{min-width:0;flex:1}
+.tier .line-lbl{font-size:10px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted)}
+.tier .name{font-size:15.5px;font-weight:800;letter-spacing:-.2px;margin:1px 0 2px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.tier .role{font-size:11.5px;color:var(--muted)}
+.tier .metrics{text-align:right;flex-shrink:0}
+.tier .cnt{font-size:26px;font-weight:900;letter-spacing:-.5px;font-variant-numeric:tabular-nums;line-height:1}
+.tier .cnt-lbl{font-size:10px;color:var(--muted2);font-weight:600;margin-top:2px}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:700;padding:2.5px 9px;border-radius:20px;border:1px solid var(--line);letter-spacing:.3px}
+.chip .dot{width:6px;height:6px;border-radius:50%}
+.chip.on{color:var(--green)} .chip.on .dot{background:var(--green);box-shadow:0 0 6px var(--green)}
+.chip.act{color:var(--accent)} .chip.act .dot{background:var(--accent);box-shadow:0 0 6px var(--accent);animation:pulse 1.6s infinite}
+.chip.idle{color:var(--muted2)} .chip.idle .dot{background:var(--muted2)}
+.chip.hermes{color:var(--rose);border-color:rgba(244,63,94,.3);font-weight:800;letter-spacing:1.5px;font-size:9px}
+@keyframes pulse{50%{opacity:.4}}
+
+/* ── server strip ── */
+.servers{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:10px}
+.srv{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px}
+.srv .top{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.srv .st{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.srv .st.up{background:var(--green);box-shadow:0 0 8px rgba(34,197,94,.6)}
+.srv .st.down{background:var(--red);box-shadow:0 0 8px rgba(239,68,68,.6)}
+.srv .st.wait{background:var(--muted2);animation:pulse 1.2s infinite}
+.srv .nm{font-size:12.5px;font-weight:800;letter-spacing:-.1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.srv .info{font-size:10.5px;color:var(--muted);line-height:1.7}
+.srv .info b{color:var(--ink2);font-weight:700;font-variant-numeric:tabular-nums}
+.srv .info .ok{color:var(--green)} .srv .info .bad{color:var(--red)}
+
+/* ── filters ── */
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.filters input,.filters select{padding:7px 10px;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;
+  color:var(--ink);font-family:var(--font);font-size:12px;outline:none}
+.filters input:focus,.filters select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(25,195,230,.08)}
+.filters input{flex:1;min-width:150px;max-width:230px}
+.filters .n{font-size:11px;color:var(--muted2);margin-left:auto;font-variant-numeric:tabular-nums}
+
+/* ── layout: board + side ── */
+.deck{display:grid;grid-template-columns:1fr 300px;gap:14px;align-items:start}
+@media(max-width:1150px){.deck{grid-template-columns:1fr}}
+
+/* ── kanban ── */
+.board{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(230px,1fr);gap:10px;overflow-x:auto;padding-bottom:8px}
+.col{background:rgba(13,21,32,.55);border:1px solid rgba(255,255,255,.04);border-radius:var(--r);min-height:180px}
+.col .head{display:flex;align-items:center;gap:8px;padding:11px 12px;border-bottom:1px solid rgba(255,255,255,.04);
+           font-size:11px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:var(--ink2)}
+.col .head .cdot{width:7px;height:7px;border-radius:50%}
+.col .head .cc{margin-left:auto;font-size:11px;color:var(--muted);background:rgba(255,255,255,.05);padding:1px 8px;border-radius:12px;font-variant-numeric:tabular-nums}
+.col .body{padding:8px;display:flex;flex-direction:column;gap:8px}
+.tk{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px 10px 16px;cursor:pointer;transition:.15s}
+.tk:hover{border-color:rgba(25,195,230,.35);transform:translateY(-1px)}
+.tk .pbar{position:absolute;left:0;top:0;bottom:0;width:4px;border-radius:10px 0 0 10px}
+.tk .ttl{font-size:12.5px;font-weight:700;line-height:1.35;margin-bottom:7px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tk .meta{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.mini{font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:12px;border:1px solid var(--line);color:var(--muted);letter-spacing:.2px}
+.mini.p{color:#fff;border:none}
+.mini.tier1{color:var(--accent);border-color:rgba(25,195,230,.3)}
+.mini.tier2{color:var(--purple);border-color:rgba(167,139,250,.3)}
+.mini.tier3{color:var(--rose);border-color:rgba(244,63,94,.3)}
+.mini.proj{color:var(--ink2);background:rgba(255,255,255,.04)}
+.tk .sla{margin-top:8px}
+.tk .sla .lbl{display:flex;justify-content:space-between;font-size:9px;color:var(--muted2);font-weight:600;margin-bottom:3px}
+.tk .sla .bar{height:3px;background:rgba(255,255,255,.06);border-radius:99px;overflow:hidden}
+.tk .sla .fill{height:100%;border-radius:99px}
+.tk .age{margin-top:6px;font-size:9.5px;color:var(--muted2)}
+.empty-col{padding:18px 10px;text-align:center;font-size:11px;color:var(--muted2)}
+
+/* ── side panels ── */
+.panel{background:var(--card);border:1px solid var(--line);border-radius:var(--rl);padding:14px;margin-bottom:14px}
+.panel h3{font-size:11px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+.asg{display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:12px}
+.asg:last-child{border-bottom:none}
+.asg .who{font-weight:700;flex-shrink:0}
+.asg .t{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+.feed{max-height:420px;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
+.ev{display:flex;gap:9px;padding:7px 2px;border-bottom:1px solid rgba(255,255,255,.03);font-size:11.5px;line-height:1.45}
+.ev:last-child{border-bottom:none}
+.ev .ic{width:22px;height:22px;border-radius:7px;display:grid;place-items:center;flex-shrink:0;font-size:11px}
+.ev .tx{color:var(--ink2);min-width:0}
+.ev .tx b{font-weight:700}
+.ev .when{display:block;font-size:9.5px;color:var(--muted2);margin-top:1px}
+.ev.created .ic{background:rgba(56,189,248,.12);color:var(--blue)}
+.ev.done .ic{background:rgba(34,197,94,.12);color:var(--green)}
+.ev.esc .ic{background:rgba(167,139,250,.12);color:var(--purple)}
+.ev.breach .ic{background:rgba(239,68,68,.12);color:var(--red)}
+.ev.cancel .ic{background:rgba(255,255,255,.05);color:var(--muted)}
+.none{font-size:11.5px;color:var(--muted2);padding:6px 0}
+
+/* ── drawer ── */
+.scrim{position:fixed;inset:0;background:rgba(3,6,10,.7);backdrop-filter:blur(3px);z-index:120;opacity:0;pointer-events:none;transition:.2s}
+.scrim.show{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(460px,96vw);background:#0A121D;border-left:1px solid var(--line);
+        z-index:130;transform:translateX(102%);transition:transform .25s cubic-bezier(.2,.7,.2,1);display:flex;flex-direction:column}
+.drawer.show{transform:none}
+.drawer .dh{display:flex;align-items:flex-start;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)}
+.drawer .dh .ttl{font-size:15px;font-weight:800;line-height:1.35;flex:1}
+.drawer .dh .x{width:32px;height:32px;border-radius:8px;background:rgba(255,255,255,.04);border:1px solid var(--line);color:var(--muted);cursor:pointer;font-size:15px}
+.drawer .dbody{flex:1;overflow-y:auto;padding:16px 18px}
+.fgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;margin-bottom:14px}
+.f{background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.05);border-radius:9px;padding:8px 10px}
+.f .k{font-size:9px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);margin-bottom:2px}
+.f .v{font-size:12.5px;font-weight:600;word-break:break-word}
+.f.wide{grid-column:1/-1}
+.drawer label{display:block;font-size:10px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);margin:12px 0 5px}
+.drawer textarea,.drawer select{width:100%;padding:9px 11px;background:var(--surface-2);border:1px solid var(--line);border-radius:9px;color:var(--ink);font-family:var(--font);font-size:12.5px;outline:none;resize:vertical}
+.drawer textarea:focus,.drawer select:focus{border-color:var(--accent)}
+.drawer .df{padding:14px 18px;border-top:1px solid var(--line);display:flex;gap:8px}
+.drawer .df .btn{flex:1;justify-content:center}
+.btn.esc-btn{color:var(--purple);border-color:rgba(167,139,250,.3)}
+.btn.esc-btn:hover{color:#c4b0ff;border-color:rgba(167,139,250,.6)}
+
+/* ── modal (new ticket) ── */
+.modal{position:fixed;inset:0;z-index:140;display:none;place-items:center;padding:16px}
+.modal.show{display:grid}
+.modal .mcard{width:min(520px,100%);max-height:92vh;overflow-y:auto;background:#0A121D;border:1px solid var(--line);border-radius:var(--rl);padding:20px}
+.modal h3{font-size:16px;font-weight:800;margin-bottom:14px}
+.modal .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.modal label{display:block;font-size:10px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);margin:10px 0 5px}
+.modal input,.modal select,.modal textarea{width:100%;padding:9px 11px;background:var(--surface-2);border:1px solid var(--line);border-radius:9px;color:var(--ink);font-family:var(--font);font-size:12.5px;outline:none}
+.modal input:focus,.modal select:focus,.modal textarea:focus{border-color:var(--accent)}
+.modal .pprev{margin-top:12px;font-size:11px;color:var(--muted)}
+.modal .pprev b{padding:2px 9px;border-radius:10px;color:#fff}
+.modal .row{display:flex;gap:8px;margin-top:16px}
+.modal .row .btn{flex:1;justify-content:center}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:24px;z-index:200;background:#0e1c2a;border:1px solid rgba(25,195,230,.35);
+       color:var(--ink);padding:10px 18px;border-radius:10px;font-size:12.5px;font-weight:600;opacity:0;transition:.25s;pointer-events:none}
+.toast.show{opacity:1}
+.toast.err{border-color:rgba(239,68,68,.5)}
+</style>
+</head>
+<body>
+
+<header class="hdr">
+  <div class="logo">AGENT<b>OS</b></div>
+  <span class="tag">ITIL 4 Service Desk</span>
+  <div class="right">
+    <span class="clock" id="clock"></span>
+    <button class="btn" id="refresh">↻ Refresh</button>
+    <button class="btn primary" id="new-btn">+ New ticket</button>
+  </div>
+</header>
+
+<main>
+  <!-- 1 · IT department -->
+  <h2 class="sect">IT Department <small>three-tier support model</small></h2>
+  <div class="tiers">
+    <div class="tier t1">
+      <div class="avatar">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2 3 7v10l9 5 9-5V7l-9-5z"/><path d="M12 8v8M8.5 10v4M15.5 10v4"/></svg>
+      </div>
+      <div class="who">
+        <div class="line-lbl">1st line</div>
+        <div class="name">DeepSeek V4 Pro</div>
+        <div class="role">Auto-triage &amp; routine fixes</div>
+      </div>
+      <div class="metrics">
+        <div class="cnt" id="t1-count">–</div>
+        <div class="cnt-lbl">open tickets</div>
+        <div style="margin-top:6px" id="t1-status"><span class="chip idle"><span class="dot"></span>…</span></div>
+      </div>
+    </div>
+    <div class="tier t2">
+      <div class="avatar">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2q1.5 6.5 10 10-8.5 3.5-10 10-1.5-6.5-10-10 8.5-3.5 10-10z"/></svg>
+      </div>
+      <div class="who">
+        <div class="line-lbl">2nd line</div>
+        <div class="name">Fable <span style="font-weight:500;color:var(--muted);font-size:11px">Claude</span></div>
+        <div class="role">Complex issues &amp; upgrades</div>
+      </div>
+      <div class="metrics">
+        <div class="cnt" id="t2-count">–</div>
+        <div class="cnt-lbl">open tickets</div>
+        <div style="margin-top:6px" id="t2-status"><span class="chip idle"><span class="dot"></span>…</span></div>
+      </div>
+    </div>
+    <div class="tier t3">
+      <div class="avatar">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg>
+      </div>
+      <div class="who">
+        <div class="line-lbl">3rd line</div>
+        <div class="name">Griff <span class="chip hermes">HERMES</span></div>
+        <div class="role">Human escalation</div>
+      </div>
+      <div class="metrics">
+        <div class="cnt" id="t3-count">–</div>
+        <div class="cnt-lbl">open tickets</div>
+        <div style="margin-top:6px" id="t3-status"><span class="chip idle"><span class="dot"></span>…</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2 · server overview -->
+  <h2 class="sect">Server Overview <small id="probe-note">probing…</small></h2>
+  <div class="servers" id="servers"></div>
+
+  <!-- 3+4+5 · board + side panels -->
+  <h2 class="sect">Ticket Board</h2>
+  <div class="filters">
+    <input id="f-q" placeholder="Search tickets…">
+    <select id="f-tier"><option value="">All tiers</option><option value="1st_line">1st line</option><option value="2nd_line">2nd line</option><option value="3rd_line">3rd line</option></select>
+    <select id="f-proj"><option value="">All projects</option></select>
+    <select id="f-pri"><option value="">All priorities</option><option>P1</option><option>P2</option><option>P3</option><option>P4</option><option>P5</option></select>
+    <select id="f-type"><option value="">All types</option><option value="incident">Incident</option><option value="service_request">Service request</option><option value="problem">Problem</option><option value="change">Change</option></select>
+    <span class="n" id="f-n"></span>
+  </div>
+
+  <div class="deck">
+    <div class="board" id="board"></div>
+    <aside>
+      <div class="panel">
+        <h3>Active Assignments</h3>
+        <div id="assignments"><div class="none">Loading…</div></div>
+      </div>
+      <div class="panel">
+        <h3>Recent Activity</h3>
+        <div class="feed" id="feed"><div class="none">Loading…</div></div>
+      </div>
+    </aside>
+  </div>
+</main>
+
+<!-- drawer -->
+<div class="scrim" id="scrim"></div>
+<div class="drawer" id="drawer">
+  <div class="dh"><div class="ttl" id="d-title"></div><button class="x" id="d-close">✕</button></div>
+  <div class="dbody">
+    <div class="fgrid" id="d-fields"></div>
+    <label for="d-status">Status</label>
+    <select id="d-status">
+      <option value="pending_dispatch">Pending dispatch</option>
+      <option value="in_progress">In progress</option>
+      <option value="on_hold">On hold</option>
+      <option value="completed">Completed</option>
+      <option value="cancelled">Cancelled</option>
+    </select>
+    <label for="d-notes">Resolution notes</label>
+    <textarea id="d-notes" rows="4" placeholder="What was done, root cause, closure detail…"></textarea>
+    <label for="d-closure">Closure code</label>
+    <select id="d-closure">
+      <option value="">—</option><option value="fixed">Fixed</option><option value="workaround">Workaround</option>
+      <option value="no_fault">No fault found</option><option value="duplicate">Duplicate</option><option value="wont_fix">Won't fix</option>
+    </select>
+  </div>
+  <div class="df">
+    <button class="btn esc-btn" id="d-escalate">⤴ Escalate</button>
+    <button class="btn primary" id="d-save">Save</button>
+  </div>
+</div>
+
+<!-- new ticket -->
+<div class="modal" id="modal">
+  <div class="mcard">
+    <h3>New ticket</h3>
+    <label for="m-title">Title</label><input id="m-title" placeholder="Short summary">
+    <label for="m-desc">Description</label><textarea id="m-desc" rows="3"></textarea>
+    <div class="grid2">
+      <div><label for="m-proj">Project</label>
+        <select id="m-proj"><option value="agent-os">AGENT OS</option><option value="kssports">KS Sports Coaching</option><option value="maxgleam">Max Gleam</option><option value="magichairstyler">Magic Hair Styler</option><option value="dafc">DAFC Shop</option><option value="vps">VPS system</option><option value="general">General</option></select></div>
+      <div><label for="m-type">Type</label>
+        <select id="m-type"><option value="incident">Incident</option><option value="service_request">Service request</option><option value="problem">Problem</option><option value="change">Change</option></select></div>
+      <div><label for="m-impact">Impact</label>
+        <select id="m-impact"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option><option value="critical">Critical</option></select></div>
+      <div><label for="m-urgency">Urgency</label>
+        <select id="m-urgency"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option><option value="critical">Critical</option></select></div>
+    </div>
+    <div class="pprev">ITIL priority: <b id="m-pprev">P3</b></div>
+    <div class="row">
+      <button class="btn" id="m-cancel">Cancel</button>
+      <button class="btn primary" id="m-create">Create</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+const API='/api/ops_tickets';
+const $=(id)=>document.getElementById(id);
+const esc=(s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+
+/* ── ITIL priority matrix: rank critical=1 … low=4; P=ceil((i+u)/2).
+     Matches the seeded example (impact high + urgency critical = P2).
+     P5 = impact/urgency missing. ── */
+const RANK={critical:1,high:2,medium:3,low:4};
+function prio(t){
+  const i=RANK[t.impact],u=RANK[t.urgency];
+  if(!i||!u)return 5;
+  return Math.ceil((i+u)/2);
+}
+const PCOL={1:'var(--p1)',2:'var(--p2)',3:'var(--p3)',4:'var(--p4)',5:'var(--p5)'};
+
+const COLS=[
+  {id:'pending_dispatch',label:'Pending dispatch',dot:'var(--amber)'},
+  {id:'in_progress',label:'In progress',dot:'var(--accent)'},
+  {id:'on_hold',label:'On hold',dot:'var(--purple)'},
+  {id:'completed',label:'Completed',dot:'var(--green)'},
+  {id:'cancelled',label:'Cancelled',dot:'var(--muted2)'},
+];
+const OPEN=new Set(['pending_dispatch','in_progress','on_hold']);
+const TIERS={'1st_line':{n:'DeepSeek V4 Pro',cls:'tier1',short:'1st'},'2nd_line':{n:'Fable',cls:'tier2',short:'2nd'},'3rd_line':{n:'Griff',cls:'tier3',short:'3rd'}};
+const PROJ_LABEL={'agent-os':'AGENT OS',kssports:'KS Sports',maxgleam:'Max Gleam',magichairstyler:'Magic Hair Styler',dafc:'DAFC Shop',vps:'VPS',general:'General'};
+
+let tickets=[],current=null;
+
+function toast(msg,err){const t=$('toast');t.textContent=msg;t.className='toast show'+(err?' err':'');setTimeout(()=>t.className='toast',2800)}
+function rel(iso){
+  if(!iso)return'';
+  const s=(Date.now()-new Date(iso).getTime())/1000;
+  if(s<60)return'just now'; if(s<3600)return Math.floor(s/60)+'m ago';
+  if(s<86400)return Math.floor(s/3600)+'h ago'; return Math.floor(s/86400)+'d ago';
+}
+
+/* ── load + render ─────────────────────────────────────────── */
+async function load(){
+  try{
+    const r=await fetch(API+'?order=created_at.desc&limit=500');
+    if(!r.ok)throw new Error('API '+r.status);
+    tickets=await r.json();
+  }catch(e){toast('Could not load tickets: '+e.message,true);return}
+  renderAll();
+}
+function renderAll(){renderTiers();renderBoard();renderAssignments();renderFeed();renderProjOptions()}
+
+function renderTiers(){
+  for(const[tier,ids]of[['1st_line',['t1-count','t1-status']],['2nd_line',['t2-count','t2-status']],['3rd_line',['t3-count','t3-status']]]){
+    const mine=tickets.filter(t=>t.assignment_tier===tier&&OPEN.has(t.status));
+    $(ids[0]).textContent=mine.length;
+    const active=mine.some(t=>t.status==='in_progress');
+    $(ids[1]).innerHTML=active
+      ?'<span class="chip act"><span class="dot"></span>Active</span>'
+      :mine.length?'<span class="chip on"><span class="dot"></span>Online</span>'
+      :'<span class="chip idle"><span class="dot"></span>Idle</span>';
+  }
+}
+
+function filtered(){
+  const q=$('f-q').value.trim().toLowerCase(),tier=$('f-tier').value,proj=$('f-proj').value,
+        pri=$('f-pri').value,type=$('f-type').value;
+  return tickets.filter(t=>
+    (!q||((t.title||'')+' '+(t.description||'')+' '+(t.project||'')).toLowerCase().includes(q))
+    &&(!tier||t.assignment_tier===tier)
+    &&(!proj||t.project===proj)
+    &&(!pri||('P'+prio(t))===pri)
+    &&(!type||t.ticket_type===type));
+}
+
+function slaHtml(t){
+  if(!t.sla_target||t.status==='completed'||t.status==='cancelled')return'';
+  const start=new Date(t.created_at).getTime(),end=new Date(t.sla_target).getTime(),now=Date.now();
+  if(!(end>start))return'';
+  const pct=Math.min(100,Math.round((now-start)/(end-start)*100));
+  const left=end-now;
+  const lbl=left<0?'SLA BREACHED':(left<3600e3?Math.max(1,Math.round(left/6e4))+'m left':Math.round(left/36e5)+'h left');
+  const col=left<0?'var(--red)':pct>75?'var(--amber)':'var(--accent)';
+  return`<div class="sla"><div class="lbl"><span>SLA</span><span style="color:${left<0?'var(--red)':'inherit'}">${lbl}</span></div>
+    <div class="bar"><div class="fill" style="width:${pct}%;background:${col}"></div></div></div>`;
+}
+
+function renderBoard(){
+  const f=filtered();
+  $('f-n').textContent=f.length+' of '+tickets.length+' tickets';
+  let h='';
+  for(const c of COLS){
+    const items=f.filter(t=>t.status===c.id);
+    h+=`<div class="col"><div class="head"><span class="cdot" style="background:${c.dot}"></span>${c.label}<span class="cc">${items.length}</span></div><div class="body">`;
+    if(!items.length)h+='<div class="empty-col">Nothing here</div>';
+    for(const t of items){
+      const p=prio(t),tr=TIERS[t.assignment_tier];
+      h+=`<div class="tk" data-id="${t.id}">
+        <span class="pbar" style="background:${PCOL[p]}"></span>
+        <div class="ttl">${esc(t.title)}</div>
+        <div class="meta">
+          <span class="mini p" style="background:${PCOL[p]}">P${p}</span>
+          ${tr?`<span class="mini ${tr.cls}">${tr.short} · ${esc(tr.n)}</span>`:''}
+          <span class="mini proj">${esc(PROJ_LABEL[t.project]||t.project||'—')}</span>
+          <span class="mini">${esc((t.ticket_type||'').replace('_',' '))}</span>
+          ${t.escalation_count>0?`<span class="mini tier2">⤴ ×${t.escalation_count}</span>`:''}
+        </div>
+        ${slaHtml(t)}
+        <div class="age">#${t.id} · ${rel(t.created_at)}</div>
+      </div>`;
+    }
+    h+='</div></div>';
+  }
+  $('board').innerHTML=h;
+  document.querySelectorAll('.tk').forEach(el=>el.addEventListener('click',()=>openDrawer(+el.dataset.id)));
+}
+
+function renderProjOptions(){
+  const sel=$('f-proj'),cur=sel.value;
+  const projs=[...new Set(tickets.map(t=>t.project).filter(Boolean))].sort();
+  sel.innerHTML='<option value="">All projects</option>'+projs.map(p=>`<option value="${esc(p)}"${p===cur?' selected':''}>${esc(PROJ_LABEL[p]||p)}</option>`).join('');
+}
+
+function renderAssignments(){
+  const act=tickets.filter(t=>t.status==='in_progress');
+  $('assignments').innerHTML=act.length?act.map(t=>{
+    const tr=TIERS[t.assignment_tier]||{n:'Unassigned',cls:''};
+    return`<div class="asg"><span class="mini ${tr.cls}">${esc(tr.n)}</span><span class="t">#${t.id} ${esc(t.title)}</span></div>`;
+  }).join(''):'<div class="none">No tickets being worked right now.</div>';
+}
+
+/* Activity is derived from real ticket data — creations, resolutions,
+   escalations, SLA breaches, cancellations. */
+function renderFeed(){
+  const ev=[];
+  const now=Date.now();
+  for(const t of tickets){
+    ev.push({at:t.created_at,cls:'created',ic:'+',tx:`<b>#${t.id}</b> ${esc(t.title)} opened → ${(TIERS[t.assignment_tier]||{}).n||'unassigned'}`});
+    if(t.escalation_count>0)
+      ev.push({at:t.updated_at,cls:'esc',ic:'⤴',tx:`<b>#${t.id}</b> escalated ×${t.escalation_count} → ${(TIERS[t.assignment_tier]||{}).n||'?'}`});
+    if(t.status==='completed')
+      ev.push({at:t.resolved_at||t.updated_at,cls:'done',ic:'✓',tx:`<b>#${t.id}</b> resolved${t.closure_code?' · '+esc(t.closure_code):''}${t.resolution_notes?' — '+esc(t.resolution_notes.slice(0,70)):''}`});
+    if(t.status==='cancelled')
+      ev.push({at:t.updated_at,cls:'cancel',ic:'–',tx:`<b>#${t.id}</b> cancelled`});
+    if(t.sla_target&&OPEN.has(t.status)&&new Date(t.sla_target).getTime()<now)
+      ev.push({at:t.sla_target,cls:'breach',ic:'!',tx:`<b>#${t.id}</b> SLA breached — ${esc(t.title)}`});
+  }
+  ev.sort((a,b)=>new Date(b.at)-new Date(a.at));
+  $('feed').innerHTML=ev.length?ev.slice(0,40).map(e=>
+    `<div class="ev ${e.cls}"><span class="ic">${e.ic}</span><span class="tx">${e.tx}<span class="when">${rel(e.at)}</span></span></div>`
+  ).join(''):'<div class="none">No activity yet.</div>';
+}
+
+/* ── drawer ────────────────────────────────────────────────── */
+function openDrawer(id){
+  const t=tickets.find(x=>x.id===id);if(!t)return;
+  current=t;
+  $('d-title').textContent='#'+t.id+' · '+t.title;
+  const p=prio(t),tr=TIERS[t.assignment_tier];
+  const F=(k,v,wide)=>`<div class="f${wide?' wide':''}"><div class="k">${k}</div><div class="v">${v||'—'}</div></div>`;
+  $('d-fields').innerHTML=
+    F('Priority',`<span class="mini p" style="background:${PCOL[p]}">P${p}</span> impact ${esc(t.impact)||'—'} × urgency ${esc(t.urgency)||'—'}`)
+    +F('Assigned',tr?`${tr.short} line · ${tr.n}`:'—')
+    +F('Type',esc((t.ticket_type||'').replace('_',' ')))
+    +F('Project',esc(PROJ_LABEL[t.project]||t.project))
+    +F('Created',new Date(t.created_at).toLocaleString('en-GB'))
+    +F('Updated',rel(t.updated_at))
+    +F('SLA target',t.sla_target?new Date(t.sla_target).toLocaleString('en-GB'):'—')
+    +F('Escalations',t.escalation_count||'0')
+    +F('Contact',esc(t.contact_name)+(t.contact_phone?' · '+esc(t.contact_phone):''))
+    +F('Location',esc(t.location))
+    +(t.description?F('Description',esc(t.description),1):'')
+    +(t.resolved_at?F('Resolved',new Date(t.resolved_at).toLocaleString('en-GB')):'');
+  $('d-status').value=t.status;
+  $('d-notes').value=t.resolution_notes||'';
+  $('d-closure').value=t.closure_code||'';
+  const nextTier=t.assignment_tier==='1st_line'?'2nd_line':t.assignment_tier==='2nd_line'?'3rd_line':null;
+  $('d-escalate').disabled=!nextTier;
+  $('d-escalate').textContent=nextTier?('⤴ Escalate to '+TIERS[nextTier].n):'At 3rd line (Griff)';
+  $('scrim').classList.add('show');$('drawer').classList.add('show');
+}
+function closeDrawer(){$('scrim').classList.remove('show');$('drawer').classList.remove('show');current=null}
+$('scrim').addEventListener('click',closeDrawer);
+$('d-close').addEventListener('click',closeDrawer);
+addEventListener('keydown',e=>{if(e.key==='Escape'){closeDrawer();$('modal').classList.remove('show')}});
+
+async function patch(id,body){
+  const r=await fetch(`${API}?id=eq.${id}`,{method:'PATCH',
+    headers:{'Content-Type':'application/json','Prefer':'return=representation'},
+    body:JSON.stringify({...body,updated_at:new Date().toISOString()})});
+  if(!r.ok)throw new Error('save failed ('+r.status+')');
+  return(await r.json())[0];
+}
+$('d-save').addEventListener('click',async()=>{
+  if(!current)return;
+  const status=$('d-status').value;
+  const body={status,resolution_notes:$('d-notes').value.trim(),closure_code:$('d-closure').value};
+  if(status==='completed'&&!current.resolved_at)body.resolved_at=new Date().toISOString();
+  try{await patch(current.id,body);toast('Ticket #'+current.id+' saved');closeDrawer();load()}
+  catch(e){toast(e.message,true)}
+});
+$('d-escalate').addEventListener('click',async()=>{
+  if(!current)return;
+  const next=current.assignment_tier==='1st_line'?'2nd_line':'3rd_line';
+  try{
+    await patch(current.id,{assignment_tier:next,escalation_count:(current.escalation_count||0)+1,status:'pending_dispatch'});
+    toast('Escalated to '+TIERS[next].n);closeDrawer();load();
+  }catch(e){toast(e.message,true)}
+});
+
+/* ── new ticket ────────────────────────────────────────────── */
+function pprev(){
+  const p=prio({impact:$('m-impact').value,urgency:$('m-urgency').value});
+  const b=$('m-pprev');b.textContent='P'+p;b.style.background=PCOL[p].replace('var(--p','var(--p');b.style.setProperty('background',getComputedStyle(document.documentElement).getPropertyValue('--p'+p));
+}
+$('m-impact').addEventListener('change',pprev);$('m-urgency').addEventListener('change',pprev);
+$('new-btn').addEventListener('click',()=>{$('modal').classList.add('show');pprev();$('m-title').focus()});
+$('m-cancel').addEventListener('click',()=>$('modal').classList.remove('show'));
+$('m-create').addEventListener('click',async()=>{
+  const title=$('m-title').value.trim();
+  if(!title){toast('Title required',true);return}
+  const body={title,description:$('m-desc').value.trim(),project:$('m-proj').value,
+    ticket_type:$('m-type').value,impact:$('m-impact').value,urgency:$('m-urgency').value,
+    status:'pending_dispatch',assignment_tier:'1st_line',priority:$('m-urgency').value,
+    location:PROJ_LABEL[$('m-proj').value]||$('m-proj').value,contact_name:'Ops Board',business:'general'};
+  try{
+    const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json','Prefer':'return=representation'},body:JSON.stringify(body)});
+    if(!r.ok)throw new Error('create failed ('+r.status+')');
+    $('modal').classList.remove('show');$('m-title').value='';$('m-desc').value='';
+    toast('Ticket created → 1st line (DeepSeek)');load();
+  }catch(e){toast(e.message,true)}
+});
+
+/* ── server probes ─────────────────────────────────────────────
+   Same-origin: real /healthz (status + latency). Cross-origin sites
+   have no CORS headers, so we use opaque no-cors probes: a resolved
+   fetch proves DNS + TLS + an HTTP response (SSL ok, reachable) and
+   times it; a rejection means unreachable. No invented uptime %,
+   no fake disk/memory numbers — that needs a host agent. ── */
+const SITES=[
+  {id:'kssports',name:'KS Sports Coaching',url:'https://kssportscoaching.co.uk/',mode:'opaque'},
+  {id:'agent-os',name:'AGENT OS',url:'/healthz',mode:'json'},
+  {id:'maxgleam',name:'Max Gleam',url:'https://maxgleam.com/',mode:'opaque'},
+  {id:'magichairstyler',name:'Magic Hair Styler',url:'https://magichairstyler.com/',mode:'opaque'},
+  {id:'dafc',name:'DAFC Shop',url:'https://darleyabbeyfc.com/',mode:'opaque'},
+  {id:'vps',name:'VPS System',mode:'agg'},
+];
+const probeState={};
+function srvCard(s){
+  const st=probeState[s.id];
+  let dot='wait',info='Probing…';
+  if(st){
+    if(s.mode==='agg'){
+      const others=SITES.filter(x=>x.mode!=='agg');
+      const up=others.filter(x=>probeState[x.id]&&probeState[x.id].up).length;
+      dot=up===others.length?'up':'down';
+      info=`<b>${up}/${others.length}</b> services reachable<br>disk · memory · load: <span style="color:var(--muted2)">needs host agent</span><br>checked <b>${st.when}</b>`;
+    }else if(st.up){
+      dot='up';
+      info=`<span class="ok">● Reachable</span> · SSL ok · <b>${st.ms}ms</b><br>${st.extra||''}checked <b>${st.when}</b>`;
+    }else{
+      dot='down';
+      info=`<span class="bad">● Unreachable</span><br>${esc(st.err||'network error')}<br>checked <b>${st.when}</b>`;
+    }
+  }
+  return`<div class="srv"><div class="top"><span class="st ${dot}"></span><span class="nm">${s.name}</span></div><div class="info">${info}</div></div>`;
+}
+function renderServers(){$('servers').innerHTML=SITES.map(srvCard).join('')}
+async function probeAll(){
+  $('probe-note').textContent='probing…';
+  await Promise.all(SITES.filter(s=>s.mode!=='agg').map(async(s)=>{
+    const t0=performance.now();
+    try{
+      if(s.mode==='json'){
+        const r=await fetch(s.url,{cache:'no-store'});
+        const ok=r.ok;let extra='';
+        try{const j=await r.json();extra=`healthz <b>${r.status}</b>${j.ok?' · ok':''}<br>`}catch(_){}
+        probeState[s.id]={up:ok,ms:Math.round(performance.now()-t0),when:new Date().toLocaleTimeString('en-GB'),extra};
+      }else{
+        await fetch(s.url,{mode:'no-cors',cache:'no-store'});
+        probeState[s.id]={up:true,ms:Math.round(performance.now()-t0),when:new Date().toLocaleTimeString('en-GB')};
+      }
+    }catch(e){
+      probeState[s.id]={up:false,err:String(e.message||e).slice(0,60),when:new Date().toLocaleTimeString('en-GB')};
+    }
+    renderServers();
+  }));
+  probeState.vps={when:new Date().toLocaleTimeString('en-GB')};
+  renderServers();
+  $('probe-note').textContent='browser probes · reachability + TLS + latency · auto every 60s';
+}
+
+/* ── wiring ── */
+['f-q','f-tier','f-proj','f-pri','f-type'].forEach(id=>$(id).addEventListener('input',renderBoard));
+$('refresh').addEventListener('click',()=>{load();probeAll()});
+setInterval(()=>$('clock').textContent=new Date().toLocaleString('en-GB',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'}),1000);
+renderServers();load();probeAll();
+setInterval(load,60000);setInterval(probeAll,60000);
+</script>
+</body>
+</html>
