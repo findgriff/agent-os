@@ -147,7 +147,17 @@ export default function WarRoom() {
     }
   };
 
-  const closeMention = () => setMention({ open: false, query: '', start: 0 });
+  const closeMention = () => setMention({ open: false, start: 0, query: '' });
+
+  const handleDeleteRoom = async (id: number, name: string) => {
+    if (!confirm(`Delete "${name}" and all its messages?`)) return;
+    try {
+      await api.deleteChatRoom(id);
+      setRooms(prev => prev.filter(r => r.id !== id));
+      if (activeRoomId === id) setActiveRoomId(null);
+      toast('Room deleted', 'ok');
+    } catch { toast('Could not delete room', 'danger'); }
+  };
 
   const insertMention = (a?: Agent) => {
     if (!a) return;
@@ -231,7 +241,7 @@ export default function WarRoom() {
     if (!activeRoom || summarizing) return;
     setSummarizing(true);
     try {
-      const { summary: s } = await api.summarizeRoom(activeRoom.id);
+      const { summary: s } = await api.chatSummarize(activeRoom.id);
       setSummary(s);
       setSummaryOpen(true);
     } catch (e: any) {
@@ -273,7 +283,7 @@ export default function WarRoom() {
               return (
                 <button key={room.id} onClick={() => setActiveRoomId(room.id)}
                   style={{ animationDelay: `${i * 40}ms` }}
-                  className={`w-full animate-fadeInUp rounded-xl border px-3 py-2.5 text-left transition-all active:scale-[0.99]
+                  className={`group w-full animate-fadeInUp rounded-xl border px-3 py-2.5 text-left transition-all active:scale-[0.99]
                     ${active
                       ? 'border-[#EF4444]/40 bg-[#EF4444]/10 shadow-[0_0_20px_-6px_rgba(239,68,68,0.5)]'
                       : 'border-white/8 hover:border-white/15 hover:bg-white/5'}`}>
@@ -282,6 +292,11 @@ export default function WarRoom() {
                     {room.message_count > 0 && (
                       <Badge tone={active ? 'danger' : 'neutral'}>{room.message_count}</Badge>
                     )}
+                    <button onClick={(e) => { e.stopPropagation(); handleDeleteRoom(room.id, room.name); }}
+                      className="ml-1 hidden h-5 w-5 place-items-center rounded text-[11px] text-muted/40 opacity-0 transition-all hover:bg-rose/20 hover:text-rose group-hover:opacity-100 group-hover:grid"
+                      title="Delete room">
+                      ×
+                    </button>
                   </div>
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <div className="flex items-center">
@@ -381,6 +396,30 @@ export default function WarRoom() {
                     <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted/70">
                       Mention an agent
                     </div>
+                    <button key="all" type="button" tabIndex={-1}
+                      onMouseDown={e => {
+                        e.preventDefault();
+                        const el = composerRef.current;
+                        const caret = el?.selectionStart ?? input.length;
+                        const allMentions = agents.map(a => a.real_name || a.name || a.slug).join(' @');
+                        const before = input.slice(0, mention.start);
+                        const token = `@${allMentions} `;
+                        const next = before + token + input.slice(caret);
+                        setInput(next);
+                        closeMention();
+                        requestAnimationFrame(() => {
+                          const pos = before.length + token.length;
+                          el?.focus();
+                          el?.setSelectionRange(pos, pos);
+                        });
+                      }}
+                      className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-white/10 ${mentionIdx === -1 ? 'bg-white/10' : ''}`}>
+                      <div className="grid h-6 w-6 place-items-center rounded-lg bg-accent/20 text-accent text-[10px] font-bold">+</div>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm text-ink">@all — mention every agent</div>
+                        <div className="truncate text-[11px] text-muted">{agents.length} agents</div>
+                      </div>
+                    </button>
                     {mentionMatches.map((a, i) => (
                       <button key={a.id} type="button"
                         onMouseDown={e => { e.preventDefault(); insertMention(a); }}

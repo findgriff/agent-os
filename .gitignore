@@ -5,3 +5,7 @@ __pycache__/
 venv/
 .env
 *.safetensors
+
+# local sqlite artifacts and pre-edit backups
+*.db
+*.bak-*

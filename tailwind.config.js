@@ -32,6 +32,35 @@ export default {
         scanner: { '0%': { left: '-18%' }, '50%': { left: '100%' }, '100%': { left: '-18%' } },
         shimmer: { '0%': { backgroundPosition: '-200% 0' }, '100%': { backgroundPosition: '200% 0' } },
         ticker: { from: { transform: 'translateX(0)' }, to: { transform: 'translateX(-50%)' } },
+        orbit: {
+          from: { transform: 'rotate(0deg) translateX(40px) rotate(0deg)' },
+          to: { transform: 'rotate(360deg) translateX(40px) rotate(-360deg)' },
+        },
+        growBar: { from: { transform: 'scaleX(0)' }, to: { transform: 'scaleX(1)' } },
+        springUp: {
+          from: { opacity: '0', transform: 'translateY(32px) scale(0.98)' },
+          to: { opacity: '1', transform: 'translateY(0) scale(1)' },
+        },
+        breathe: {
+          '0%,100%': { boxShadow: '0 0 0 1px rgba(25,195,230,0.08), 0 0 24px -14px rgba(25,195,230,0.2)' },
+          '50%': { boxShadow: '0 0 0 1px rgba(25,195,230,0.22), 0 0 32px -8px rgba(25,195,230,0.4)' },
+        },
+        scaleIn: {
+          from: { opacity: '0', transform: 'scale(0.96) translateY(-4px)' },
+          to: { opacity: '1', transform: 'scale(1) translateY(0)' },
+        },
+        textShimmer: {
+          from: { backgroundPosition: '0% 50%' },
+          to: { backgroundPosition: '200% 50%' },
+        },
+        reveal: {
+          from: { opacity: '0', transform: 'scale(0.97)', filter: 'blur(12px)' },
+          to: { opacity: '1', transform: 'scale(1)', filter: 'blur(0)' },
+        },
+        pip: {
+          from: { opacity: '0', transform: 'translateY(-50%) scaleY(0.2)' },
+          to: { opacity: '1', transform: 'translateY(-50%) scaleY(1)' },
+        },
       },
       animation: {
         fadeInUp: 'fadeInUp 0.5s ease-out both',
@@ -43,6 +72,14 @@ export default {
         scanner: 'scanner 6s ease-in-out infinite',
         shimmer: 'shimmer 1.8s linear infinite',
         ticker: 'ticker 40s linear infinite',
+        orbit: 'orbit 2.6s linear infinite',
+        growBar: 'growBar 0.7s cubic-bezier(0.16, 1, 0.3, 1) both',
+        springUp: 'springUp 0.45s cubic-bezier(0.16, 1, 0.3, 1) both',
+        breathe: 'breathe 4s ease-in-out infinite',
+        scaleIn: 'scaleIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) both',
+        textShimmer: 'textShimmer 7s linear infinite',
+        reveal: 'reveal 0.65s cubic-bezier(0.16, 1, 0.3, 1) both',
+        pip: 'pip 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both',
       },
     },
   },

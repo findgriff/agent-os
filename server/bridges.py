@@ -19,7 +19,7 @@ from server import inference
 HERMES_DB = os.path.expanduser("~/.hermes/state.db")
 VAULT_DIR = os.path.expanduser("~/.superbrain/vault")
 
-PLATFORMS = ("hermes", "chatgpt", "fal", "claude_sdk", "kimi", "omi")
+PLATFORMS = ("hermes", "chatgpt", "fal", "claude_sdk", "kimi", "omi", "gemini")
 
 PLATFORM_META = {
     "hermes": {"label": "Hermes", "kind": "memory",
@@ -34,10 +34,12 @@ PLATFORM_META = {
              "blurb": "Moonshot models for agent runs"},
     "omi": {"label": "Omi", "kind": "wearable",
             "blurb": "Omi wearable conversations → vault memory (webhook)"},
+    "gemini": {"label": "Gemini", "kind": "inference",
+               "blurb": "Google Gemini models — 1M context, multi-modal, free tier"},
 }
 
 # Platforms that expose a two-way chat surface inside AGENT OS.
-CHATTABLE = ("hermes", "chatgpt", "fal", "claude_sdk", "kimi", "omi")
+CHATTABLE = ("hermes", "chatgpt", "fal", "claude_sdk", "kimi", "omi", "gemini")
 
 
 def _http_json(url, headers, timeout=15):
@@ -51,6 +53,7 @@ def test_connection(platform: str, config: dict) -> dict:
     fn = {
         "hermes": _test_hermes, "chatgpt": _test_chatgpt, "fal": _test_fal,
         "claude_sdk": _test_claude, "kimi": _test_kimi, "omi": _test_omi,
+        "gemini": _test_gemini,
     }.get(platform)
     if not fn:
         return {"status": "error", "detail": f"unknown platform '{platform}'"}
@@ -207,6 +210,61 @@ def _test_omi(config) -> dict:
             "webhook": "/api/omi/webhook"}
 
 
+# ── Gemini (Google) ──────────────────────────────────────────────────────
+
+def _gemini_key(config) -> str:
+    return (config.get("api_key") or os.environ.get("GEMINI_API_KEY", "")).strip()
+
+
+def _test_gemini(config) -> dict:
+    key = _gemini_key(config)
+    if not key:
+        return {"status": "disconnected", "detail": "no Gemini API key"}
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read())
+        models = [m["name"] for m in data.get("models", []) if "gemini" in m["name"]]
+        return {"status": "connected", "detail": f"{len(models)} models available",
+                "models": models[:5]}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
+
+def gemini_run(config, prompt: str, system: str = "") -> str | None:
+    """Run a prompt through Gemini API. Returns response text or None."""
+    key = _gemini_key(config)
+    if not key:
+        return None
+    model = config.get("model", "gemini-2.0-flash")
+    parts = []
+    if system:
+        parts.append({"text": system + "\n\n" + prompt})
+    else:
+        parts.append({"text": prompt})
+    body = json.dumps({
+        "contents": [{"parts": parts}],
+        "generationConfig": {
+            "maxOutputTokens": config.get("max_tokens", 1024),
+            "temperature": config.get("temperature", 0.7),
+        },
+    }).encode()
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
+    req = urllib.request.Request(url, data=body, method="POST",
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=45) as r:
+            data = json.loads(r.read())
+        candidates = data.get("candidates", [])
+        if not candidates:
+            return None
+        parts = candidates[0].get("content", {}).get("parts", [])
+        return "".join(p.get("text", "") for p in parts) or None
+    except Exception as e:
+        return None
+
+
 # ── Chat surface (POST /api/bridges/:id/chat) ───────────────────────────
 
 def hermes_chat(message: str = "", agent_id: int | None = None) -> str:
@@ -272,6 +330,11 @@ def bridge_chat(platform: str, config: dict, message: str) -> dict:
         if platform == "omi":
             return {"ok": True, "reply": "Omi is a push-only wearable bridge. Conversations "
                     "captured on your Omi arrive automatically and become vault memories."}
+        if platform == "gemini":
+            out = gemini_run(config, message,
+                             system="You are Gemini, answering inside the AGENT OS command centre.")
+            return ({"ok": True, "reply": out} if out else
+                    {"ok": False, "reply": "Gemini is unavailable — check the API key on this connection."})
     except Exception as e:  # defensive — bridges never raise to the handler
         return {"ok": False, "reply": f"Bridge error: {e}"}
     return {"ok": False, "reply": f"'{platform}' has no chat surface."}

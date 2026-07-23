@@ -16,13 +16,46 @@ export const PLATFORM_STYLE: Record<string, PlatformStyle> = {
   claude_sdk: { icon: 'auto_awesome',  accent: '#A78BFA' }, // violet
   kimi:       { icon: 'rocket_launch', accent: '#19C3E6' }, // accent
   omi:        { icon: 'graphic_eq',    accent: '#F472B6' }, // pink — wearable
+  gemini:     { icon: 'smart_toy',     accent: '#4285F4' }, // google blue
 };
 export const styleFor = (platform: string): PlatformStyle =>
   PLATFORM_STYLE[platform] || { icon: 'extension', accent: '#7B8DA8' };
 
 // Platforms that need an API key (hermes + omi need nothing).
 const NEEDS_KEY: Record<string, boolean> = {
-  hermes: false, chatgpt: true, fal: true, claude_sdk: true, kimi: true, omi: false,
+  hermes: false, chatgpt: true, fal: true, claude_sdk: true, kimi: true, omi: false, gemini: true,
+};
+
+// Platform-specific model presets for the dropdown
+const PLATFORM_MODELS: Record<string, { label: string; value: string }[]> = {
+  gemini: [
+    { label: 'Gemini 2.0 Flash (fast, default)', value: 'gemini-2.0-flash' },
+    { label: 'Gemini 2.5 Pro (deep reasoning)', value: 'gemini-2.5-pro' },
+    { label: 'Gemini 2.0 Flash Lite (cheapest)', value: 'gemini-2.0-flash-lite' },
+  ],
+  chatgpt: [
+    { label: 'GPT-4o (balanced)', value: 'gpt-4o' },
+    { label: 'GPT-4o Mini (fast, cheap)', value: 'gpt-4o-mini' },
+    { label: 'GPT-4.1 (reasoning)', value: 'gpt-4.1' },
+    { label: 'GPT-4.1 Mini', value: 'gpt-4.1-mini' },
+    { label: 'GPT-4.1 Nano (cheapest)', value: 'gpt-4.1-nano' },
+    { label: 'o3 (heavy reasoning)', value: 'o3' },
+    { label: 'o4 Mini (reasoning)', value: 'o4-mini' },
+  ],
+  claude_sdk: [
+    { label: 'Claude Sonnet 4 (balanced)', value: 'claude-sonnet-4' },
+    { label: 'Claude Opus 4 (max quality)', value: 'claude-opus-4' },
+    { label: 'Claude Haiku 3.5 (fast)', value: 'claude-3-5-haiku' },
+  ],
+  fal: [
+    { label: 'FLUX.1 Dev (quality)', value: 'fal-ai/flux/dev' },
+    { label: 'FLUX.1 Schnell (fast)', value: 'fal-ai/flux/schnell' },
+    { label: 'FLUX Pro 1.1', value: 'fal-ai/flux-pro/v1.1' },
+    { label: 'FLUX Realism', value: 'fal-ai/flux-realism' },
+  ],
+  kimi: [
+    { label: 'Kimi k2.6 (default)', value: 'kimi-k2.6' },
+  ],
 };
 
 // last_status → Badge tone
@@ -290,8 +323,19 @@ export default function Integrations() {
                   <span className="text-xs font-semibold uppercase tracking-wider text-muted">
                     Model <span className="font-normal text-muted/60">(optional)</span>
                   </span>
-                  <Input value={form.model} placeholder="default"
-                    onChange={e => setForm(f => ({ ...f, model: e.target.value }))} />
+                  {PLATFORM_MODELS[addPlatform] ? (
+                    <select value={form.model || PLATFORM_MODELS[addPlatform][0].value}
+                      onChange={e => setForm(f => ({ ...f, model: e.target.value }))}
+                      className="block w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-ink outline-none transition focus:border-accent focus:ring-1 focus:ring-accent [&>option]:bg-[#0B1826]">
+                      <option value="">Auto (platform default)</option>
+                      {PLATFORM_MODELS[addPlatform].map(m => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <Input value={form.model} placeholder="default"
+                      onChange={e => setForm(f => ({ ...f, model: e.target.value }))} />
+                  )}
                 </label>
               </>
             ) : (

@@ -8,6 +8,7 @@ import type {
   Pipeline, PipelineRun, KanbanTask, AgentBrief, Room, RoomMessage,
   WorkspaceItem, WorkspaceStats, Lead, Campaign, AgentEmail, EmailMetrics,
   VoiceSession, ApolloCommand, ApolloCommandResult,
+  InventoryItem, InventoryResponse, CommsResponse,
 } from './types';
 
 const TOKEN_KEY = 'agentos_token';
@@ -106,6 +107,18 @@ export const api = {
   studioGenerate: (data: Record<string, unknown>) =>
     req<StudioResult>('POST', '/api/studio/generate', data),
 
+  // video studio
+  videoGenerate: (data: Record<string, unknown>) =>
+    req<{ videoUrl: string; thumbnail: string; model: string; duration: number }>('POST', '/api/studio/video/generate', data),
+  videoHistory: () =>
+    req<{ items: any[] }>('GET', '/api/studio/video/history'),
+
+  // generic fetch for custom endpoints
+  post: <T = any>(path: string, data?: unknown) =>
+    req<T>('POST', path, data),
+  get: <T = any>(path: string) =>
+    req<T>('GET', path),
+
   // 1. pipelines
   pipelines: (tenantId?: number) =>
     req<{ pipelines: Pipeline[] }>('GET', '/api/pipelines' + qs({ tenant_id: tenantId })),
@@ -139,8 +152,12 @@ export const api = {
     req<{ messages: RoomMessage[]; room: Room }>('GET', `/api/chat/rooms/${id}/messages`),
   sendRoomMessage: (id: number, data: { text: string; from_agent_id?: number | null; reply?: boolean }) =>
     req<{ message: RoomMessage; replies: RoomMessage[] }>('POST', `/api/chat/rooms/${id}/messages`, data),
-  summarizeRoom: (id: number) =>
-    req<{ summary: string }>('POST', `/api/chat/rooms/${id}/summarize`),
+  chatSummarize: (rid: number) =>
+    req<{ summary: string }>('POST', `/api/chat/rooms/${rid}/summarize`),
+  deleteChatRoom: (rid: number) =>
+    req<{ ok: boolean }>('DELETE', `/api/chat/rooms/${rid}`),
+  factoryRun: (data: { goal: string; builder_agent_id: number; judge_agent_id: number; max_rounds?: number; pass_threshold?: number }) =>
+    req<any>('POST', '/api/factory/run', data),
 
   // 4. workspace gallery
   workspace: (params: { tenant_id?: number; type?: string; agent_id?: number; model?: string; project?: string; q?: string } = {}) =>
@@ -158,6 +175,8 @@ export const api = {
     req<{ leads: Lead[] }>('GET', '/api/leads' + qs(params)),
   updateLead: (id: number, data: Record<string, unknown>) =>
     req<{ lead: Lead }>('PATCH', `/api/leads/${id}`, data),
+  deleteLead: (id: number) =>
+    req<{ ok: boolean }>('DELETE', `/api/leads/${id}`),
   convertLead: (id: number) => req<{ lead: Lead }>('POST', `/api/leads/${id}/convert`),
   campaigns: (tenantId?: number) =>
     req<{ campaigns: Campaign[] }>('GET', '/api/campaigns' + qs({ tenant_id: tenantId })),
@@ -199,12 +218,36 @@ export const api = {
     req<{ headlines: any[]; ideas: any[]; scan_id?: number }>(
       'POST', '/api/oracle/scan', { keywords, tenant_id: tenantId }),
   oracleHistory: () => req<{ scans: any[] }>('GET', '/api/oracle/history'),
+  oracleSources: () => req<{ sources: any[] }>('GET', '/api/oracle/sources'),
+  addOracleSource: (data: { name: string; url_template: string; response_path?: string; title_field?: string; url_field?: string }) =>
+    req<{ source: any }>('POST', '/api/oracle/sources', data),
+  deleteOracleSource: (id: number) => req<{ ok: boolean }>('DELETE', `/api/oracle/sources/${id}`),
 
   // 9. Fire Coral Search
   searchQuery: (query: string, topK = 10) =>
     req<{ results: any[] }>('POST', '/api/search/query', { query, top_k: topK }),
   searchAgents: (query: string, agentId: number, topK = 10) =>
     req<{ results: any[] }>('POST', '/api/search/agents', { query, top_k: topK, agent_id: agentId }),
+
+  // 10. Max Gleam stock control
+  inventory: () => req<InventoryResponse>('GET', '/api/maxgleam/inventory'),
+  inventoryAdd: (data: {
+    name: string; category?: string; quantity?: number; unit?: string;
+    min_quantity?: number; supplier?: string; notes?: string;
+  }) => req<{ item: InventoryItem }>('POST', '/api/maxgleam/inventory/add', data),
+  inventoryUse: (itemId: number, quantityUsed: number, jobId?: number) =>
+    req<{ item: InventoryItem; used: number; shortfall: number | null }>(
+      'POST', '/api/maxgleam/inventory/use',
+      { item_id: itemId, quantity_used: quantityUsed, job_id: jobId }),
+  inventoryOrder: (itemId: number, quantity = 0) =>
+    req<{ item: InventoryItem; received: number }>(
+      'POST', '/api/maxgleam/inventory/order', { item_id: itemId, quantity }),
+
+  // 11. Max Gleam communications log
+  comms: (filters: {
+    customer_id?: number; kind?: string; channel?: string;
+    start?: string; end?: string; q?: string; limit?: number;
+  } = {}) => req<CommsResponse>('GET', '/api/maxgleam/comms' + qs(filters)),
 };
 
 export function timeAgo(ts?: number | null): string {
@@ -214,4 +257,9 @@ export function timeAgo(ts?: number | null): string {
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86400)}d ago`;
+}
+
+// Generic request method exposed for custom API calls
+export async function apiReq<T>(method: string, path: string, body?: unknown): Promise<T> {
+  return req<T>(method, path, body);
 }

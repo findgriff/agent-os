@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m py_compile tools/call_agent.py server/app.py server/twilio_bridge.py)",
+      "Bash(npm run *)",
+      "Bash(systemctl restart *)",
+      "Bash(systemctl is-active *)",
+      "Bash(systemctl status *)",
+      "Bash(curl -s -i -X POST http://127.0.0.1:8100/api/call-center/handle-response?business=max-gleam -H 'Content-Type: application/x-www-form-urlencoded' --data 'CallSid=CATEST12345&SpeechResult=no thanks were all set&CallStatus=in-progress')",
+      "Bash([ -f \"$f\" ])",
+      "Bash(grep -v CATEST12345 /var/lib/agent-os/call-state.jsonl)",
+      "Bash(mv /var/lib/agent-os/call-state.jsonl.tmp /var/lib/agent-os/call-state.jsonl)",
+      "Bash(curl -s \"http://localhost:3200/ops_tickets?limit=1\")",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s \"http://localhost:3200/ops_tickets?select=status,assignment_tier&limit=100\")",
+      "Bash(python3 -c \"import sys,json;d=json.load\\(sys.stdin\\);from collections import Counter;print\\('status:',Counter\\(x['status'] for x in d\\)\\);print\\('tier:',Counter\\(x['assignment_tier'] for x in d\\)\\)\")",
+      "Bash(python3 -m py_compile tools/call_agent.py server/app.py)",
+      "Bash(curl -s -i -X POST 'http://127.0.0.1:8100/api/call-center/score/NOSUCHSID')",
+      "Bash(curl -s \"http://localhost:3200/ops_tickets?id=eq.38&select=id,title,status,assignment_tier,priority,business,contact_phone\")",
+      "Bash(python3 -c \"import sys,json;r=json.load\\(sys.stdin\\);print\\('call_sid',r['call_sid'],'| score',r['score'],'| ticket_id',r.get\\('ticket_id'\\)\\)\")",
+      "Bash(curl -s -X DELETE \"http://localhost:3200/ops_tickets?id=eq.38\" -H \"Prefer: return=minimal\" -o /dev/null -w \"deleted ticket #38 \\(HTTP %{http_code}\\)\\\\n\")",
+      "Bash(python3 -)",
+      "Bash(python3 tools/call_agent.py badcmd)"
+    ]
+  }
+}

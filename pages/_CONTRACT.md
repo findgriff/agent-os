@@ -27,7 +27,7 @@ Arbitrary anim ok: `animate-[fadeInUp_0.5s_ease-out]`. Stagger with inline `styl
 `import { Avatar } from '../components/Avatar'` — `Avatar({colour?,initials?,size?,glow?,status?})` status: idle|running|flagged|error.
 `import { Sparkline } from '../components/Sparkline'` — `Sparkline({data:number[],colour?,height?,width?,showAxis?})`.
 `import { Galaxy, CONSTELLATION_COLOUR } from '../components/Galaxy'` —
-  `Galaxy({memories:GalaxyStar[],interactive?,mini?,filter?,onMemoryClick?,onHover?,className?})`.
+  `Galaxy({memories:GalaxyStar[],interactive?,mini?,filter?,bloom?,selectedId?,onMemoryClick?,onHover?,className?})`.
   Container must have explicit height (e.g. wrap in `<div className="h-full">`).
 `import { Logo } from '../components/Logo'` — `Logo({size?,showText?})`.
 

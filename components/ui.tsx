@@ -15,7 +15,7 @@ export function Icon({ name, className = '', size = 20, fill = false, style }:
 // ── Button ──────────────────────────────────────────────────────────────
 type BtnVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'glass';
 const btnStyles: Record<BtnVariant, string> = {
-  primary: 'bg-accent text-[#04222b] hover:brightness-110 font-semibold shadow-[0_0_20px_rgba(25,195,230,0.25)] hover:shadow-[0_0_32px_rgba(25,195,230,0.45)]',
+  primary: 'bg-gradient-to-br from-[#2AD4F5] to-[#0EA5C9] text-[#04222b] hover:brightness-110 font-semibold shadow-[0_0_20px_rgba(25,195,230,0.3),inset_0_1px_0_rgba(255,255,255,0.35)] hover:shadow-[0_0_36px_rgba(25,195,230,0.5),inset_0_1px_0_rgba(255,255,255,0.35)]',
   secondary: 'bg-raised text-ink hover:bg-[#1a2942] border border-white/10 hover:border-accent/30 hover:shadow-[0_0_18px_-4px_rgba(25,195,230,0.3)]',
   ghost: 'text-muted hover:text-ink hover:bg-white/5',
   danger: 'bg-rose/90 text-white hover:bg-rose hover:shadow-[0_0_24px_-4px_rgba(244,63,94,0.5)]',
@@ -117,8 +117,8 @@ export function Modal({ open, onClose, title, children, width = 'max-w-lg' }:
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
       onClick={onClose}>
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm animate-[fadeInUp_0.2s]" />
-      <div className={`relative w-full ${width} glass-raised rounded-2xl p-5 animate-[fadeInUp_0.3s]`}
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm animate-[pageFade_0.25s_ease-out_both]" />
+      <div className={`relative w-full ${width} glass-raised rounded-2xl p-5 animate-scaleIn`}
         onClick={e => e.stopPropagation()}>
         {title && (
           <div className="mb-4 flex items-center justify-between">
@@ -138,7 +138,7 @@ export function Drawer({ open, onClose, children, width = 'max-w-md' }:
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-[pageFade_0.25s_ease-out_both]" />
       <div className={`relative h-full w-full ${width} glass-raised border-l border-white/10 overflow-y-auto animate-slideInRight`}
         onClick={e => e.stopPropagation()}>
         {children}
@@ -155,6 +155,9 @@ export function EmptyState({ icon = 'inbox', title, hint, action, accent = '#19C
       <div className="relative">
         <div className={`absolute inset-0 rounded-3xl animate-pulse ${large ? '-m-2' : '-m-1.5'}`}
           style={{ border: `1px solid ${accent}30` }} />
+        {/* slow orbiting dashed ring — a satellite path around the icon */}
+        <div className={`pointer-events-none absolute inset-0 rounded-full border border-dashed animate-[spin_18s_linear_infinite] ${large ? '-m-5' : '-m-4'}`}
+          style={{ borderColor: `${accent}26` }} />
         <div className={`grid place-items-center rounded-3xl glass ${large ? 'h-20 w-20' : 'h-14 w-14'}`}
           style={{ color: accent, boxShadow: `0 0 32px -8px ${accent}55` }}>
           <Icon name={icon} size={large ? 34 : 26} />
@@ -195,13 +198,21 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     <ToastCtx.Provider value={push}>
       {children}
       <div className="fixed bottom-6 right-6 z-[60] flex flex-col gap-2">
-        {toasts.map(t => (
-          <div key={t.id} className="glass-raised flex items-center gap-2 rounded-xl px-4 py-3 text-sm text-ink shadow-xl animate-slideInRight">
-            <Icon size={18} className={badgeTones[t.tone].split(' ')[1]}
-              name={t.tone === 'danger' ? 'error' : t.tone === 'ok' ? 'check_circle' : 'info'} />
-            {t.message}
-          </div>
-        ))}
+        {toasts.map(t => {
+          const glow = t.tone === 'danger' ? '#F43F5E' : t.tone === 'ok' ? '#22C55E'
+            : t.tone === 'warn' ? '#F59E0B' : '#19C3E6';
+          return (
+            <div key={t.id}
+              className="glass-raised relative flex items-center gap-2 overflow-hidden rounded-xl px-4 py-3 text-sm text-ink shadow-xl animate-slideInRight"
+              style={{ borderColor: `${glow}44`, boxShadow: `0 12px 40px -10px rgba(0,0,0,0.7), 0 0 24px -8px ${glow}55` }}>
+              <span className="absolute bottom-1.5 left-0 top-1.5 w-[3px] rounded-r-full"
+                style={{ background: glow, boxShadow: `0 0 10px ${glow}` }} />
+              <Icon size={18} className={badgeTones[t.tone].split(' ')[1]}
+                name={t.tone === 'danger' ? 'error' : t.tone === 'ok' ? 'check_circle' : 'info'} />
+              {t.message}
+            </div>
+          );
+        })}
       </div>
     </ToastCtx.Provider>
   );
@@ -211,16 +222,23 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 export function Stat({ label, value, icon, accent = '#19C3E6', delay = 0 }:
   { label: string; value: React.ReactNode; icon?: string; accent?: string; delay?: number }) {
   return (
-    <Card glass hover className="p-4 animate-fadeInUp" style={{ animationDelay: `${delay}ms` }}>
-      <div className="flex items-center gap-3">
+    <Card glass hover className="group relative overflow-hidden p-4 animate-fadeInUp"
+      style={{ animationDelay: `${delay}ms` }}>
+      {/* accent hairline along the top edge */}
+      <div className="pointer-events-none absolute inset-x-4 top-0 h-px"
+        style={{ background: `linear-gradient(90deg, transparent, ${accent}55, transparent)` }} />
+      {/* soft accent wash behind the corner */}
+      <div className="pointer-events-none absolute -right-7 -top-9 h-24 w-24 rounded-full opacity-20 blur-2xl transition-opacity duration-300 group-hover:opacity-40"
+        style={{ background: accent }} />
+      <div className="relative flex items-center gap-3">
         {icon && (
-          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl"
-            style={{ background: `${accent}1a`, color: accent }}>
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl transition-transform duration-300 group-hover:-rotate-6 group-hover:scale-110"
+            style={{ background: `${accent}1a`, color: accent, boxShadow: `0 0 20px -8px ${accent}66, inset 0 1px 0 ${accent}22` }}>
             <Icon name={icon} size={20} />
           </div>
         )}
         <div className="min-w-0">
-          <div className="font-display text-2xl font-bold leading-tight text-ink">{value}</div>
+          <div className="font-display text-2xl font-bold leading-tight text-ink tabular-nums">{value}</div>
           <div className="truncate text-xs text-muted">{label}</div>
         </div>
       </div>

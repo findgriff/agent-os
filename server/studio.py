@@ -213,10 +213,12 @@ def generate_image(config: dict, dest_dir: str | None = None,
 
 
 def _persist(url: str, dest_dir: str, session_id: str, seed, idx: int) -> str | None:
-    """Download `url` into dest_dir/generated/<session>/ and return the
-    site-relative served path (e.g. /generated/<session>/<ts>_<seed>.png)."""
+    """Download `url` into dest_dir/<session>/ and return the served path
+    (e.g. /generated/<session>/<ts>_<seed>.png). dest_dir must be the
+    directory the app serves at /generated/ — app.py passes GEN_DIR, which
+    lives outside site/ so `vite build` can't wipe it."""
     safe_session = "".join(c for c in str(session_id) if c.isalnum() or c in "-_") or "adhoc"
-    folder = Path(dest_dir) / "generated" / safe_session
+    folder = Path(dest_dir) / safe_session
     try:
         folder.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y%m%d-%H%M%S")

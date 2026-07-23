@@ -27,31 +27,60 @@ body {
     transition-duration: 200ms;
     transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   }
+  /* Keyboard focus — a crisp accent halo instead of the UA default */
+  :focus-visible {
+    outline: 2px solid rgba(25, 195, 230, 0.65);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: rgba(25, 195, 230, 0.3);
+    color: #EAF7FB;
+  }
+}
+
+/* Honour reduced-motion globally: entrances land instantly, loops stop */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @layer components {
+  /* Glass panes: gradient fill + saturated blur + a lit top edge, so panels
+     read as physical panes catching light rather than flat grey rectangles. */
   .glass {
-    background: rgba(255, 255, 255, 0.04);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.028));
+    backdrop-filter: blur(14px) saturate(150%);
+    -webkit-backdrop-filter: blur(14px) saturate(150%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   }
   .glass-raised {
-    background: rgba(20, 30, 45, 0.72);
-    backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: linear-gradient(180deg, rgba(24, 36, 54, 0.85), rgba(15, 24, 38, 0.75));
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 12px 40px -12px rgba(0, 0, 0, 0.6);
   }
   .card {
-    background: #0D1520;
+    background: linear-gradient(180deg, #0E1826, #0B121C);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 1rem;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
   }
-  /* Faint blueprint grid laid over page backgrounds */
+  /* Page backdrop: faint blueprint grid + cosmic colour washes drifting in
+     from the corners, so every page sits in an atmosphere, not on black. */
   .grid-bg {
     background-image:
+      radial-gradient(ellipse 75% 55% at 10% -12%, rgba(24, 88, 138, 0.16), transparent 62%),
+      radial-gradient(ellipse 65% 50% at 92% -14%, rgba(92, 61, 168, 0.13), transparent 62%),
+      radial-gradient(ellipse 90% 60% at 50% 118%, rgba(14, 58, 88, 0.12), transparent 65%),
       linear-gradient(rgba(25, 195, 230, 0.028) 1px, transparent 1px),
       linear-gradient(90deg, rgba(25, 195, 230, 0.028) 1px, transparent 1px);
-    background-size: 44px 44px;
+    background-size: 100% 100%, 100% 100%, 100% 100%, 44px 44px, 44px 44px;
   }
   /* KITT scanner bar — a red pulse sweeping a thin track */
   .kitt-track {
@@ -84,6 +113,36 @@ body {
     animation: tickerScroll 45s linear infinite;
   }
   .ticker-track:hover { animation-play-state: paused; }
+  /* Fade ticker items out at both edges instead of clipping them hard */
+  .ticker-mask {
+    mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 56px), transparent);
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 56px), transparent);
+  }
+  /* Image Studio render beam — a soft cyan/violet scanline sweeping the
+     placeholder while the model paints (pair with .skeleton underneath). */
+  .render-scan {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    border-radius: inherit;
+    pointer-events: none;
+  }
+  .render-scan::after {
+    content: '';
+    position: absolute;
+    left: -10%;
+    right: -10%;
+    height: 32%;
+    top: -40%;
+    background: linear-gradient(180deg,
+      transparent,
+      rgba(192, 132, 252, 0.14) 38%,
+      rgba(25, 195, 230, 0.32) 50%,
+      rgba(192, 132, 252, 0.14) 62%,
+      transparent);
+    box-shadow: 0 0 30px rgba(192, 132, 252, 0.25);
+    animation: renderScan 2.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
   /* Shimmering loading skeleton */
   .skeleton {
     background: linear-gradient(100deg,
@@ -96,6 +155,7 @@ body {
 }
 
 @keyframes scannerSweep { 0% { left: -18%; } 50% { left: 100%; } 100% { left: -18%; } }
+@keyframes renderScan { 0% { top: -40%; } 100% { top: 112%; } }
 @keyframes tickerScroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 @keyframes shimmerSweep { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
 
@@ -114,6 +174,71 @@ body {
   background: linear-gradient(120deg, #05080C 0%, #081420 30%, #0b1a2b 50%, #081420 70%, #05080C 100%);
   background-size: 300% 300%;
 }
+
+/* ── Login atmosphere ──────────────────────────────────────────────────── */
+/* Logo draw-on: hex sigil traces itself, ring follows, core pops in */
+.logo-draw path {
+  stroke-dasharray: 150;
+  stroke-dashoffset: 150;
+  animation: logoDraw 1.3s cubic-bezier(0.4, 0, 0.2, 1) 0.1s forwards;
+}
+.logo-draw circle[r="11"] {
+  stroke-dasharray: 70;
+  stroke-dashoffset: 70;
+  animation: logoDraw 1s ease-out 0.75s forwards;
+}
+.logo-draw circle[r="6.5"] {
+  opacity: 0;
+  transform-origin: 50% 50%;
+  animation: logoPop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) 1.2s forwards;
+}
+@keyframes logoDraw { to { stroke-dashoffset: 0; } }
+@keyframes logoPop {
+  from { opacity: 0; transform: scale(0.3); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* Occasional meteor streaking down-left across the login sky */
+.shooting-star {
+  position: absolute;
+  height: 1.5px;
+  width: 130px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.85), rgba(25, 195, 230, 0.4), transparent);
+  box-shadow: 0 0 8px rgba(190, 232, 255, 0.5);
+  opacity: 0;
+  animation: shootAcross 9s linear infinite;
+}
+@keyframes shootAcross {
+  0% { transform: translate(0, 0) rotate(-32deg); opacity: 0; }
+  1.5% { opacity: 0.9; }
+  7% { transform: translate(-620px, 388px) rotate(-32deg); opacity: 0; }
+  100% { transform: translate(-620px, 388px) rotate(-32deg); opacity: 0; }
+}
+
+/* Slow-orbiting accent glints around a rounded border (Chromium/modern) */
+@property --aura-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+.aura-border { position: relative; }
+.aura-border::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(from var(--aura-angle),
+    transparent 0%, rgba(25, 195, 230, 0.55) 10%, transparent 24%,
+    transparent 50%, rgba(167, 139, 250, 0.45) 62%, transparent 76%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  animation: auraSpin 8s linear infinite;
+  pointer-events: none;
+}
+@keyframes auraSpin { to { --aura-angle: 360deg; } }
 
 .animate-fadeInUp { animation: fadeInUp 0.5s ease-out both; }
 @keyframes fadeInUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }

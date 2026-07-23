@@ -270,6 +270,21 @@ CREATE TABLE IF NOT EXISTS oracle_scans (
   created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 
+-- Custom Oracle sources: user-defined JSON APIs the scan aggregates alongside
+-- the built-in feeds. url_template uses {kw} as the keyword placeholder;
+-- response_path is a dot path to the results array (e.g. "hits", "data.children").
+CREATE TABLE IF NOT EXISTS oracle_sources (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+  name TEXT NOT NULL,
+  url_template TEXT NOT NULL,
+  response_path TEXT NOT NULL DEFAULT 'hits',
+  title_field TEXT NOT NULL DEFAULT 'title',
+  url_field TEXT NOT NULL DEFAULT 'url',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+
 CREATE TABLE IF NOT EXISTS search_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tenant_id INTEGER NOT NULL REFERENCES tenants(id),

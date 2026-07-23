@@ -325,10 +325,10 @@ def seed_demo(conn, db_module) -> int:
             return roster[0]
 
         seeded += _seed_pipelines(conn, db_module, tid, pick, now)
-        seeded += _seed_kanban(conn, db_module, tid, roster, pick, now, day)
-        seeded += _seed_workspace(conn, db_module, tid, pick, now, day)
-        seeded += _seed_leads(conn, db_module, tid, now, day)
-        seeded += _seed_chat(conn, db_module, tid, pick, now)
+        # seeded += _seed_kanban(...)  # disabled
+        # seeded += _seed_workspace(...)  # disabled — clean gallery
+        # seeded += _seed_leads(...)   # disabled — clean board
+        # seeded += _seed_chat(conn, db_module, tid, pick, now)  # disabled — clean war room
         seeded += _seed_email(conn, db_module, tid, pick, now, day)
         seeded += _seed_voice(conn, db_module, tid, now, day)
     return seeded

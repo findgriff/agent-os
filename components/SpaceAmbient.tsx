@@ -23,7 +23,7 @@ function startDrone() {
 
   // Master gain — overall volume
   const master = ctx.createGain();
-  master.gain.value = 0.0875; // Even lower — barely-there background texture
+  master.gain.value = 0.026; // Barely perceptible — 70% below previous level
   master.connect(ctx.destination);
 
   // ── Layer 1: Deep bass drone (80Hz, more audible on phone speakers) ──

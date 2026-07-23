@@ -15,14 +15,15 @@ import type { Lead, LeadStatus, Campaign } from '../lib/types';
 // ── Static config ───────────────────────────────────────────────────────────
 type Tone = 'ok' | 'warn' | 'danger' | 'info' | 'neutral' | 'violet';
 
-const STATUSES: LeadStatus[] = ['new', 'contacted', 'qualified', 'converted', 'lost'];
+const STATUSES: LeadStatus[] = ['new', 'contacted', 'in_progress', 'qualified', 'converted', 'lost'];
 
 const STATUS_META: Record<LeadStatus, { tone: Tone; label: string; icon: string; colour: string }> = {
-  new:       { tone: 'info',   label: 'New',       icon: 'fiber_new',         colour: '#38BDF8' },
-  contacted: { tone: 'warn',   label: 'Contacted', icon: 'forward_to_inbox',  colour: '#F59E0B' },
-  qualified: { tone: 'violet', label: 'Qualified', icon: 'workspace_premium', colour: '#A78BFA' },
-  converted: { tone: 'ok',     label: 'Converted', icon: 'verified',          colour: '#22C55E' },
-  lost:      { tone: 'danger', label: 'Lost',      icon: 'do_not_disturb_on', colour: '#F43F5E' },
+  new:         { tone: 'info',   label: 'New',            icon: 'fiber_new',         colour: '#38BDF8' },
+  contacted:   { tone: 'warn',   label: 'Contacted',      icon: 'forward_to_inbox',  colour: '#F59E0B' },
+  in_progress: { tone: 'violet', label: 'Working Progress', icon: 'trending_up',     colour: '#A78BFA' },
+  qualified:   { tone: 'violet', label: 'Qualified',      icon: 'workspace_premium', colour: '#A78BFA' },
+  converted:   { tone: 'ok',     label: 'Converted',      icon: 'verified',          colour: '#22C55E' },
+  lost:        { tone: 'danger', label: 'Lost',            icon: 'do_not_disturb_on', colour: '#F43F5E' },
 };
 
 const CAMPAIGN_TONE: Record<string, Tone> = {
@@ -97,6 +98,7 @@ export default function Leads() {
   // Table filters
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterCampaign, setFilterCampaign] = useState('all');
+  const [filterSource, setFilterSource] = useState('all');
 
   // Overlays
   const [openLeadId, setOpenLeadId] = useState<number | null>(null);
@@ -136,7 +138,10 @@ export default function Leads() {
 
   // ── Mutations ─────────────────────────────────────────────────────────────
   const patchLead = (id: number, data: Partial<Lead>) =>
-    setLeads(prev => prev.map(l => (l.id === id ? { ...l, ...data } : l)));
+    setLeads(prev => {
+      if ((data as any)._deleted) return prev.filter(l => l.id !== id);
+      return prev.map(l => (l.id === id ? { ...l, ...data } : l));
+    });
 
   const findLeads = async () => {
     if (!industry.trim() && !keywords.trim() && !location.trim()) {
@@ -218,11 +223,14 @@ export default function Leads() {
     return { total, qualified, converted, convRate };
   }, [leads]);
 
+  const sources = useMemo(() => [...new Set(leads.map(l => l.source).filter(Boolean))] as string[], [leads]);
+
   const filtered = useMemo(() => leads.filter(l => {
     if (filterStatus !== 'all' && l.status !== filterStatus) return false;
     if (filterCampaign !== 'all' && l.campaign_id !== Number(filterCampaign)) return false;
+    if (filterSource !== 'all' && l.source !== filterSource) return false;
     return true;
-  }), [leads, filterStatus, filterCampaign]);
+  }), [leads, filterStatus, filterCampaign, filterSource]);
 
   const campaignLabel = (l: Lead) =>
     l.campaign_name || campaigns.find(c => c.id === l.campaign_id)?.name || '';
@@ -321,6 +329,10 @@ export default function Leads() {
             <Select value={filterCampaign} onChange={e => setFilterCampaign(e.target.value)}>
               <option value="all">All campaigns</option>
               {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Select>
+            <Select value={filterSource} onChange={e => setFilterSource(e.target.value)}>
+              <option value="all">All sources</option>
+              {sources.map(s => <option key={s} value={s}>{s}</option>)}
             </Select>
             <Badge tone="neutral">{filtered.length} of {leads.length}</Badge>
           </div>
@@ -641,6 +653,11 @@ function LeadDrawer({ lead, campaigns, onPatch, onReloadCampaigns, onClose }:
       {/* Footer */}
       <div className="flex items-center gap-2 border-t border-white/10 p-4">
         <Button variant="ghost" onClick={onClose}>Close</Button>
+        <Button variant="danger" icon="delete" onClick={async () => {
+          if (!confirm('Delete this lead?')) return;
+          try { await api.deleteLead(lead.id); onClose(); onPatch({ ...lead, _deleted: true } as any); toast('Lead deleted', 'ok'); }
+          catch { toast('Could not delete lead', 'danger'); }
+        }}>Delete</Button>
         <div className="flex-1" />
         <Button variant="secondary" icon="bolt" loading={converting}
           disabled={form.status === 'converted'} onClick={convert}>

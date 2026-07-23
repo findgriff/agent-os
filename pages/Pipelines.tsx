@@ -564,6 +564,12 @@ function StepCard({ step, index, total, agents, onEdit, onDelete, onMove }: {
               </div>
             ) : <span className="italic text-amber/80">No agent selected</span>
           ) : <span className="line-clamp-2 break-words">{previewText(step)}</span>}
+ {step.config?.model && (
+ <div className="mt-1.5 flex items-center gap-1 text-[10px] text-muted/70">
+   <Icon name="memory" size={11} />
+   <span className="truncate">{step.config.model}</span>
+ </div>
+ )}
         </div>
 
         <div className="mt-2.5 flex items-center justify-between border-t border-white/5 pt-2">
@@ -604,6 +610,7 @@ function StepEditor({ mode, initial, agents, onSave, onClose }: {
   const [label, setLabel] = useState<string>(String(initial?.label ?? initial?.config?.label ?? ''));
   const [agentId, setAgentId] = useState<number | ''>(typeof initAgent === 'number' ? initAgent : (agents[0]?.id ?? ''));
   const [prompt, setPrompt] = useState<string>(String(initial?.config?.prompt ?? ''));
+  const [model, setModel] = useState<string>(String(initial?.config?.model ?? 'deepseek-chat'));
   const [channel, setChannel] = useState<string>(String(initial?.config?.channel ?? ''));
   const [seconds, setSeconds] = useState<string>(String(initial?.config?.seconds ?? 5));
   const [expr, setExpr] = useState<string>(String(initial?.config?.expr ?? ''));
@@ -617,9 +624,11 @@ function StepEditor({ mode, initial, agents, onSave, onClose }: {
     if (type === 'agent') {
       if (agentId === '') { toast('Select an agent for this step', 'warn'); return; }
       config.agent_id = Number(agentId);
+      config.model = model;
     } else if (type === 'generate') {
-      if (!prompt.trim()) { toast('Enter a prompt', 'warn'); return; }
-      config.prompt = prompt.trim();
+   if (!prompt.trim()) { toast('Enter a prompt', 'warn'); return; }
+   config.prompt = prompt.trim();
+   config.model = model;
     } else if (type === 'notify') {
       config.channel = channel.trim() || 'general';
     } else if (type === 'delay') {
@@ -687,6 +696,37 @@ function StepEditor({ mode, initial, agents, onSave, onClose }: {
           <Textarea value={prompt} rows={3} onChange={e => setPrompt(e.target.value)}
             placeholder="Write a concise summary of the previous step…" className="resize-none" />
         </Field>
+      )}
+      {/* Model selector — shown for agent and generate steps */}
+      {(type === 'agent' || type === 'generate') && (
+        <div className="mt-3">
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">
+            Brain <span className="font-normal text-muted/60">(LLM)</span>
+          </label>
+          <select
+            value={model}
+            onChange={e => setModel(e.target.value)}
+            className="block w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-ink outline-none transition focus:border-accent focus:ring-1 focus:ring-accent [&>option]:bg-[#0B1826]">
+            <optgroup label="DeepSeek">
+              <option value="deepseek-chat">DeepSeek V4 Flash (fast)</option>
+              <option value="deepseek-reasoner">DeepSeek V4 Pro (reasoning)</option>
+            </optgroup>
+            <optgroup label="OpenAI">
+              <option value="gpt-4o">GPT-4o</option>
+              <option value="gpt-4o-mini">GPT-4o Mini</option>
+              <option value="o3">o3 (reasoning)</option>
+              <option value="o4-mini">o4 Mini</option>
+            </optgroup>
+            <optgroup label="Gemini">
+              <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+              <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+            </optgroup>
+            <optgroup label="Claude">
+              <option value="claude-sonnet-4">Claude Sonnet 4</option>
+              <option value="claude-opus-4">Claude Opus 4</option>
+            </optgroup>
+          </select>
+        </div>
       )}
       {type === 'notify' && (
         <Field label="Channel">

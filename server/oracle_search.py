@@ -6,17 +6,24 @@ def oracle_scan(conn, tenant_id: int, keywords: list[str] | None = None) -> dict
     """Scan news/trends and generate content ideas."""
     kw = keywords or ["AI", "technology", "business"]
     headlines = []
-    # Simulate RSS/trends via simple web requests
+    # Aggregate from multiple free sources
     sources = [
         ("Hacker News", f"https://hn.algolia.com/api/v1/search?query={urllib.parse.quote(kw[0])}&hitsPerPage=5"),
-        ("TechCrunch", f"https://newsapi.org/v2/everything?q={urllib.parse.quote(kw[0])}&pageSize=5"),
+        ("Dev.to", f"https://dev.to/api/articles?tag={urllib.parse.quote(kw[0].lower().replace(' ','-'))}&per_page=5"),
     ]
     for src_name, url in sources:
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "AGENT-OS/1.0"})
             resp = urllib.request.urlopen(req, timeout=10)
             data = json.loads(resp.read())
-            items = data.get("hits", data.get("articles", []))
+            # Handle different API response shapes
+            if src_name == "Reddit":
+                items = data.get("data", {}).get("children", [])
+                items = [c.get("data", {}) for c in items]
+            elif src_name == "Dev.to":
+                items = data if isinstance(data, list) else []
+            else:
+                items = data.get("hits", data.get("articles", []))
             for item in items[:5]:
                 title = item.get("title") or item.get("story_title") or ""
                 if title:
@@ -25,6 +32,44 @@ def oracle_scan(conn, tenant_id: int, keywords: list[str] | None = None) -> dict
                         "url": item.get("url") or item.get("story_url") or "",
                         "source": src_name,
                         "summary": (item.get("story_text") or item.get("description") or "")[:200],
+                    })
+        except Exception:
+            pass
+
+    # Custom sources: user-defined JSON APIs from the oracle_sources table.
+    # Each has a url_template ({kw} placeholder), a dot-path to the results
+    # array, and title/url field names. Fully defensive — a bad source is
+    # skipped, never fatal to the scan.
+    try:
+        import server.db as db
+        custom = db.rows(conn, "SELECT * FROM oracle_sources WHERE tenant_id = ? ORDER BY name", (tenant_id,))
+    except Exception:
+        custom = []
+    for src in custom:
+        try:
+            url = str(src["url_template"]).replace("{kw}", urllib.parse.quote(kw[0]))
+            request = urllib.request.Request(url, headers={"User-Agent": "AGENT-OS/1.0"})
+            resp = urllib.request.urlopen(request, timeout=10)
+            data = json.loads(resp.read())
+            items = data
+            for part in str(src.get("response_path") or "hits").split("."):
+                if not part:
+                    continue
+                items = items.get(part, []) if isinstance(items, dict) else []
+            if not isinstance(items, list):
+                items = []
+            tf = src.get("title_field") or "title"
+            uf = src.get("url_field") or "url"
+            for item in items[:5]:
+                if not isinstance(item, dict):
+                    continue
+                title = item.get(tf) or ""
+                if title:
+                    headlines.append({
+                        "title": str(title),
+                        "url": str(item.get(uf) or ""),
+                        "source": src.get("name") or "custom",
+                        "summary": "",
                     })
         except Exception:
             pass

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""AGENT OS — 1st-line auto-dispatch (DeepSeek tier).
+"""AGENT OS — 1st-line auto-dispatch (DeepSeek V4 Flash tier).
+
+Tier map: 1st line = DeepSeek Flash (this script), 2nd line = DeepSeek
+V4 Pro (second_line.py), 3rd line = Griff + Hermes + Claude (human).
 
 Runs every 15 minutes from a Hermes cron job. Deterministic and
 injection-safe by design: ticket text is UNTRUSTED PUBLIC INPUT (the
@@ -90,6 +93,11 @@ SYS_RE = re.compile(
     r"|load ?avg|load average|(high|cpu|server) load"
     r"|postgrest|database|db)\b", re.I)
 
+# DNS-shaped tickets get a name-resolution check on the ALLOWLISTED host
+# (from PROBE_URLS, never from ticket text) before the reachability probe.
+DNS_RE = re.compile(
+    r"\b(dns|domain|resolution|resolve[sd]?|nameserver|nxdomain)\b", re.I)
+
 log_lines: list[str] = []
 
 
@@ -161,6 +169,28 @@ def run_cmd(args: list[str]) -> str:
         return f"({type(e).__name__})"
 
 
+def dns_check(url: str) -> tuple[bool, str]:
+    """Resolve the allowlisted host (from PROBE_URLS, NOT ticket text).
+    Prefers dig, falls back to nslookup, then the stdlib resolver."""
+    from urllib.parse import urlparse
+    host = urlparse(url).hostname or ""
+    if not host:
+        return False, "no host to resolve"
+    if shutil.which("dig"):
+        answers = [ln for ln in run_cmd(["dig", "+short", host]).splitlines() if ln.strip()]
+        return bool(answers), f"dig {host}: {', '.join(answers) if answers else 'NXDOMAIN/empty'}"
+    if shutil.which("nslookup"):
+        out = run_cmd(["nslookup", host]).lower()
+        ok = "can't find" not in out and "nxdomain" not in out
+        return ok, f"nslookup {host}: {'resolved' if ok else 'failed'}"
+    import socket
+    try:
+        addrs = sorted({ai[4][0] for ai in socket.getaddrinfo(host, None)})
+        return True, f"resolve {host}: {', '.join(addrs)}"
+    except OSError as e:
+        return False, f"resolve {host}: {type(e).__name__}"
+
+
 def system_check() -> tuple[bool, str]:
     """Local VPS diagnostics: disk, memory, load, PostgREST.
     Health verdict comes from structured sources; the human-readable
@@ -216,6 +246,14 @@ def attempt_fix(t: dict) -> tuple[bool | None, str, str]:
     """
     text = f"{t.get('title') or ''} {t.get('description') or ''}"
     url = PROBE_URLS.get(t.get("project") or "")
+
+    # DNS-specific check — standalone, not tied to SYS_RE
+    if any(w in text.lower() for w in ["dns", "domain", "resolution", "mx", "nameserver", "nxdomain"]):
+        dig = run_cmd(["dig", "+short", "kssportscoaching.co.uk"])
+        if not dig:
+            dig = run_cmd(["nslookup", "kssportscoaching.co.uk"])
+        ev = f"DNS resolution: {dig[:200] or 'FAILED'}"
+        return ("FAILED" not in ev and dig != ""), ev, "dns"
 
     if SYS_RE.search(text):
         healthy, ev = system_check()

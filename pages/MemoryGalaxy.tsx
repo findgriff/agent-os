@@ -93,13 +93,34 @@ export default function MemoryGalaxy() {
       : Object.keys(CONSTELLATION_COLOUR);
   }, [constellations, stars]);
 
+  // Per-constellation star counts for the legend.
+  const legendCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    stars.forEach(s => { counts[s.constellation] = (counts[s.constellation] || 0) + 1; });
+    return counts;
+  }, [stars]);
+
   return (
     <div className="relative w-full h-[calc(100vh-4rem)] bg-bg overflow-hidden">
+      {/* Deep-space backdrop behind the canvas */}
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_65%_55%_at_50%_38%,rgba(23,49,94,0.35),transparent_72%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_40%_32%_at_62%_30%,rgba(92,61,168,0.16),transparent_70%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_36%_28%_at_36%_52%,rgba(20,90,110,0.14),transparent_70%)]" />
+      </div>
       {loading ? (
         <div className="absolute inset-0 grid place-items-center">
-          <div className="flex flex-col items-center gap-3 animate-pulse">
-            <Logo size={44} showText={false} />
-            <div className="font-display text-sm text-muted">Mapping the galaxy…</div>
+          <div className="flex flex-col items-center gap-5 animate-fadeInUp">
+            {/* Orbital loader — two motes circling the sigil */}
+            <div className="relative grid h-24 w-24 place-items-center">
+              <div className="absolute inset-0 rounded-full border border-accent/15" />
+              <div className="absolute inset-3 rounded-full border border-violet/15" />
+              <Logo size={40} showText={false} />
+              <span className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 animate-orbit rounded-full bg-accent shadow-[0_0_10px_2px_rgba(25,195,230,0.7)]" />
+              <span className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 animate-orbit rounded-full bg-violet shadow-[0_0_8px_2px_rgba(167,139,250,0.7)]"
+                style={{ animationDuration: '3.4s', animationDirection: 'reverse' }} />
+            </div>
+            <div className="font-display text-sm tracking-wide text-muted">Mapping the galaxy…</div>
           </div>
         </div>
       ) : count === 0 ? (
@@ -120,19 +141,27 @@ export default function MemoryGalaxy() {
             interactive
             bloom
             filter={filter}
+            selectedId={selected?.id ?? null}
             onMemoryClick={setSelected}
             onHover={handleHover}
           />
 
+          {/* Cinematic vignette above the canvas, below the UI */}
+          <div className="pointer-events-none absolute inset-0 z-[5] bg-[radial-gradient(ellipse_at_center,transparent_52%,rgba(2,4,9,0.6)_100%)]" />
+
           {/* Top-left title overlay */}
           <div className="pointer-events-none absolute left-5 top-5 z-10 max-w-xs animate-fadeInUp">
-            <h1 className="font-display text-2xl font-bold text-ink drop-shadow-[0_2px_12px_rgba(0,0,0,0.6)]">
+            <h1 className="animate-textShimmer bg-gradient-to-r from-ink via-accent to-violet bg-clip-text bg-[length:200%_auto] font-display text-3xl font-bold tracking-tight text-transparent drop-shadow-[0_2px_16px_rgba(0,0,0,0.7)]">
               Memory Galaxy
             </h1>
-            <p className="mt-1 text-sm text-muted">
+            <p className="mt-1.5 text-sm text-muted">
               Each star is a memory. Brighter = higher confidence.
             </p>
-            <div className="mt-2 text-xs font-mono text-muted/80">
+            <div className="mt-2.5 flex items-center gap-2 font-mono text-xs text-muted/80">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent" />
+              </span>
               {count} memories · {constellations.length} constellations
             </div>
           </div>
@@ -140,20 +169,23 @@ export default function MemoryGalaxy() {
           {/* Top-right filter chips */}
           <div className="absolute right-4 top-5 z-10 flex flex-wrap justify-end gap-2 max-w-[60%]">
             <AmbientToggle playing={playing} onToggle={toggleAmbient} />
-            {FILTERS.map(f => {
+            {FILTERS.map((f, i) => {
               const active = filter === f;
+              const c = f === 'all' ? '#19C3E6' : dotColour(f);
               return (
                 <button
                   key={f}
                   onClick={() => setFilter(f)}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-all active:scale-95
-                    ${active
-                      ? 'glass-raised border-accent/40 text-ink shadow-[0_0_16px_rgba(25,195,230,0.25)]'
-                      : 'glass border-white/10 text-muted hover:text-ink'}`}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-all active:scale-95 animate-fadeInUp
+                    ${active ? 'glass-raised text-ink' : 'glass border-white/10 text-muted hover:border-white/25 hover:text-ink'}`}
+                  style={{
+                    animationDelay: `${i * 45}ms`,
+                    ...(active ? { borderColor: `${c}66`, boxShadow: `0 0 18px -2px ${c}55, inset 0 0 12px -6px ${c}44` } : {}),
+                  }}
                 >
                   <span
-                    className="h-2 w-2 rounded-full"
-                    style={{ background: f === 'all' ? '#19C3E6' : dotColour(f) }}
+                    className="h-2 w-2 rounded-full transition-shadow"
+                    style={{ background: c, boxShadow: active ? `0 0 8px ${c}` : undefined }}
                   />
                   {cap(f)}
                 </button>
@@ -161,36 +193,57 @@ export default function MemoryGalaxy() {
             })}
           </div>
 
-          {/* Legend (bottom-left) */}
-          <div className="pointer-events-none absolute bottom-5 left-5 z-10 hidden sm:block animate-fadeInUp">
-            <div className="glass rounded-xl px-3 py-2.5">
-              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted/70">
+          {/* Legend (bottom-left) — rows double as filters */}
+          <div className="absolute bottom-5 left-5 z-10 hidden sm:block animate-fadeInUp">
+            <div className="glass rounded-2xl px-2 py-2.5 backdrop-blur-xl">
+              <div className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted/70">
                 Constellations
               </div>
-              <div className="flex flex-col gap-1">
-                {legend.map(k => (
-                  <div key={k} className="flex items-center gap-2 text-xs text-muted">
-                    <span className="h-2 w-2 rounded-full" style={{ background: dotColour(k) }} />
-                    {cap(k)}
-                  </div>
-                ))}
+              <div className="flex flex-col gap-0.5">
+                {legend.map(k => {
+                  const active = filter === k;
+                  const c = dotColour(k);
+                  return (
+                    <button key={k} onClick={() => setFilter(active ? 'all' : k)}
+                      className={`flex items-center gap-2 rounded-lg px-2 py-1 text-left text-xs transition-all
+                        ${active ? 'bg-white/8 text-ink' : 'text-muted hover:bg-white/5 hover:text-ink'}`}>
+                      <span className="h-2 w-2 rounded-full transition-shadow"
+                        style={{ background: c, boxShadow: active ? `0 0 8px ${c}` : `0 0 4px ${c}66` }} />
+                      <span className="flex-1">{cap(k)}</span>
+                      <span className="pl-3 font-mono text-[10px] text-muted/60">{legendCounts[k] || 0}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
+          </div>
+
+          {/* Bottom-right hint */}
+          <div className="pointer-events-none absolute bottom-5 right-5 z-10 hidden md:flex items-center gap-3 font-mono text-[10px] uppercase tracking-widest text-muted/50 animate-fadeInUp">
+            <span className="flex items-center gap-1.5"><Icon name="drag_pan" size={13} /> drag to orbit</span>
+            <span className="flex items-center gap-1.5"><Icon name="mouse" size={13} /> scroll to zoom</span>
           </div>
 
           {/* Hover tooltip */}
           {hover && (
             <div
-              className="pointer-events-none fixed z-30 max-w-[240px] glass rounded-lg px-3 py-2 text-xs text-ink shadow-xl"
-              style={{ left: hover.x + 14, top: hover.y + 14 }}
+              className="pointer-events-none fixed z-30 max-w-[250px] glass-raised rounded-xl px-3 py-2 text-xs text-ink animate-[fadeInUp_0.15s_ease-out]"
+              style={{
+                left: hover.x + 14, top: hover.y + 14,
+                borderColor: `${dotColour(hover.m.constellation)}44`,
+                boxShadow: `0 12px 40px -8px rgba(0,0,0,0.8), 0 0 24px -6px ${dotColour(hover.m.constellation)}33`,
+              }}
             >
               <div className="mb-0.5 flex items-center gap-1.5">
                 <span
                   className="h-1.5 w-1.5 rounded-full"
-                  style={{ background: dotColour(hover.m.constellation) }}
+                  style={{ background: dotColour(hover.m.constellation), boxShadow: `0 0 6px ${dotColour(hover.m.constellation)}` }}
                 />
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">
                   {cap(hover.m.constellation)}
+                </span>
+                <span className="ml-auto font-mono text-[10px] text-muted/60">
+                  {Math.round(hover.m.confidence * 100)}%
                 </span>
               </div>
               <div className="line-clamp-2 leading-snug">{hover.m.fact}</div>
@@ -202,9 +255,17 @@ export default function MemoryGalaxy() {
             <>
               {/* transparent click-catcher: click outside closes */}
               <div className="absolute inset-0 z-10" onClick={() => setSelected(null)} />
-              <div className="absolute bottom-0 left-0 right-0 z-20 px-3 pb-3 animate-fadeInUp"
+              <div className="absolute bottom-0 left-0 right-0 z-20 px-3 pb-3 animate-springUp"
                 onClick={e => e.stopPropagation()}>
-                <div className="mx-auto max-w-4xl glass-raised rounded-2xl p-5 shadow-2xl">
+                <div className="relative mx-auto max-w-4xl">
+                  {/* constellation-coloured glow bleeding out from behind the panel */}
+                  <div className="pointer-events-none absolute -inset-4 -z-10 rounded-[2rem] blur-2xl"
+                    style={{ background: `radial-gradient(ellipse at 50% 100%, ${dotColour(selected.constellation)}2e, transparent 70%)` }} />
+                  <div className="glass-raised relative overflow-hidden rounded-2xl p-5 shadow-2xl"
+                    style={{ borderColor: `${dotColour(selected.constellation)}33` }}>
+                    {/* hairline in the constellation colour along the top edge */}
+                    <div className="pointer-events-none absolute inset-x-10 top-0 h-px"
+                      style={{ background: `linear-gradient(90deg, transparent, ${dotColour(selected.constellation)}, transparent)` }} />
                   <div className="mb-3 flex items-start justify-between gap-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge tone="info" dot>{cap(selected.constellation)}</Badge>
@@ -231,9 +292,10 @@ export default function MemoryGalaxy() {
                           <span className="font-mono text-ink">{Math.round(selected.confidence * 100)}%</span>
                         </div>
                         <div className="h-2 w-full overflow-hidden rounded-full bg-white/8">
-                          <div className="h-full rounded-full transition-all"
+                          <div key={selected.id} className="h-full origin-left animate-growBar rounded-full"
                             style={{ width: `${Math.round(selected.confidence * 100)}%`,
-                              background: `linear-gradient(90deg, ${dotColour(selected.constellation)}, #19C3E6)` }} />
+                              background: `linear-gradient(90deg, ${dotColour(selected.constellation)}, #19C3E6)`,
+                              boxShadow: `0 0 12px ${dotColour(selected.constellation)}66` }} />
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-x-6 gap-y-1.5 text-xs">
@@ -263,8 +325,8 @@ export default function MemoryGalaxy() {
                         <div className="flex flex-col gap-1.5">
                           {related.map(r => (
                             <button key={r.id} onClick={() => setSelected(r)}
-                              className="flex items-center gap-2 rounded-lg border border-white/8 bg-white/4 px-2.5 py-1.5 text-left text-xs text-muted transition-all hover:border-accent/40 hover:text-ink">
-                              <span className="h-1.5 w-1.5 shrink-0 rounded-full"
+                              className="group flex items-center gap-2 rounded-lg border border-white/8 bg-white/4 px-2.5 py-1.5 text-left text-xs text-muted transition-all hover:translate-x-0.5 hover:border-accent/40 hover:bg-white/8 hover:text-ink">
+                              <span className="h-1.5 w-1.5 shrink-0 rounded-full transition-shadow group-hover:shadow-[0_0_6px_currentColor]"
                                 style={{ background: dotColour(r.constellation) }} />
                               <span className="line-clamp-1">{r.fact}</span>
                             </button>
@@ -272,6 +334,7 @@ export default function MemoryGalaxy() {
                         </div>
                       )}
                     </div>
+                  </div>
                   </div>
                 </div>
               </div>

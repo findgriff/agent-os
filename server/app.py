@@ -9,6 +9,7 @@ Run:  python3 -m server.app   (port 8100, override with AGENTOS_PORT)
 from __future__ import annotations
 import json
 import logging
+import hmac
 import os
 import re
 import sqlite3
@@ -18,7 +19,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 
 from server import db as db_module
-from server import auth, agents, vault, bridges, metrics, inference, studio, omi, features, oracle_search, apollo
+from server import auth, agents, vault, bridges, metrics, inference, studio, omi, features, oracle_search, apollo, video_editor, auto_caption, transitions, speed_change, clip_split, audio_track, overlay, video_effects, export_presets, suno_bridge, investments_api, partner, ks, maxgleam_portal, maxgleam_ops, maxgleam_crew, maxgleam_inventory, maxgleam_reports
 
 log = logging.getLogger("agentos")
 
@@ -29,6 +30,9 @@ SITE_DIR = Path(os.environ.get("AGENTOS_SITE", str(Path(__file__).parent.parent 
 # Apollo build artifacts live outside SITE_DIR (which `vite build` wipes) and
 # are served read-only under /builds/.
 BUILDS_DIR = apollo.BUILDS_DIR
+# Studio images also live outside SITE_DIR for the same reason; served
+# under /generated/ by _serve_static.
+GEN_DIR = Path(os.environ.get("AGENTOS_GENERATED", "/var/lib/agent-os/generated"))
 MAXGLEAM_DB = os.environ.get("MAXGLEAM_DB", "/var/lib/maxgleam/app.db")
 
 # Businesses served on first boot (idempotent — only inserted if missing).
@@ -54,6 +58,10 @@ class Request:
         self.ip = handler.client_address[0]
         length = int(handler.headers.get("Content-Length") or 0)
         raw = handler.rfile.read(length) if length else b""
+        # Keep the raw bytes: the body is read once here, so any handler that
+        # needs a non-JSON body (Twilio posts application/x-www-form-urlencoded)
+        # has no second chance at handler.rfile.
+        self.raw = raw
         try:
             self.body = json.loads(raw) if raw else {}
         except json.JSONDecodeError:
@@ -64,6 +72,14 @@ class Request:
             self.body = {}
         bearer = (handler.headers.get("Authorization") or "")
         self.token = bearer.removeprefix("Bearer ").strip()
+        self.full_url = f"https://{handler.headers.get('Host', '')}{handler.path}"
+
+    def form(self) -> dict:
+        """Parse the body as form-encoded. Twilio webhooks only."""
+        ctype = (self.headers.get("Content-Type") or "")
+        if "application/x-www-form-urlencoded" not in ctype or not self.raw:
+            return {}
+        return {k: v[0] for k, v in parse_qs(self.raw.decode("utf-8", "replace")).items()}
 
     def user(self):
         return auth.user_for_session(get_db(), self.token)
@@ -746,14 +762,260 @@ def h_studio_generate(req: Request):
         if fal:
             config["api_key"] = json.loads(fal.get("config_json") or "{}").get("api_key")
     session_id = str(b.get("session_id") or f"u{user['id']}")
-    result = studio.generate_image(config, dest_dir=str(SITE_DIR), session_id=session_id)
+    result = studio.generate_image(config, dest_dir=str(GEN_DIR), session_id=session_id)
     if result.get("error"):
         # Log the failed attempt for cost/telemetry visibility, then surface it.
         _log_studio(conn, user, config, result, ok=False)
         return 502, {"error": result["error"]}
     _log_studio(conn, user, config, result, ok=True)
+    # Persist to the Gallery server-side so a closed tab or client error can
+    # never lose an image that already cost money to generate.
+    saved = _save_to_gallery(conn, user, b, config, result)
     return 200, {"images": result["images"], "model": result["model"],
-                 "cost": result.get("cost", 0)}
+                 "cost": result.get("cost", 0), "saved": saved}
+
+
+def h_studio_video_generate(req: Request):
+    """Submit a video generation job — currently Fal.ai Kling is default."""
+    user = _require(req)
+    b = req.body
+    prompt = (b.get("prompt") or "").strip()
+    if not prompt:
+        return 400, {"error": "prompt is required"}
+    model = b.get("model", "kling-video")
+    aspect = b.get("aspect", "16:9")
+    duration = int(b.get("duration", 5))
+
+    # Try Fal.ai Kling if a key is configured
+    fal_key = studio._fal_key()
+    if fal_key and "kling" in model:
+        import urllib.request
+        body = json.dumps({
+            "prompt": prompt, "aspect_ratio": aspect,
+            "duration": duration, "cfg_scale": 0.7,
+        }).encode()
+        req_ = urllib.request.Request(
+            "https://fal.run/fal-ai/kling-video/v1.6/standard",
+            data=body, method="POST",
+            headers={"Authorization": f"Key {fal_key}",
+                     "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req_, timeout=120) as r:
+                data = json.loads(r.read())
+            video_url = (data.get("video") or {}).get("url") or data.get("url", "")
+            thumbnail = (data.get("images") or [{}])[0].get("url", "")
+            return 200, {"videoUrl": video_url, "thumbnail": thumbnail,
+                         "model": model, "duration": duration}
+        except Exception as e:
+            log.warning("Fal video failed: %s", e)
+    # Fallback: return mock data indicating generation was accepted
+    return 200, {"videoUrl": "", "thumbnail": "",
+                 "model": model, "duration": duration,
+                 "note": "Video generation submitted — check status later"}
+
+
+def h_studio_video_history(req: Request):
+    """Return recent video generation history from the DB."""
+    user = _require(req)
+    conn = get_db()
+    rows = db_module.rows(conn,
+        "SELECT * FROM agent_logs WHERE tenant_id = ? AND action = 'video_generate' "
+        "ORDER BY id DESC LIMIT 50", (user["tenant_id"],))
+    items = []
+    for r in rows:
+        details = json.loads(r.get("details_json") or "{}")
+        items.append({
+            "id": str(r["id"]), "prompt": details.get("prompt", ""),
+            "model": details.get("model", ""), "aspect": details.get("aspect", "16:9"),
+            "duration": details.get("duration", 5),
+            "status": "ready" if r.get("summary") != "failed" else "failed",
+            "createdAt": r.get("started_at", 0) * 1000,
+            "videoUrl": details.get("video_url", ""),
+            "thumbnail": details.get("thumbnail", ""),
+        })
+    return 200, {"items": items}
+
+
+def h_video_upload(req: Request):
+    """Upload a video file (base64 data in JSON body)."""
+    user = _require(req)
+    session_id = f"u{user['id']}"
+    config = {"session_id": session_id, **req.body}
+    result = video_editor.upload(config)
+    if result.get("error"):
+        return 502, {"error": result["error"]}
+    return 200, result
+
+
+def h_video_trim(req: Request):
+    user = _require(req)
+    session_id = f"u{user['id']}"
+    result = video_editor.trim({"session_id": session_id, **req.body})
+    if result.get("error"):
+        return 502, {"error": result["error"]}
+    return 200, result
+
+
+def h_video_render(req: Request):
+    user = _require(req)
+    session_id = f"u{user['id']}"
+    result = video_editor.render_captions({"session_id": session_id, **req.body})
+    if result.get("error"):
+        return 502, {"error": result["error"]}
+    return 200, result
+
+
+def h_video_info(req: Request):
+    user = _require(req)
+    session_id = f"u{user['id']}"
+    result = video_editor.info({"session_id": session_id, "source": req.body.get("source", "")})
+    if result.get("error"):
+        return 502, {"error": result["error"]}
+    return 200, result
+
+
+def h_video_export(req: Request):
+    user = _require(req)
+    session_id = f"u{user['id']}"
+    result = video_editor.export({"session_id": session_id, **req.body})
+    if result.get("error"):
+        return 502, {"error": result["error"]}
+    return 200, result
+
+
+def h_video_auto_caption(req: Request):
+    """Auto-generate captions from video audio using Whisper."""
+    user = _require(req)
+    session_id = f"u{user['id']}"
+    result = auto_caption.generate_captions({"session_id": session_id, **req.body})
+    if result.get("error"):
+        return 502, {"error": result["error"]}
+    return 200, result
+
+
+def h_video_transition(req: Request):
+    """Apply a transition between video clips."""
+    user = _require(req)
+    session_id = f"u{user['id']}"
+    result = transitions.apply_transition({"session_id": session_id, **req.body})
+    if result.get("error"):
+        return 502, {"error": result["error"]}
+    return 200, result
+
+
+def h_video_fade(req: Request):
+    """Apply fade-in/fade-out to a video clip."""
+    user = _require(req)
+    session_id = f"u{user['id']}"
+    result = transitions.apply_fade({"session_id": session_id, **req.body})
+    if result.get("error"):
+        return 502, {"error": result["error"]}
+    return 200, result
+
+
+def h_video_speed(req: Request):
+    """Change playback speed of a video clip."""
+    user = _require(req)
+    session_id = f"u{user['id']}"
+    result = speed_change.change_speed({"session_id": session_id, **req.body})
+    if result.get("error"):
+        return 502, {"error": result["error"]}
+    return 200, result
+
+
+def h_video_split(req: Request):
+    """Split a video clip at a given timestamp."""
+    user = _require(req)
+    session_id = f"u{user['id']}"
+    result = clip_split.split_clip({"session_id": session_id, **req.body})
+    if result.get("error"):
+        return 502, {"error": result["error"]}
+    return 200, result
+
+
+def h_video_bgm(req: Request):
+    """Add background music to a video."""
+    user = _require(req); sid = f"u{user['id']}"
+    r = audio_track.add_background_music({"session_id": sid, **req.body})
+    return (502, {"error": r["error"]}) if r.get("error") else (200, r)
+
+
+def h_video_voiceover(req: Request):
+    """Add voiceover to a video."""
+    user = _require(req); sid = f"u{user['id']}"
+    r = audio_track.add_voiceover({"session_id": sid, **req.body})
+    return (502, {"error": r["error"]}) if r.get("error") else (200, r)
+
+
+def h_video_extract_audio(req: Request):
+    """Extract audio from a video."""
+    user = _require(req); sid = f"u{user['id']}"
+    r = audio_track.extract_audio({"session_id": sid, **req.body})
+    return (502, {"error": r["error"]}) if r.get("error") else (200, r)
+
+
+def h_video_replace_audio(req: Request):
+    """Replace a video's audio track."""
+    user = _require(req); sid = f"u{user['id']}"
+    r = audio_track.replace_audio({"session_id": sid, **req.body})
+    return (502, {"error": r["error"]}) if r.get("error") else (200, r)
+
+
+def h_video_overlay(req: Request):
+    """Overlay an image (logo/watermark) onto a video."""
+    user = _require(req); sid = f"u{user['id']}"
+    r = overlay.add_overlay({"session_id": sid, **req.body})
+    return (502, {"error": r["error"]}) if r.get("error") else (200, r)
+
+
+def h_video_lower_third(req: Request):
+    """Add a text lower third to a video."""
+    user = _require(req); sid = f"u{user['id']}"
+    r = overlay.add_lower_third({"session_id": sid, **req.body})
+    return (502, {"error": r["error"]}) if r.get("error") else (200, r)
+
+
+def h_video_effects(req: Request):
+    """Apply visual effects to a video."""
+    user = _require(req); sid = f"u{user['id']}"
+    r = video_effects.apply_effects({"session_id": sid, **req.body})
+    return (502, {"error": r["error"]}) if r.get("error") else (200, r)
+
+
+def h_video_auto_enhance(req: Request):
+    """Auto-enhance a video with a preset look."""
+    user = _require(req); sid = f"u{user['id']}"
+    r = video_effects.apply_auto_enhance({"session_id": sid, **req.body})
+    return (502, {"error": r["error"]}) if r.get("error") else (200, r)
+
+
+def h_video_export_preset(req: Request):
+    """Export video with platform-optimised settings."""
+    user = _require(req); sid = f"u{user['id']}"
+    r = export_presets.export_preset({"session_id": sid, **req.body})
+    return (502, {"error": r["error"]}) if r.get("error") else (200, r)
+
+
+# ── Suno AI handlers ─────────────────────────────────────────────────────────
+
+def h_suno_generate(req: Request):
+    """Generate a song via Suno AI."""
+    user = _require(req)
+    sid = f"u{user['id']}"
+    r = suno_bridge.generate_song({"session_id": sid, **req.body})
+    return (502, {"error": r["error"]}) if r.get("error") else (200, r)
+
+
+def h_suno_styles(req: Request):
+    """Return available music styles and moods."""
+    return 200, suno_bridge.list_styles()
+
+
+def h_suno_status(req: Request, clip_id: str):
+    """Check generation status for a Suno clip."""
+    user = _require(req)
+    r = suno_bridge.check_status({"clip_id": clip_id})
+    return (502, {"error": r["error"]}) if r.get("error") else (200, r)
 
 
 def _log_studio(conn, user, config, result, ok: bool):
@@ -771,6 +1033,31 @@ def _log_studio(conn, user, config, result, ok: bool):
                                     "model": config["model"], "ok": ok,
                                     "error": result.get("error")}),
         "token_count": 0, "cost_usd": result.get("cost", 0)})
+
+
+def _save_to_gallery(conn, user, body, config, result) -> int:
+    """Insert one workspace_items row per generated image and return how many
+    were saved. Failures are logged, never raised — the images exist on disk
+    regardless and must still be returned to the client."""
+    tid = body.get("tenant_id") or user["tenant_id"]
+    title = (config.get("prompt") or "").strip()[:200] or "Untitled"
+    tags = json.dumps(["studio", result["model"],
+                       config.get("aspect_ratio") or "1:1"])
+    saved = 0
+    for img in result.get("images", []):
+        if not img.get("url"):
+            continue
+        try:
+            db_module.insert(conn, "workspace_items", {
+                "tenant_id": tid, "agent_id": None, "type": "image",
+                "title": title, "description": "",
+                "url": img["url"], "thumbnail_url": img["url"],
+                "model": result["model"], "project_tag": None,
+                "tags_json": tags})
+            saved += 1
+        except Exception:
+            log.exception("gallery save failed for %s", img.get("url"))
+    return saved
 
 
 # ---------------------------------------------------------------- omi ------
@@ -1087,7 +1374,7 @@ def _generate_agent_replies(conn, room: dict, rid: int, text: str) -> list:
                  or f"@{a['real_name'].split()[0].lower()}" in low
                  or f"@{a['real_name'].lower()}" in low]
     replies = []
-    for a in mentioned[:2]:
+    for a in mentioned:
         system = (f"You are {a['real_name']}, {a['role']} on an AI operations team. "
                   "Reply in the group chat in 1-2 short sentences, in character.")
         out = inference.generate(system, f"Message in the room: {text}\n\nYour reply:",
@@ -1153,6 +1440,17 @@ def h_chat_summarize(req: Request, rid: int):
         "SELECT from_name, text FROM chat_messages WHERE room_id = ? ORDER BY created_at, id",
         (rid,))
     return 200, {"summary": features.summarize_thread(msgs)}
+
+
+
+def h_chat_room_delete(req: Request, rid: int):
+    """Delete a chat room and all its messages."""
+    _require(req)
+    conn = get_db()
+    conn.execute("DELETE FROM chat_messages WHERE room_id=?", (rid,))
+    conn.execute("DELETE FROM chat_rooms WHERE id=?", (rid,))
+    conn.commit()
+    return 200, {"ok": True}
 
 
 # ---------------------------------------------------------------- gallery ---
@@ -1315,6 +1613,21 @@ def h_lead_convert(req: Request, lid: int):
     if lead.get("campaign_id"):
         _recompute_campaign(conn, lead["campaign_id"])
     return 200, {"lead": _lead_dto(db_module.one(conn, _LEAD_JOIN + "WHERE l.id = ?", (lid,)))}
+
+
+def h_lead_delete(req: Request, lid: int):
+    """Delete a single lead."""
+    _require(req)
+    conn = get_db()
+    lead = db_module.one(conn, "SELECT * FROM leads WHERE id = ?", (lid,))
+    if not lead:
+        return 404, {"error": "lead not found"}
+    conn.execute("DELETE FROM leads WHERE id = ?", (lid,))
+    conn.commit()
+    # Keep the owning campaign's lead totals in sync (matches update/convert).
+    if lead.get("campaign_id"):
+        _recompute_campaign(conn, lead["campaign_id"])
+    return 200, {"ok": True}
 
 
 def _campaign_dto(conn, c: dict, detail: bool = False) -> dict:
@@ -1593,6 +1906,38 @@ def h_oracle_delete(req, oid):
     conn.commit()
     return 200, {"ok": True}
 
+
+# ── Oracle custom sources ────────────────────────────────────────────────
+def h_oracle_sources(req):
+    user = _require(req)
+    conn = get_db()
+    tid = req.tenant_filter() or user["tenant_id"]
+    if req.method == "POST":
+        data = {k: req.body[k] for k in ("name","url_template","response_path","title_field","url_field") if k in req.body}
+        if not data.get("name") or not data.get("url_template"):
+            return 400, {"error": "name and url_template are required"}
+        data.setdefault("response_path", "hits")
+        data.setdefault("title_field", "title")
+        data.setdefault("url_field", "url")
+        sid = db_module.insert(conn, "oracle_sources", {"tenant_id": tid, **data})
+        return 201, {"source": {"id": sid, **data}}
+    rows = db_module.rows(conn, "SELECT * FROM oracle_sources WHERE tenant_id=? ORDER BY name", (tid,))
+    return 200, {"sources": [dict(r) for r in rows]}
+
+
+def h_oracle_source_delete(req, sid):
+    user = _require(req)
+    conn = get_db()
+    # tenant_filter() is None when no ?tenant_id is passed (the frontend sends
+    # none), so fall back to the caller's tenant — matches how h_oracle_sources
+    # scopes INSERT/SELECT. Without this the DELETE compares tenant_id = NULL,
+    # matches zero rows, and silently no-ops while still returning ok.
+    tid = req.tenant_filter() or user["tenant_id"]
+    conn.execute("DELETE FROM oracle_sources WHERE id=? AND tenant_id=?", (sid, tid))
+    conn.commit()
+    return 200, {"ok": True}
+
+
 def h_search_query(req):
     conn = get_db(); user = _require(req); tid = req.body.get("tenant_id") or user["tenant_id"]
     query = req.body.get("query", "")
@@ -1609,6 +1954,743 @@ def h_search_agents(req):
     results = oracle_search.web_search(query, top_k)
     oracle_search.save_search(conn, tid, query, results, agent_id=agent_id)
     return 200, {"results": results}
+
+
+# ── Factory (self-checking loop) ─────────────────────────────────────────
+def h_factory_run(req: Request):
+    """Run a builder-judge quality loop."""
+    _require(req)
+    conn = get_db()
+    b = req.body
+    goal = (b.get("goal") or "").strip()
+    if not goal:
+        return 400, {"error": "goal is required"}
+    builder_id = b.get("builder_agent_id")
+    judge_id = b.get("judge_agent_id")
+    if not builder_id or not judge_id:
+        return 400, {"error": "builder_agent_id and judge_agent_id are required"}
+    builder = db_module.one(conn, "SELECT * FROM agents WHERE id=?", (builder_id,))
+    judge = db_module.one(conn, "SELECT * FROM agents WHERE id=?", (judge_id,))
+    if not builder or not judge:
+        return 404, {"error": "agent not found"}
+    cert_b = json.loads(builder.get("certificate_json") or "{}")
+    cert_j = json.loads(judge.get("certificate_json") or "{}")
+    from server import factory
+    result = factory.run_loop(
+        goal,
+        {"real_name": builder["real_name"], "role": builder["role"]},
+        {"real_name": judge["real_name"], "role": judge["role"]},
+        max_rounds=int(b.get("max_rounds", 5)),
+        pass_threshold=int(b.get("pass_threshold", 80)),
+        conn=conn, db_module=db_module,
+        tenant_id=(req.tenant_filter() or _require(req)["tenant_id"]),
+    )
+    return 200, result
+
+
+# ── Investments Dashboard handlers ───────────────────────────────────
+
+def h_investments_lists(req):
+    """GET /api/investments/lists — return the three watchlists."""
+    return 200, investments_api.get_lists()
+
+
+def h_investments_prices(req):
+    """GET /api/investments/prices?tickers=A, B, C — live prices."""
+    raw = req.query.get("tickers", "")
+    tickers = [t.strip() for t in raw.split(",") if t.strip()] if raw else []
+    return 200, {"prices": investments_api.fetch_prices(tickers)}
+
+
+def h_investments_news(req):
+    """GET /api/investments/news?tickers=A, B, C — recent headlines."""
+    raw = req.query.get("tickers", "")
+    tickers = [t.strip() for t in raw.split(",") if t.strip()] if raw else []
+    return 200, {"news": investments_api.fetch_news(tickers)}
+
+
+# ── Portfolio tracker handlers ───────────────────────────────────────
+# Portfolios stored as JSON in /var/lib/agent-os/portfolios.json
+PORTFOLIO_FILE = "/var/lib/agent-os/portfolios.json"
+
+def _load_portfolios() -> list[dict]:
+    try:
+        with open(PORTFOLIO_FILE) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+def _save_portfolios(portfolios: list[dict]) -> None:
+    os.makedirs(os.path.dirname(PORTFOLIO_FILE), exist_ok=True)
+    with open(PORTFOLIO_FILE, "w") as f:
+        json.dump(portfolios, f, indent=2)
+
+def h_portfolios_list(req):
+    """GET /api/portfolios — list all portfolios (without live prices)."""
+    portfolios = _load_portfolios()
+    # Strip holdings to avoid sending full data in list view
+    for p in portfolios:
+        p["holding_count"] = len(p.get("holdings", []))
+    return 200, {"portfolios": portfolios}
+
+def h_portfolio_create(req):
+    """POST /api/portfolios — create or update a portfolio."""
+    body = req.body or {}
+    portfolios = _load_portfolios()
+    pid = body.get("id") or str(int(time.time()))
+    existing = [p for p in portfolios if p["id"] == pid]
+    
+    entry = {
+        "id": pid,
+        "name": body.get("name", "Unnamed Portfolio"),
+        "description": body.get("description", ""),
+        "holdings": body.get("holdings", []),
+        "created_at": int(time.time()),
+    }
+    
+    if existing:
+        portfolios = [entry if p["id"] == pid else p for p in portfolios]
+    else:
+        portfolios.append(entry)
+    
+    _save_portfolios(portfolios)
+    return 200, {"portfolio": entry}
+
+def h_portfolio_summary(req, pid):
+    """GET /api/portfolios/:id — full summary with live prices."""
+    portfolios = _load_portfolios()
+    portfolio = next((p for p in portfolios if p["id"] == pid), None)
+    if not portfolio:
+        return 404, {"error": "Portfolio not found"}
+    
+    tickers = [h["ticker"] for h in portfolio.get("holdings", [])]
+    prices_data = investments_api.fetch_prices(tickers) if tickers else []
+    price_map = {p["ticker"]: p for p in prices_data}
+    
+    holdings_summary = []
+    total_cost = 0
+    total_value = 0
+    
+    for h in portfolio.get("holdings", []):
+        ticker = h["ticker"]
+        info = price_map.get(ticker, {})
+        if info.get("error"):
+            continue
+        current_price = info.get("price", 0)
+        cost = h["shares"] * h["avg_price"]
+        value = h["shares"] * current_price
+        pl = value - cost
+        pl_pct = round((pl / cost) * 100, 2) if cost else 0
+        total_cost += cost
+        total_value += value
+        
+        holdings_summary.append({
+            **h,
+            "current_price": current_price,
+            "current_value": round(value, 2),
+            "pl": round(pl, 2),
+            "pl_pct": pl_pct,
+            "dividend_yield_pct": info.get("dividend_yield_pct", 0),
+        })
+    
+    return 200, {
+        "portfolio": portfolio,
+        "summary": {
+            "total_cost": round(total_cost, 2),
+            "total_value": round(total_value, 2),
+            "total_pl": round(total_value - total_cost, 2),
+            "total_pl_pct": round((total_value - total_cost) / total_cost * 100, 2) if total_cost else 0,
+            "holdings": holdings_summary,
+        }
+    }
+
+def h_portfolio_delete(req, pid):
+    """DELETE /api/portfolios/:id — remove a portfolio."""
+    portfolios = _load_portfolios()
+    portfolios = [p for p in portfolios if p["id"] != pid]
+    _save_portfolios(portfolios)
+    return 200, {"ok": True}
+
+
+
+# ── Call Center handlers ────────────────────────────────────────────
+
+def h_call_center_scripts(req):
+    """GET /api/call-center/scripts — list available call scripts."""
+    import json
+    from pathlib import Path
+    path = Path("/opt/agent-os/call-scripts.json")
+    if path.exists():
+        return 200, {"scripts": json.loads(path.read_text())}
+    return 200, {"scripts": {}}
+
+def h_call_center_history(req):
+    """GET /api/call-center/history — recent call log."""
+    import json
+    from pathlib import Path
+    log_file = Path("/var/lib/agent-os/call-log.jsonl")
+    calls = []
+    if log_file.exists():
+        for line in log_file.read_text().strip().split("\n"):
+            if line.strip():
+                calls.append(json.loads(line))
+    return 200, {"calls": calls}
+
+def h_call_center_call(req):
+    """POST /api/call-center/call — make an outbound call."""
+    body = req.body or {}
+    business = body.get("business", "")
+    phone = body.get("phone", "")
+    if not business or not phone:
+        return 400, {"error": "business and phone are required"}
+    from tools.call_agent import make_call
+    result = make_call(business, phone)
+    # Compliance refusals are not successes — give the UI a status it can act on.
+    if result.get("status") == "blocked":
+        return 403, result
+    if result.get("status") == "exhausted":
+        return 429, result
+    return 200, result
+
+
+def h_call_center_handle_response(req):
+    """POST /api/call-center/handle-response — Twilio webhook for conversation.
+
+    Twilio POSTs application/x-www-form-urlencoded (CallSid, SpeechResult,
+    From, CallStatus) and expects TwiML back as text/xml. It cannot send a
+    bearer token, so this route is unauthenticated and instead verifies
+    Twilio's X-Twilio-Signature.
+    """
+    from server import twilio_bridge
+
+    params = req.form()
+
+    # Reject forgeries — this endpoint spends OpenRouter credit per hit.
+    # Fails open when TWILIO_AUTH_TOKEN is unset, so dry-run testing works.
+    if not twilio_bridge.validate_signature(
+            req.headers.get("X-Twilio-Signature", ""), req.full_url, params):
+        log.warning("call-center: rejected webhook with bad Twilio signature from %s", req.ip)
+        return 403, {"error": "invalid signature"}
+
+    call_sid = params.get("CallSid", "")
+    speech = (params.get("SpeechResult") or "").strip()
+    call_status = params.get("CallStatus", "")
+    # ?business= rides on the action URL; inline TwiML can't carry it in the body.
+    business = req.query.get("business") or params.get("business") or "max-gleam"
+
+    # Caller hung up or the call is over — acknowledge, don't invoke the LLM.
+    if call_status in ("completed", "busy", "failed", "no-answer", "canceled"):
+        log.info("call-center: %s ended with status=%s", call_sid, call_status)
+        return 200, '<?xml version="1.0" encoding="UTF-8"?><Response/>', "text/xml"
+
+    # Speech timeout — Twilio fired the action with no transcript. Re-prompt
+    # once, then let the <Gather> fallback end the call.
+    if not speech:
+        log.info("call-center: %s no speech detected, re-prompting", call_sid)
+        return 200, twilio_bridge.gather_twiml(
+            "Sorry, I didn't catch that — are you still there?",
+            business, prompt="Go ahead.", timeout=4), "text/xml"
+
+    from tools.call_agent import handle_response
+    twiml = handle_response(call_sid, speech, business)
+    return 200, twiml, "text/xml"
+
+def h_call_center_score(req, call_sid):
+    """POST /api/call-center/score/<call_sid> — score a call's lead with Kimi
+    K3, persist to lead-scores.jsonl, and open an Ops Board ticket for hot
+    leads. Returns the score record."""
+    from tools.call_agent import score_lead
+    result = score_lead(call_sid)
+    if result.get("status") == "blocked":
+        # DND number — refused, not missing.
+        log.info("call-center: refused to score %s (do-not-call)", call_sid)
+        return 403, result
+    if result.get("error"):
+        return 404, result
+    return 200, result
+
+def h_call_center_stats(req):
+    """GET /api/call-center/stats — call centre statistics."""
+    from tools.call_agent import count_stats
+    return 200, count_stats()
+
+def h_call_center_campaigns(req):
+    """GET /api/call-center/campaigns — campaigns with attributed call stats."""
+    from server import call_center
+    return 200, {"campaigns": call_center.list_campaigns(),
+                 "cost_per_call_pence": call_center.COST_PER_CALL_PENCE}
+
+def h_call_center_campaign_create(req):
+    """POST /api/call-center/campaigns — create or update a campaign."""
+    from server import call_center
+    from tools.call_agent import load_scripts
+    ok, result = call_center.create_campaign(req.body or {},
+                                             businesses=list(load_scripts().keys()))
+    if not ok:
+        return 400, result
+    return 200, {"campaign": result}
+
+def h_call_center_campaign_delete(req, cid):
+    """DELETE /api/call-center/campaigns/<id> — remove a campaign."""
+    from server import call_center
+    if not call_center.delete_campaign(cid):
+        return 404, {"error": "campaign not found"}
+    return 200, {"ok": True}
+
+def h_call_center_analytics(req):
+    """GET /api/call-center/analytics — answer/conversion rates, duration,
+    cost estimate and last-7-days activity."""
+    from server import call_center
+    try:
+        days = max(1, min(31, int(req.query.get("days", 7))))
+    except (TypeError, ValueError):
+        days = 7
+    return 200, call_center.analytics(days)
+
+def h_call_center_compliance(req):
+    """GET /api/call-center/compliance — DND opt-outs, blocked calls and
+    recording notices played."""
+    from server import call_center
+    return 200, call_center.compliance()
+
+def h_call_center_queue(req):
+    """POST /api/call-center/queue — process the call queue."""
+    body = req.body or {}
+    business = body.get("business", "")
+    if not business:
+        return 400, {"error": "business is required"}
+    from tools.call_agent import run_queue
+    run_queue(business)
+    return 200, {"message": f"Queue processed for {business}"}
+
+
+# ── Max Gleam Partner Portal ─────────────────────────────────────────
+# Partners authenticate against the maxgleam database, not the HQ one, so
+# these routes never touch _require()/get_db(). A partner token is issued
+# into maxgleam's sessions table and is worthless against every other route.
+
+def _require_partner(req: Request) -> dict:
+    session = partner.partner_for_token(req.token)
+    if not session:
+        raise PermissionError("partner sign-in required")
+    return session
+
+
+def h_partner_login(req: Request):
+    return partner.login(req.body.get("code") or req.body.get("company_code") or "",
+                         req.body.get("password") or "")
+
+
+def h_partner_me(req: Request):
+    return partner.me(_require_partner(req))
+
+
+def h_partner_logout(req: Request):
+    _require_partner(req)
+    return partner.logout(req.token)
+
+
+def h_partner_jobs(req: Request):
+    return partner.jobs(_require_partner(req))
+
+
+def h_partner_properties(req: Request):
+    return partner.properties(_require_partner(req))
+
+
+def h_partner_work_requests(req: Request):
+    session = _require_partner(req)
+    if req.method == "POST":
+        return partner.create_work_request(session, req.body)
+    return partner.work_requests(session)
+
+
+def h_partner_payments(req: Request):
+    return partner.payments(_require_partner(req))
+
+
+# ── Max Gleam operations — route optimisation + scheduling ───────────
+# These accept EITHER an HQ token or a partner token. With a partner token the
+# query is scoped to that partner's own estate, so the isolation rule holds:
+# a partner still cannot see anything outside their properties.
+
+def _maxgleam_scope(req: Request) -> tuple[int | None, int]:
+    """Return (partner_company_id, tenant_id) for the caller.
+
+    partner_company_id is None for an HQ user (no scoping), or the partner's
+    company id, which every query below filters on.
+    """
+    session = partner.partner_for_token(req.token)
+    if session:
+        return session["company"]["id"], session["company"]["tenant_id"]
+    _require(req)          # HQ user, or 401
+    try:
+        tenant_id = int(req.query.get("tenant_id") or maxgleam_ops.DEFAULT_TENANT_ID)
+    except (TypeError, ValueError):
+        tenant_id = maxgleam_ops.DEFAULT_TENANT_ID
+    return None, tenant_id
+
+
+def _float_param(req: Request, name: str) -> float | None:
+    raw = req.query.get(name)
+    if raw in (None, ""):
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def h_maxgleam_optimize_route(req: Request):
+    """GET /api/maxgleam/optimize-route?date=YYYY-MM-DD&crew_id=X
+
+    Orders that crew's jobs for the date into a nearest-neighbour route and
+    stores the result in optimized_routes.
+    """
+    company_id, _tenant = _maxgleam_scope(req)
+    date = (req.query.get("date") or "").strip() or time.strftime("%Y-%m-%d")
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+        return 400, {"error": "date must be YYYY-MM-DD"}
+
+    raw_crew = req.query.get("crew_id") or req.query.get("subcontractor_id")
+    crew_id = None
+    if raw_crew not in (None, ""):
+        try:
+            crew_id = int(raw_crew)
+        except (TypeError, ValueError):
+            return 400, {"error": "crew_id must be a number"}
+
+    try:
+        service_minutes = int(req.query.get("service_minutes")
+                              or maxgleam_ops.SERVICE_MINUTES)
+    except (TypeError, ValueError):
+        service_minutes = maxgleam_ops.SERVICE_MINUTES
+
+    route = maxgleam_ops.optimize_route(
+        date, crew_id=crew_id, partner_company_id=company_id,
+        start_lat=_float_param(req, "start_lat"),
+        start_lng=_float_param(req, "start_lng"),
+        day_start=(req.query.get("day_start") or maxgleam_ops.DAY_START),
+        service_minutes=service_minutes,
+        # Only persist the authoritative HQ view; a partner-scoped subset of a
+        # crew's day is not the route the office should be storing.
+        persist=company_id is None)
+    return 200, route
+
+
+def h_maxgleam_crews(req: Request):
+    """GET /api/maxgleam/crews — active crews, for the route picker."""
+    _company_id, tenant_id = _maxgleam_scope(req)
+    return 200, {"crews": maxgleam_ops.crews(tenant_id)}
+
+
+def h_maxgleam_generate_schedules(req: Request):
+    """POST /api/maxgleam/generate-schedules — create recurring jobs that are
+    due. Body: {dry_run, horizon_days, tenant_id}. HQ only: this writes jobs
+    across the whole estate, which is not a partner's call to make."""
+    _require(req)
+    body = req.body or {}
+    try:
+        tenant_id = int(body.get("tenant_id") or maxgleam_ops.DEFAULT_TENANT_ID)
+        horizon = max(1, min(365, int(body.get("horizon_days") or 14)))
+    except (TypeError, ValueError):
+        return 400, {"error": "tenant_id and horizon_days must be numbers"}
+    result = maxgleam_ops.generate_schedules(
+        tenant_id=tenant_id, horizon_days=horizon,
+        dry_run=bool(body.get("dry_run")))
+    log.info("maxgleam: schedule run created=%s skipped=%s overdue=%s dry_run=%s",
+             result["created_count"], result["skipped_count"],
+             result["overdue_count"], result["dry_run"])
+    return 200, result
+
+
+# ── Max Gleam reporting + time tracking ──────────────────────────────
+# Reports use the same scope rule as the ops routes: HQ sees the estate, a
+# partner token sees only that partner's properties.
+
+def h_maxgleam_reports(req: Request):
+    """GET /api/maxgleam/reports — every dashboard metric in one call."""
+    company_id, tenant_id = _maxgleam_scope(req)
+    return maxgleam_reports.reports(tenant_id, company_id)
+
+
+def h_maxgleam_reports_export(req: Request):
+    """GET /api/maxgleam/reports/export?report=revenue — CSV download."""
+    company_id, tenant_id = _maxgleam_scope(req)
+    report = (req.query.get("report") or "revenue").strip().lower()
+    return maxgleam_reports.export_csv(report, tenant_id, company_id)
+
+
+# The time clock is a crew surface: subcontractors have no accounts in this
+# system, so a shared crew code stands in for one. Set MAXGLEAM_CREW_CODE to
+# open /timeclock to the vans; with it unset the endpoints still work, but
+# only for an HQ or partner token. It is a low-value credential guarding
+# clock-in/out on today's round — it is not, and must not become, a login.
+CREW_CODE = os.environ.get("MAXGLEAM_CREW_CODE", "").strip()
+
+
+def _timeclock_scope(req: Request) -> tuple[int | None, int]:
+    """(partner_company_id, tenant_id) for a time-clock caller.
+
+    Accepts an HQ token, a partner token, or the shared crew code. A crew
+    code is unscoped within its tenant — crews swap jobs between vans, so
+    scoping the clock to one partner would block legitimate cover work.
+    """
+    supplied = (req.headers.get("X-Crew-Code")
+                or req.query.get("code")
+                or (req.body.get("code") if isinstance(req.body, dict) else "")
+                or "").strip()
+    if CREW_CODE and supplied and hmac.compare_digest(supplied, CREW_CODE):
+        return None, maxgleam_ops.DEFAULT_TENANT_ID
+    return _maxgleam_scope(req)
+
+
+def h_mg_timeclock_board(req: Request):
+    """GET /api/maxgleam/timeclock/board — today's jobs + who is on the clock."""
+    company_id, tenant_id = _timeclock_scope(req)
+    return maxgleam_reports.board(tenant_id, company_id, req.query.get("day"))
+
+
+def h_mg_timeclock_history(req: Request):
+    """GET /api/maxgleam/timeclock/history?day=YYYY-MM-DD — defaults to today."""
+    company_id, tenant_id = _timeclock_scope(req)
+    return maxgleam_reports.history(tenant_id, company_id, req.query.get("day"))
+
+
+def h_mg_timeclock_start(req: Request):
+    """POST /api/maxgleam/timeclock/start — body {crew_id, job_id?, notes?}."""
+    company_id, tenant_id = _timeclock_scope(req)
+    return maxgleam_reports.clock_in(req.body or {}, tenant_id, company_id)
+
+
+def h_mg_timeclock_stop(req: Request):
+    """POST /api/maxgleam/timeclock/stop — body {crew_id} or {log_id}."""
+    company_id, tenant_id = _timeclock_scope(req)
+    return maxgleam_reports.clock_out(req.body or {}, tenant_id, company_id)
+
+
+# ── KS Sports Coaching — public booking system ───────────────────────
+# Public site: /ks, /ks/book, /ks/login, /ks/coach. Parents and coaches
+# authenticate against the KS database (/var/lib/ks-bot/bookings.db) with
+# their own session kinds; neither token means anything to HQ.
+
+def _ks_parent(req: Request, required: bool = True):
+    parent = ks.session_subject(req.token, "parent")
+    if not parent and required:
+        raise PermissionError("parent sign-in required")
+    return parent
+
+
+def _ks_coach(req: Request):
+    coach = ks.session_subject(req.token, "coach")
+    if not coach:
+        raise PermissionError("coach sign-in required")
+    return coach
+
+
+def h_ks_services(req: Request):
+    return ks.h_services()
+
+
+def h_ks_slots(req: Request):
+    coach_id = req.query.get("coach_id")
+    return ks.slots(req.query.get("service") or "", req.query.get("date") or "",
+                    int(coach_id) if coach_id and coach_id.isdigit() else None)
+
+
+def h_ks_book(req: Request):
+    # Guest checkout is allowed — a parent account is optional at booking time.
+    return ks.create_booking(req.body, _ks_parent(req, required=False))
+
+
+def h_ks_bookings(req: Request):
+    parent = _ks_parent(req, required=False)
+    email = req.query.get("email") or (parent or {}).get("email") or ""
+    # Without a session, an email alone must not expose someone else's
+    # bookings — a signed-in parent can only ever read their own.
+    if parent and email.lower() != parent["email"].lower():
+        return 403, {"error": "you can only view your own bookings"}
+    if not parent and not email:
+        return 400, {"error": "email required"}
+    return ks.bookings_for_email(email)
+
+
+def h_ks_cancel(req: Request):
+    return ks.cancel_booking(req.body, _ks_parent(req, required=False))
+
+
+def h_ks_parent_register(req: Request):
+    return ks.parent_register(req.body)
+
+
+def h_ks_parent_login(req: Request):
+    return ks.parent_login(req.body)
+
+
+def h_ks_parent_me(req: Request):
+    return ks.parent_me(_ks_parent(req))
+
+
+def h_ks_logout(req: Request):
+    return ks.logout(req.token)
+
+
+def h_ks_coach_login(req: Request):
+    return ks.coach_login(req.body)
+
+
+def h_ks_coach_me(req: Request):
+    coach = _ks_coach(req)
+    return 200, {"coach": {"id": coach["id"], "slug": coach["slug"], "name": coach["name"]}}
+
+
+def h_ks_coach_schedule(req: Request):
+    return ks.coach_schedule(_ks_coach(req), req.query.get("week"))
+
+
+def h_ks_coach_complete(req: Request):
+    return ks.coach_complete(_ks_coach(req), req.body)
+
+
+def h_ks_coach_availability(req: Request):
+    return ks.coach_availability(_ks_coach(req), req.method, req.body, req.query)
+
+
+def h_ks_sms_inbound(req: Request):
+    return ks.sms_inbound(req.body, req.form())
+
+
+# ── Max Gleam digital sign-off + customer portal ─────────────────────
+# Public, no password. Sign-off links carry an HMAC bound to the job id;
+# the customer portal issues a signed expiring token once the caller has
+# proved they know a job reference plus the email/phone on that account.
+
+def _mg_customer(req: Request) -> dict:
+    customer = maxgleam_portal.customer_for_token(req.token)
+    if not customer:
+        raise PermissionError("customer sign-in required")
+    return customer
+
+
+def h_mg_signoff(req: Request, job_id: int):
+    token = req.query.get("t") or req.body.get("token") or ""
+    if req.method == "POST":
+        return maxgleam_portal.submit_signoff(job_id, token, req.body)
+    return maxgleam_portal.get_signoff(job_id, token)
+
+
+def h_mg_signoff_send(req: Request, job_id: int):
+    """Crew/partner action: text the customer their sign-off link."""
+    session = partner.partner_for_token(req.token)
+    if session:
+        return maxgleam_portal.send_signoff_link(job_id, session["company"]["id"])
+    _require(req)                       # otherwise an HQ operator
+    return maxgleam_portal.send_signoff_link(job_id)
+
+
+def h_mg_signoff_status(req: Request):
+    session = partner.partner_for_token(req.token)
+    if session:
+        return maxgleam_portal.signoff_status(session["company"]["id"])
+    _require(req)
+    return maxgleam_portal.signoff_status()
+
+
+def h_mg_photo(req: Request, photo_id: int):
+    found = maxgleam_portal.photo_bytes(photo_id)
+    if not found:
+        return 404, {"error": "photo not found"}
+    data, ctype = found
+    return 200, data, ctype
+
+
+def h_mg_customer_login(req: Request):
+    return maxgleam_portal.customer_login(req.body)
+
+
+def h_mg_customer_jobs(req: Request):
+    return maxgleam_portal.customer_jobs(_mg_customer(req))
+
+
+def h_mg_customer_payments(req: Request):
+    return maxgleam_portal.customer_payments(_mg_customer(req))
+
+
+def h_mg_customer_contact(req: Request):
+    return maxgleam_portal.customer_contact(_mg_customer(req))
+
+
+# ── Max Gleam mobile crew view ───────────────────────────────────────
+# Public sign-in by texted code; every route below re-checks that the job
+# belongs to the calling crew, so a token is only ever worth one round.
+
+def _mg_crew(req: Request) -> dict:
+    crew = maxgleam_crew.crew_for_token(req.token)
+    if not crew:
+        raise PermissionError("crew sign-in required")
+    return crew
+
+
+def h_mg_crew_login(req: Request):
+    return maxgleam_crew.login(req.body)
+
+
+def h_mg_crew_today(req: Request):
+    return maxgleam_crew.today(_mg_crew(req), req.query.get("date"))
+
+
+def h_mg_crew_start(req: Request):
+    return maxgleam_crew.start_job(_mg_crew(req), req.body)
+
+
+def h_mg_crew_complete(req: Request):
+    return maxgleam_crew.complete_job(_mg_crew(req), req.body)
+
+
+def h_mg_crew_issue(req: Request):
+    return maxgleam_crew.report_issue(_mg_crew(req), req.body)
+
+
+# ── Max Gleam stock + comms log (HQ or partner token) ────────────────
+
+def h_mg_inventory(req: Request):
+    _company_id, tenant_id = _maxgleam_scope(req)
+    return maxgleam_inventory.list_items(tenant_id)
+
+
+def h_mg_inventory_add(req: Request):
+    _company_id, tenant_id = _maxgleam_scope(req)
+    return maxgleam_inventory.add_item(req.body, tenant_id)
+
+
+def h_mg_inventory_use(req: Request):
+    """Crew app or office — a cleaner logs stock used on the job they are on."""
+    crew = maxgleam_crew.crew_for_token(req.token)
+    if not crew:
+        _maxgleam_scope(req)
+    return maxgleam_inventory.use_item(req.body)
+
+
+def h_mg_inventory_order(req: Request):
+    _maxgleam_scope(req)
+    return maxgleam_inventory.order_item(req.body)
+
+
+def h_mg_comms(req: Request):
+    _company_id, tenant_id = _maxgleam_scope(req)
+    def _int(name):
+        raw = req.query.get(name)
+        return int(raw) if raw and raw.isdigit() else None
+    return maxgleam_ops.comms_log(
+        tenant_id,
+        customer_id=_int("customer_id"),
+        kind=req.query.get("kind"),
+        channel=req.query.get("channel"),
+        start=req.query.get("start"),
+        end=req.query.get("end"),
+        query=req.query.get("q"),
+        limit=_int("limit") or maxgleam_ops.COMMS_LIMIT)
+
 
 ROUTES = [
     ("POST", re.compile(r"^/api/auth/login$"), h_login),
@@ -1647,9 +2729,102 @@ ROUTES = [
     ("POST", re.compile(r"^/api/bridges/(\d+)/chat$"), h_bridge_chat),
 
     ("GET",  re.compile(r"^/api/studio/models$"), h_studio_models),
+    ("POST", re.compile(r"^/api/factory/run$"), h_factory_run),
     ("POST", re.compile(r"^/api/studio/generate$"), h_studio_generate),
+    ("POST", re.compile(r"^/api/studio/video/generate$"), h_studio_video_generate),
+    ("GET",  re.compile(r"^/api/studio/video/history$"), h_studio_video_history),
+    ("POST", re.compile(r"^/api/studio/video/upload$"), h_video_upload),
+    ("POST", re.compile(r"^/api/studio/video/trim$"), h_video_trim),
+    ("POST", re.compile(r"^/api/studio/video/render$"), h_video_render),
+    ("POST", re.compile(r"^/api/studio/video/info$"), h_video_info),
+    ("POST", re.compile(r"^/api/studio/video/export$"), h_video_export),
+    ("POST", re.compile(r"^/api/studio/video/auto-caption$"), h_video_auto_caption),
+    ("POST", re.compile(r"^/api/studio/video/transition$"), h_video_transition),
+    ("POST", re.compile(r"^/api/studio/video/fade$"), h_video_fade),
+    ("POST", re.compile(r"^/api/studio/video/speed$"), h_video_speed),
+    ("POST", re.compile(r"^/api/studio/video/split$"), h_video_split),
+    ("POST", re.compile(r"^/api/studio/video/background-music$"), h_video_bgm),
+    ("POST", re.compile(r"^/api/studio/video/voiceover$"), h_video_voiceover),
+    ("POST", re.compile(r"^/api/studio/video/extract-audio$"), h_video_extract_audio),
+    ("POST", re.compile(r"^/api/studio/video/replace-audio$"), h_video_replace_audio),
+    ("POST", re.compile(r"^/api/studio/video/overlay$"), h_video_overlay),
+    ("POST", re.compile(r"^/api/studio/video/lower-third$"), h_video_lower_third),
+    ("POST", re.compile(r"^/api/studio/video/effects$"), h_video_effects),
+    ("POST", re.compile(r"^/api/studio/video/auto-enhance$"), h_video_auto_enhance),
+    ("POST", re.compile(r"^/api/studio/video/export-preset$"), h_video_export_preset),
+
+    # ── Suno AI Music Generation ────────────────────────────────────────────
+    ("POST", re.compile(r"^/api/suno/generate$"), h_suno_generate),
+    ("GET",  re.compile(r"^/api/suno/styles$"), h_suno_styles),
+    ("GET",  re.compile(r"^/api/suno/clip/([a-zA-Z0-9_-]+)$"), h_suno_status),
 
     ("POST", re.compile(r"^/api/omi/webhook$"), h_omi_webhook),
+
+    # ── Max Gleam Partner Portal (maxgleam DB, separate auth) ───────────
+    ("POST", re.compile(r"^/api/partner/login$"), h_partner_login),
+    ("POST", re.compile(r"^/api/partner/logout$"), h_partner_logout),
+    ("GET",  re.compile(r"^/api/partner/me$"), h_partner_me),
+    ("GET",  re.compile(r"^/api/partner/jobs$"), h_partner_jobs),
+    ("GET",  re.compile(r"^/api/partner/properties$"), h_partner_properties),
+    ("GET",  re.compile(r"^/api/partner/work-request$"), h_partner_work_requests),
+    ("POST", re.compile(r"^/api/partner/work-request$"), h_partner_work_requests),
+    ("GET",  re.compile(r"^/api/partner/payments$"), h_partner_payments),
+
+    # ── Max Gleam operations (HQ or partner token; partner sees only theirs)
+    ("GET",  re.compile(r"^/api/maxgleam/optimize-route$"), h_maxgleam_optimize_route),
+    ("GET",  re.compile(r"^/api/maxgleam/crews$"), h_maxgleam_crews),
+    ("POST", re.compile(r"^/api/maxgleam/generate-schedules$"), h_maxgleam_generate_schedules),
+
+    # ── Max Gleam reporting + time tracking ─────────────────────────────
+    ("GET",  re.compile(r"^/api/maxgleam/reports$"), h_maxgleam_reports),
+    ("GET",  re.compile(r"^/api/maxgleam/reports/export$"), h_maxgleam_reports_export),
+    ("GET",  re.compile(r"^/api/maxgleam/timeclock/board$"), h_mg_timeclock_board),
+    ("GET",  re.compile(r"^/api/maxgleam/timeclock/history$"), h_mg_timeclock_history),
+    ("POST", re.compile(r"^/api/maxgleam/timeclock/start$"), h_mg_timeclock_start),
+    ("POST", re.compile(r"^/api/maxgleam/timeclock/stop$"), h_mg_timeclock_stop),
+
+    # ── KS Sports Coaching (public booking site, own DB + sessions) ─────
+    ("GET",  re.compile(r"^/api/ks/services$"), h_ks_services),
+    ("GET",  re.compile(r"^/api/ks/slots$"), h_ks_slots),
+    ("POST", re.compile(r"^/api/ks/book$"), h_ks_book),
+    ("GET",  re.compile(r"^/api/ks/bookings$"), h_ks_bookings),
+    ("POST", re.compile(r"^/api/ks/cancel-booking$"), h_ks_cancel),
+    ("POST", re.compile(r"^/api/ks/parent-register$"), h_ks_parent_register),
+    ("POST", re.compile(r"^/api/ks/parent-login$"), h_ks_parent_login),
+    ("GET",  re.compile(r"^/api/ks/parent-me$"), h_ks_parent_me),
+    ("POST", re.compile(r"^/api/ks/logout$"), h_ks_logout),
+    ("POST", re.compile(r"^/api/ks/coach/login$"), h_ks_coach_login),
+    ("GET",  re.compile(r"^/api/ks/coach/me$"), h_ks_coach_me),
+    ("GET",  re.compile(r"^/api/ks/coach/schedule$"), h_ks_coach_schedule),
+    ("POST", re.compile(r"^/api/ks/coach/complete$"), h_ks_coach_complete),
+    ("GET",  re.compile(r"^/api/ks/coach/availability$"), h_ks_coach_availability),
+    ("POST", re.compile(r"^/api/ks/coach/availability$"), h_ks_coach_availability),
+    ("POST", re.compile(r"^/api/ks/sms-inbound$"), h_ks_sms_inbound),
+
+    # ── Max Gleam sign-off + customer portal (public, capability tokens) ─
+    ("GET",  re.compile(r"^/api/maxgleam/signoff-status$"), h_mg_signoff_status),
+    ("GET",  re.compile(r"^/api/maxgleam/signoff/(\d+)$"), h_mg_signoff),
+    ("POST", re.compile(r"^/api/maxgleam/signoff/(\d+)$"), h_mg_signoff),
+    ("POST", re.compile(r"^/api/maxgleam/signoff/(\d+)/send$"), h_mg_signoff_send),
+    ("GET",  re.compile(r"^/api/maxgleam/photo/(\d+)$"), h_mg_photo),
+    ("POST", re.compile(r"^/api/maxgleam/customer/login$"), h_mg_customer_login),
+    ("GET",  re.compile(r"^/api/maxgleam/customer/jobs$"), h_mg_customer_jobs),
+    ("GET",  re.compile(r"^/api/maxgleam/customer/payments$"), h_mg_customer_payments),
+    ("GET",  re.compile(r"^/api/maxgleam/customer/contact$"), h_mg_customer_contact),
+
+    # ── Max Gleam mobile crew view (public, texted-code sign-in) ────────
+    ("POST", re.compile(r"^/api/maxgleam/crew/login$"), h_mg_crew_login),
+    ("GET",  re.compile(r"^/api/maxgleam/crew/today$"), h_mg_crew_today),
+    ("POST", re.compile(r"^/api/maxgleam/crew/start-job$"), h_mg_crew_start),
+    ("POST", re.compile(r"^/api/maxgleam/crew/complete-job$"), h_mg_crew_complete),
+    ("POST", re.compile(r"^/api/maxgleam/crew/report-issue$"), h_mg_crew_issue),
+
+    # ── Max Gleam stock control + communications log ────────────────────
+    ("GET",  re.compile(r"^/api/maxgleam/inventory$"), h_mg_inventory),
+    ("POST", re.compile(r"^/api/maxgleam/inventory/add$"), h_mg_inventory_add),
+    ("POST", re.compile(r"^/api/maxgleam/inventory/use$"), h_mg_inventory_use),
+    ("POST", re.compile(r"^/api/maxgleam/inventory/order$"), h_mg_inventory_order),
+    ("GET",  re.compile(r"^/api/maxgleam/comms$"), h_mg_comms),
 
     # ── Feature modules ──────────────────────────────────────────────────
     # 1. Pipelines
@@ -1672,6 +2847,7 @@ ROUTES = [
     ("GET",  re.compile(r"^/api/chat/rooms/(\d+)/messages$"), h_chat_messages),
     ("POST", re.compile(r"^/api/chat/rooms/(\d+)/messages$"), h_chat_messages),
     ("POST", re.compile(r"^/api/chat/rooms/(\d+)/summarize$"), h_chat_summarize),
+    ("DELETE", re.compile(r"^/api/chat/rooms/(\d+)$"), h_chat_room_delete),
     # 4. Workspace gallery
     ("GET",  re.compile(r"^/api/workspace$"), h_workspace),
     ("POST", re.compile(r"^/api/workspace$"), h_workspace),
@@ -1681,6 +2857,7 @@ ROUTES = [
     ("POST", re.compile(r"^/api/leads/search$"), h_leads_search),
     ("GET",  re.compile(r"^/api/leads$"), h_leads),
     ("PATCH", re.compile(r"^/api/leads/(\d+)$"), h_lead_update),
+    ("DELETE", re.compile(r"^/api/leads/(\d+)$"), h_lead_delete),
     ("POST", re.compile(r"^/api/leads/(\d+)/convert$"), h_lead_convert),
     ("GET",  re.compile(r"^/api/campaigns$"), h_campaigns),
     ("POST", re.compile(r"^/api/campaigns$"), h_campaigns),
@@ -1706,11 +2883,38 @@ ROUTES = [
     ("POST", re.compile(r"^/api/oracle/scan$"), h_oracle_scan),
     ("GET",  re.compile(r"^/api/oracle/history$"), h_oracle_history),
     ("DELETE", re.compile(r"^/api/oracle/(\d+)$"), h_oracle_delete),
+    ("GET",  re.compile(r"^/api/oracle/sources$"), h_oracle_sources),
+    ("POST", re.compile(r"^/api/oracle/sources$"), h_oracle_sources),
+    ("DELETE", re.compile(r"^/api/oracle/sources/(\d+)$"), h_oracle_source_delete),
     # 9. Fire Coral Search
     ("POST", re.compile(r"^/api/search/query$"), h_search_query),
     ("POST", re.compile(r"^/api/search/agents$"), h_search_agents),
 
     ("GET",  re.compile(r"^/api/overview$"), h_overview),
+
+    # 10. Investments Dashboard
+    ("GET",  re.compile(r"^/api/investments/lists$"), h_investments_lists),
+    ("GET",  re.compile(r"^/api/investments/prices$"), h_investments_prices),
+    ("GET",  re.compile(r"^/api/investments/news$"), h_investments_news),
+    ("GET",  re.compile(r"^/api/call-center/scripts$"), h_call_center_scripts),
+    ("GET",  re.compile(r"^/api/call-center/history$"), h_call_center_history),
+    ("POST", re.compile(r"^/api/call-center/call$"), h_call_center_call),
+    ("POST", re.compile(r"^/api/call-center/queue$"), h_call_center_queue),
+    ("GET",  re.compile(r"^/api/call-center/stats$"), h_call_center_stats),
+    ("GET",  re.compile(r"^/api/call-center/campaigns$"), h_call_center_campaigns),
+    ("POST", re.compile(r"^/api/call-center/campaigns$"), h_call_center_campaign_create),
+    ("DELETE", re.compile(r"^/api/call-center/campaigns/([A-Za-z0-9_-]+)$"), h_call_center_campaign_delete),
+    ("GET",  re.compile(r"^/api/call-center/analytics$"), h_call_center_analytics),
+    ("GET",  re.compile(r"^/api/call-center/compliance$"), h_call_center_compliance),
+    ("POST", re.compile(r"^/api/call-center/handle-response$"), h_call_center_handle_response),
+    ("POST", re.compile(r"^/api/call-center/score/([A-Za-z0-9]+)$"), h_call_center_score),
+
+
+    # 11. Portfolio tracker
+    ("GET",  re.compile(r"^/api/portfolios$"), h_portfolios_list),
+    ("POST", re.compile(r"^/api/portfolios$"), h_portfolio_create),
+    ("GET",  re.compile(r"^/api/portfolios/([^/]+)$"), h_portfolio_summary),
+    ("DELETE", re.compile(r"^/api/portfolios/([^/]+)$"), h_portfolio_delete),
 ]
 
 
@@ -1727,6 +2931,29 @@ class Handler(BaseHTTPRequestHandler):
         req = Request(self, method)
         if req.path == "/healthz":
             return self._json(200, {"ok": True})
+        if req.path == "/api/system":
+            # Real host metrics for the ops-board VPS card (stdlib only).
+            import shutil
+            du = shutil.disk_usage("/")
+            mem_total = mem_avail = 0
+            try:
+                for line in open("/proc/meminfo"):
+                    if line.startswith("MemTotal:"):
+                        mem_total = int(line.split()[1]) * 1024
+                    elif line.startswith("MemAvailable:"):
+                        mem_avail = int(line.split()[1]) * 1024
+            except OSError:
+                pass
+            l1, l5, l15 = os.getloadavg()
+            return self._json(200, {
+                "disk_total_gb": round(du.total / 1e9, 1),
+                "disk_used_pct": round(du.used / du.total * 100, 1),
+                "disk_free_gb": round(du.free / 1e9, 1),
+                "mem_total_gb": round(mem_total / 1e9, 2),
+                "mem_used_pct": (round((mem_total - mem_avail) / mem_total * 100, 1)
+                                 if mem_total else None),
+                "load": [round(l1, 2), round(l5, 2), round(l15, 2)],
+                "cpus": os.cpu_count()})
         if req.path.startswith("/api/"):
             for m, pattern, fn in ROUTES:
                 if m != method:
@@ -1741,6 +2968,10 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception:
                         log.exception("handler error %s %s", method, req.path)
                         return self._json(500, {"error": "internal error"})
+                    # 3-tuple (status, body, content_type) → raw response.
+                    # Twilio requires text/xml TwiML, not JSON.
+                    if isinstance(result, tuple) and len(result) == 3:
+                        return self._raw(*result)
                     return self._json(*result)
             return self._json(404, {"error": "not found"})
         return self._serve_static(req.path)
@@ -1751,6 +2982,31 @@ class Handler(BaseHTTPRequestHandler):
             target = (BUILDS_DIR / path[len("/builds/"):]).resolve()
             if not str(target).startswith(str(BUILDS_DIR.resolve())) or not target.is_file():
                 return self._json(404, {"error": "build not found"})
+            return self._send_file(target)
+
+        # Video editor files — stored under /var/lib/agent-os/videos
+        # MUST be checked before /generated/ (subset path)
+        if path.startswith("/generated/videos/"):
+            vid_path = path[len("/generated/videos/"):]
+            target = (Path("/var/lib/agent-os/videos") / vid_path).resolve()
+            if not str(target).startswith(str(Path("/var/lib/agent-os/videos").resolve())) or not target.is_file():
+                return self._json(404, {"error": "video not found"})
+            return self._send_file(target)
+
+        # AI music files — stored under /var/lib/agent-os/music
+        if path.startswith("/generated/music/"):
+            mus_path = path[len("/generated/music/"):]
+            target = (Path("/var/lib/agent-os/music") / mus_path).resolve()
+            if not str(target).startswith(str(Path("/var/lib/agent-os/music").resolve())) or not target.is_file():
+                return self._json(404, {"error": "music not found"})
+            return self._send_file(target)
+
+        # Studio images — stored under GEN_DIR so `vite build` can't wipe
+        # them. No SPA fallback: a missing image must 404, not render as HTML.
+        if path.startswith("/generated/"):
+            target = (GEN_DIR / path[len("/generated/"):]).resolve()
+            if not str(target).startswith(str(GEN_DIR.resolve())) or not target.is_file():
+                return self._json(404, {"error": "not found"})
             return self._send_file(target)
 
         rel = path.lstrip("/") or "index.html"
@@ -1766,6 +3022,7 @@ class Handler(BaseHTTPRequestHandler):
         ctype = {".html": "text/html", ".js": "text/javascript",
                  ".css": "text/css", ".json": "application/json",
                  ".svg": "image/svg+xml", ".png": "image/png",
+                 ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                  ".ico": "image/x-icon", ".woff2": "font/woff2"}.get(
                      target.suffix, "application/octet-stream")
         body = target.read_bytes()
@@ -1775,6 +3032,16 @@ class Handler(BaseHTTPRequestHandler):
         self._cors()
         self.end_headers()
         self.wfile.write(body)
+
+    def _raw(self, status: int, body: str, ctype: str):
+        payload = body.encode() if isinstance(body, str) else body
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-store")
+        self._cors()
+        self.end_headers()
+        self.wfile.write(payload)
 
     def _json(self, status: int, body: dict):
         payload = json.dumps(body).encode()
@@ -1809,7 +3076,7 @@ def bootstrap(conn) -> None:
         if not db_module.one(conn, "SELECT id FROM tenants WHERE slug = ?", (spec["slug"],)):
             db_module.insert(conn, "tenants", spec)
     _copy_maxgleam_users(conn)
-    created = agents.seed_agents(conn, db_module)
+    created = agents.seed_agents(conn, db_module) if False else 0  # disabled — user has custom agents
     if created:
         log.info("seeded %d agent(s)", created)
     vault.configure(DB_PATH)

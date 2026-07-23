@@ -72,6 +72,10 @@ export default function Dashboard() {
     }
   };
 
+  // Greeting follows the local clock — command centres never say just "hello".
+  const hour = new Date().getHours();
+  const daypart = hour < 5 ? 'evening' : hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
+
   const stats = overview?.stats;
   const projects = overview?.projects || [];
   const activity = overview?.recent_activity || [];
@@ -87,11 +91,12 @@ export default function Dashboard() {
   return (
     <div className="p-4 md:p-6 space-y-6">
       {/* 1 ── Welcome banner ─────────────────────────────────────────── */}
-      <Card className="relative overflow-hidden glass-raised p-6 animate-fadeInUp">
-        <div className="aurora-bg pointer-events-none absolute inset-0 opacity-40" />
+      <Card className="relative overflow-hidden glass-raised p-6 animate-[fadeInUp_0.5s_ease-out_both,breathe_4s_ease-in-out_0.6s_infinite]">
+        <div className="aurora-bg animate-aurora pointer-events-none absolute inset-0 opacity-40" />
+        <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-accent/50 to-transparent" />
         <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-4">
-            <Logo size={44} showText={false} />
+            <div className="animate-float"><Logo size={44} showText={false} /></div>
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-accent">
@@ -99,10 +104,10 @@ export default function Dashboard() {
                 </span>
                 <Badge tone="ok" dot>Online</Badge>
               </div>
-              <h1 className="font-display text-2xl font-bold text-ink">
-                Welcome back, Commander
+              <h1 className="font-display text-2xl font-bold tracking-tight text-ink">
+                Good {daypart}, Commander
               </h1>
-              <p className="text-sm text-muted">
+              <p className="mt-0.5 text-sm text-muted">
                 Your fleet at a glance — every project, agent and memory in one view.
               </p>
             </div>
@@ -192,7 +197,10 @@ export default function Dashboard() {
 
           {/* 3 ── Project cards ───────────────────────────────────────── */}
           <section className="space-y-3">
-            <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-muted">Projects</h2>
+            <h2 className="flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-muted">
+              <span className="h-3.5 w-[3px] rounded-full bg-accent/70 shadow-[0_0_8px_rgba(25,195,230,0.5)]" />
+              Projects
+            </h2>
             {projects.length === 0 ? (
               <EmptyState icon="workspaces" title="No projects yet" hint="Projects appear here once agents are provisioned." />
             ) : (
@@ -201,20 +209,22 @@ export default function Dashboard() {
                   <Card key={p.id} hover role="button" tabIndex={0}
                     onClick={() => openProject(p.id)}
                     onKeyDown={e => { if (e.key === 'Enter') openProject(p.id); }}
-                    className="cursor-pointer p-4 animate-fadeInUp"
+                    className="group relative cursor-pointer overflow-hidden p-4 animate-fadeInUp"
                     style={{ animationDelay: `${i * 60}ms` }}>
-                    <div className="flex items-center gap-2">
-                      <span className="h-2.5 w-2.5 shrink-0 rounded-full"
-                        style={{ background: p.brand_colour, boxShadow: `0 0 8px ${p.brand_colour}` }} />
+                    <span className="absolute bottom-3 left-0 top-3 w-1 rounded-r-full transition-all duration-300 group-hover:bottom-2 group-hover:top-2"
+                      style={{ background: p.brand_colour, boxShadow: `0 0 12px ${p.brand_colour}88` }} />
+                    <div className="flex items-center gap-2 pl-2">
                       <div className="truncate font-display font-semibold text-ink">{p.name}</div>
                       {p.error_count > 0 && <Badge tone="danger" dot>{p.error_count}</Badge>}
+                      <span className="material-symbols-rounded ml-auto shrink-0 -translate-x-1 text-muted opacity-0 transition-all duration-200 group-hover:translate-x-0 group-hover:opacity-100"
+                        style={{ fontSize: 16 }}>arrow_forward</span>
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-1.5">
+                    <div className="mt-3 flex flex-wrap gap-1.5 pl-2">
                       <Badge tone="info">{p.agent_count} agents</Badge>
                       <Badge tone="ok" dot>{p.active_count} active</Badge>
                       <Badge tone="neutral">{p.runs_today} runs today</Badge>
                     </div>
-                    <div className="mt-3 flex items-center gap-1 text-xs text-muted">
+                    <div className="mt-3 flex items-center gap-1 pl-2 text-xs text-muted">
                       <span className="material-symbols-rounded" style={{ fontSize: 14 }}>schedule</span>
                       {timeAgo(p.latest?.created_at)}
                     </div>
@@ -227,45 +237,67 @@ export default function Dashboard() {
           {/* Two-column: Galaxy preview + activity feed ────────────────── */}
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
             {/* 4 ── Memory Galaxy mini preview ─────────────────────────── */}
-            <Card hover className="cursor-pointer overflow-hidden p-4 lg:col-span-2 animate-fadeInUp"
+            <Card hover className="group cursor-pointer overflow-hidden p-4 lg:col-span-2 animate-fadeInUp"
               onClick={() => navigate('/galaxy')}>
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-muted">Memory Galaxy</h2>
-                <span className="text-xs text-accent">Explore →</span>
+                <h2 className="flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-muted">
+                  <span className="h-3.5 w-[3px] rounded-full bg-violet/70 shadow-[0_0_8px_rgba(167,139,250,0.5)]" />
+                  Memory Galaxy
+                </h2>
+                <span className="flex items-center gap-1 text-xs text-accent">
+                  Explore
+                  <span className="material-symbols-rounded transition-transform duration-200 group-hover:translate-x-0.5"
+                    style={{ fontSize: 14 }}>arrow_forward</span>
+                </span>
               </div>
               {stars.length === 0 ? (
                 <EmptyState icon="auto_awesome" accent="#A78BFA" title="No memories yet"
                   hint="As agents learn, their memories light up here as stars." />
               ) : (
-                <div className="h-[300px] w-full">
-                  <Galaxy memories={stars} mini interactive={false} />
+                <div className="relative h-[300px] w-full overflow-hidden rounded-xl">
+                  {/* slow zoom on hover — leaning closer to the viewport glass */}
+                  <div className="h-full w-full transition-transform duration-[1800ms] ease-out group-hover:scale-[1.06]">
+                    <Galaxy memories={stars} mini interactive={false} />
+                  </div>
+                  <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_58%,rgba(5,8,12,0.65)_100%)]" />
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-[#05080C]/70 to-transparent" />
+                  <div className="pointer-events-none absolute bottom-2.5 right-3 font-mono text-[10px] uppercase tracking-widest text-muted/60">
+                    {stars.length} stars
+                  </div>
                 </div>
               )}
             </Card>
 
             {/* 5 ── Recent activity feed ───────────────────────────────── */}
             <Card className="p-4 animate-fadeInUp">
-              <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-muted">Recent activity</h2>
+              <h2 className="mb-3 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-wider text-muted">
+                <span className="h-3.5 w-[3px] rounded-full bg-emerald/70 shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
+                Recent activity
+              </h2>
               {activity.length === 0 ? (
                 <EmptyState icon="history" title="Quiet right now" hint="Agent activity across projects shows here." />
               ) : (
-                <div className="space-y-3">
-                  {activity.slice(0, 8).map((a: any, i: number) => (
-                    <div key={a.id ?? i} className="flex items-start gap-3 animate-fadeInUp"
-                      style={{ animationDelay: `${i * 40}ms` }}>
-                      <Avatar colour={a.avatar_colour} initials={a.avatar_initials} size={34} />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className="truncate text-sm font-semibold text-ink">
-                            {a.real_name || a.name || 'Agent'}
-                          </span>
-                          {a.tenant_name && <Badge tone="neutral">{a.tenant_name}</Badge>}
+                <div className="relative">
+                  {/* timeline spine connecting the avatars */}
+                  <div className="pointer-events-none absolute bottom-4 left-[23px] top-4 w-px bg-gradient-to-b from-accent/30 via-white/10 to-transparent" />
+                  <div className="space-y-1">
+                    {activity.slice(0, 8).map((a: any, i: number) => (
+                      <div key={a.id ?? i} className="relative flex items-start gap-3 rounded-xl p-1.5 transition-colors hover:bg-white/4 animate-fadeInUp"
+                        style={{ animationDelay: `${i * 40}ms` }}>
+                        <Avatar colour={a.avatar_colour} initials={a.avatar_initials} size={34} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="truncate text-sm font-semibold text-ink">
+                              {a.real_name || a.name || 'Agent'}
+                            </span>
+                            {a.tenant_name && <Badge tone="neutral">{a.tenant_name}</Badge>}
+                          </div>
+                          {a.summary && <div className="truncate text-xs text-muted">{a.summary}</div>}
+                          <div className="text-[11px] tabular-nums text-muted/70">{timeAgo(a.created_at)}</div>
                         </div>
-                        {a.summary && <div className="truncate text-xs text-muted">{a.summary}</div>}
-                        <div className="text-[11px] text-muted/70">{timeAgo(a.created_at)}</div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               )}
             </Card>
@@ -282,7 +314,7 @@ export default function Dashboard() {
                   </span>
                   <span className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-emerald">Live</span>
                 </div>
-                <div className="min-w-0 flex-1 overflow-hidden">
+                <div className="ticker-mask min-w-0 flex-1 overflow-hidden">
                   <div className="ticker-track">
                     {[0, 1].map(copy => (
                       <div key={copy} className="flex shrink-0 items-center" aria-hidden={copy === 1}>

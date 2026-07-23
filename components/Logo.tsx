@@ -1,9 +1,11 @@
 // AGENT OS wordmark — a glowing hex sigil + type. Pure SVG, no asset.
-export function Logo({ size = 34, showText = true, className = '' }:
-  { size?: number; showText?: boolean; className?: string }) {
+// `draw` plays the trace-on entrance (hex draws, ring follows, core pops).
+export function Logo({ size = 34, showText = true, className = '', draw = false }:
+  { size?: number; showText?: boolean; className?: string; draw?: boolean }) {
   return (
     <div className={`flex items-center gap-2.5 ${className}`}>
-      <svg width={size} height={size} viewBox="0 0 48 48" fill="none">
+      <svg width={size} height={size} viewBox="0 0 48 48" fill="none"
+        className={draw ? 'logo-draw' : undefined}>
         <defs>
           <linearGradient id="lg-a" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0%" stopColor="#19C3E6" />

@@ -52,6 +52,14 @@ export default function Login({ onAuthed }: { onAuthed: (u: User) => void }) {
       <div className="aurora-bg animate-aurora absolute inset-0" />
       <div className="grid-bg pointer-events-none absolute inset-0 opacity-60" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(25,195,230,0.10),transparent_55%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_50%_35%_at_50%_100%,rgba(103,72,190,0.12),transparent_70%)]" />
+
+      {/* Meteors */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <span className="shooting-star" style={{ top: '12%', left: '78%' }} />
+        <span className="shooting-star" style={{ top: '4%', left: '38%', animationDelay: '4.6s' }} />
+        <span className="shooting-star" style={{ top: '26%', left: '92%', animationDelay: '7.3s' }} />
+      </div>
 
       {/* Star / particle field */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -78,25 +86,28 @@ export default function Login({ onAuthed }: { onAuthed: (u: User) => void }) {
           {/* Ambient glow behind the card */}
           <div className="pointer-events-none absolute -inset-6 -z-10 rounded-[2.5rem] bg-[radial-gradient(ellipse_at_center,rgba(25,195,230,0.18),transparent_70%)] blur-xl" />
 
-          <div className={`glass-raised w-full rounded-3xl p-8 shadow-2xl shadow-black/50 ring-1 ring-accent/10 animate-[fadeInUp_0.6s_ease-out] transition-all duration-300 sm:p-10
+          <div className={`aura-border glass-raised w-full rounded-3xl p-8 shadow-2xl shadow-black/50 ring-1 ring-accent/10 animate-[fadeInUp_0.6s_ease-out] transition-all duration-300 sm:p-10
             ${loading ? 'ring-accent/30 shadow-[0_0_60px_-16px_rgba(25,195,230,0.4)]' : ''}`}>
             <div className="flex flex-col items-center text-center">
               <div className="relative">
-                <div className="absolute -inset-3 rounded-full bg-[radial-gradient(circle,rgba(25,195,230,0.28),transparent_70%)] blur-md animate-pulse" />
+                <div className="absolute -inset-3 rounded-full bg-[radial-gradient(circle,rgba(25,195,230,0.28),transparent_70%)] blur-md animate-pulse"
+                  style={{ animationDelay: '1.3s' }} />
                 <div className={`relative rounded-2xl transition-transform duration-500 ${loading ? 'scale-110' : ''}`}>
-                  <div className="animate-float"><Logo size={56} showText={false} /></div>
+                  <div className="animate-float"><Logo size={56} showText={false} draw /></div>
                 </div>
               </div>
-              <h1 className="mt-5 bg-gradient-to-r from-accent via-ink to-violet bg-clip-text font-display text-3xl font-bold tracking-[0.18em] text-transparent">
+              <h1 className="mt-5 animate-fadeInUp bg-gradient-to-r from-accent via-ink to-violet bg-clip-text font-display text-3xl font-bold tracking-[0.18em] text-transparent"
+                style={{ animationDelay: '0.35s' }}>
                 AGENT OS
               </h1>
-              <p className="mt-1.5 max-w-xs text-[11px] uppercase tracking-[0.22em] text-muted">
+              <p className="mt-1.5 max-w-xs animate-fadeInUp text-[11px] uppercase tracking-[0.22em] text-muted"
+                style={{ animationDelay: '0.5s' }}>
                 The Operating System for Autonomous Intelligence
               </p>
             </div>
 
             <form onSubmit={submit} className="mt-8 space-y-4">
-              <label className="block">
+              <label className="block animate-fadeInUp" style={{ animationDelay: '0.65s' }}>
                 <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-muted">Email</span>
                 <Input
                   type="email"
@@ -110,7 +121,7 @@ export default function Login({ onAuthed }: { onAuthed: (u: User) => void }) {
                 />
               </label>
 
-              <label className="block">
+              <label className="block animate-fadeInUp" style={{ animationDelay: '0.75s' }}>
                 <div className="mb-1.5 flex items-center justify-between">
                   <span className="block text-xs font-semibold uppercase tracking-wider text-muted">Password</span>
                   <button type="button" tabIndex={-1}
@@ -136,18 +147,21 @@ export default function Login({ onAuthed }: { onAuthed: (u: User) => void }) {
                 </div>
               )}
 
-              <Button
-                type="submit"
-                variant="primary"
-                loading={loading}
-                icon="login"
-                className="w-full py-2.5 text-[15px]"
-              >
-                {loading ? 'Authenticating…' : 'Enter AGENT OS'}
-              </Button>
+              <div className="animate-fadeInUp" style={{ animationDelay: '0.85s' }}>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  loading={loading}
+                  icon="login"
+                  className="w-full py-2.5 text-[15px]"
+                >
+                  {loading ? 'Authenticating…' : 'Enter AGENT OS'}
+                </Button>
+              </div>
             </form>
 
-            <div className="mt-7 flex items-center justify-center gap-1.5 text-[11px] uppercase tracking-[0.25em] text-muted/70">
+            <div className="mt-7 flex animate-fadeInUp items-center justify-center gap-1.5 text-[11px] uppercase tracking-[0.25em] text-muted/70"
+              style={{ animationDelay: '1s' }}>
               <span className="h-1 w-1 rounded-full bg-accent animate-pulseGlow" />
               secure channel
             </div>

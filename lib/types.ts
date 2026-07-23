@@ -2,6 +2,29 @@ export type Status = 'idle' | 'running' | 'flagged' | 'error';
 export type Team = 'marketing' | 'sales' | 'technical' | 'platform';
 export type ModelName = 'deepseek' | 'claude' | 'kimi';
 
+export interface StudioVideo {
+  id: string;
+  prompt: string;
+  model: string;
+  aspect: string;
+  duration: number;
+  thumbnail?: string;
+  videoUrl?: string;
+  captions?: VideoCaption[];
+  createdAt: number;
+  status: 'generating' | 'ready' | 'failed';
+}
+
+export interface VideoCaption {
+  id: string;
+  start: number;
+  end: number;
+  text: string;
+  position: 'top' | 'middle' | 'bottom';
+  fontSize: number;
+  color: string;
+}
+
 export interface User {
   id: number; email: string; name: string; role: string; tenant_id: number;
 }
@@ -78,6 +101,7 @@ export interface StudioImage {
 
 export interface StudioResult {
   images: StudioImage[]; model: string; cost: number;
+  saved?: number; // workspace_items rows written server-side
 }
 
 export interface MCTelemetry {
@@ -198,8 +222,39 @@ export interface WorkspaceItem {
 }
 export interface WorkspaceStats { by_type: Record<string, number>; total: number; }
 
+// ── 7. Investments ──────────────────────────────────────────────────
+export interface InvestmentData {
+  ticker: string; name: string; price: number; change_pct: number;
+  dividend_yield_pct: number; "52w_high": number; "52w_low": number;
+  pct_from_52w_high: number; market_cap: number;
+  sector: string; country: string; pe_ratio: number;
+  error?: string;
+}
+export interface InvestmentList {
+  name: string; description: string; tickers: string[];
+}
+export interface InvestmentNews {
+  ticker: string; title: string; link: string; publisher: string; timestamp: number;
+}
+
+// ── 8. Portfolio Tracking ───────────────────────────────────────────
+export interface PortfolioHolding {
+  ticker: string; shares: number; avg_price: number;
+  notes?: string; added_at?: number;
+}
+export interface Portfolio {
+  id: string; name: string; description?: string;
+  holdings: PortfolioHolding[]; created_at: number;
+}
+export interface PortfolioSummary {
+  total_value: number; total_cost: number; total_pl: number; total_pl_pct: number;
+  holdings: (PortfolioHolding & {
+    current_price: number; current_value: number; pl: number; pl_pct: number; dividend_yield_pct: number;
+  })[];
+}
+
 // ── 5. Lead generation ──────────────────────────────────────────────────────
-export type LeadStatus = 'new' | 'contacted' | 'qualified' | 'converted' | 'lost';
+export type LeadStatus = 'new' | 'contacted' | 'in_progress' | 'qualified' | 'converted' | 'lost';
 export interface Lead {
   id: number; tenant_id: number; company: string;
   contact_name?: string | null; email?: string | null; phone?: string | null;
@@ -256,4 +311,42 @@ export interface ApolloCommand {
   id: number; tenant_id: number; text: string; response: string | null;
   intent: ApolloIntent | null; action: ApolloAction; result: ApolloResult;
   status: string; latency_ms: number; created_at: number;
+}
+
+// ── Max Gleam stock control ─────────────────────────────────────────────
+export interface InventoryUsage {
+  id: number; item_id: number; job_id: number | null; quantity_used: number;
+  used_at: number; scheduled_date: string | null; address: string | null;
+  crew_name: string | null;
+}
+
+export interface InventoryItem {
+  id: number; tenant_id: number; name: string; category: string;
+  quantity: number; unit: string; min_quantity: number;
+  supplier: string | null; notes: string | null;
+  created_at: number; last_ordered_at: number | null;
+  low: boolean; out: boolean; used_30d: number;
+  recent_usage: InventoryUsage[];
+}
+
+export interface InventoryResponse {
+  items: InventoryItem[];
+  categories: string[];
+  summary: { total: number; low: number; out: number };
+}
+
+// ── Max Gleam communications log ────────────────────────────────────────
+export interface CommsEntry {
+  id: number; customer_id: number | null; kind: string; content: string;
+  created_at: number; customer_name: string | null;
+  customer_email: string | null; customer_phone: string | null;
+  channel: string;
+}
+
+export interface CommsResponse {
+  entries: CommsEntry[];
+  kinds: string[];
+  customers: { id: number; name: string }[];
+  channels: string[];
+  summary: { count: number; limit: number };
 }
