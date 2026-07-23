@@ -139,6 +139,66 @@ CREATE TABLE IF NOT EXISTS sms_log (
   sent_at    INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sms_once ON sms_log(booking_id, kind);
+
+CREATE TABLE IF NOT EXISTS attendance (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  booking_id INTEGER NOT NULL REFERENCES bookings(id),
+  child_name TEXT NOT NULL,
+  status     TEXT NOT NULL,               -- attended|absent|cancelled
+  notes      TEXT,
+  marked_by  TEXT,
+  created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+-- One mark per child per session: re-marking corrects the record in place
+-- rather than stacking a second, contradictory row.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_attendance_once
+  ON attendance(booking_id, child_name);
+CREATE INDEX IF NOT EXISTS idx_attendance_child ON attendance(child_name);
+
+CREATE TABLE IF NOT EXISTS progress_notes (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  booking_id INTEGER NOT NULL REFERENCES bookings(id),
+  child_name TEXT NOT NULL,
+  coach_name TEXT,
+  skills     TEXT,                        -- JSON array of skill keys
+  notes      TEXT,
+  rating     INTEGER CHECK (rating IS NULL OR rating BETWEEN 1 AND 5),
+  created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_progress_once
+  ON progress_notes(booking_id, child_name);
+CREATE INDEX IF NOT EXISTS idx_progress_child ON progress_notes(child_name, created_at);
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  parent_email      TEXT NOT NULL,
+  plan              TEXT NOT NULL,        -- 4-sessions|8-sessions|unlimited
+  amount_pence      INTEGER NOT NULL,
+  active            INTEGER NOT NULL DEFAULT 1,
+  next_billing_date TEXT,                 -- YYYY-MM-DD (UK local), 1st of month
+  created_at        INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  cancelled_at      INTEGER
+);
+-- A parent may only hold one live subscription; cancelled rows are kept for
+-- history, so the uniqueness has to be partial rather than a plain UNIQUE.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_subscription_live
+  ON subscriptions(parent_email) WHERE active = 1;
+
+CREATE TABLE IF NOT EXISTS subscription_invoices (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  subscription_id INTEGER NOT NULL REFERENCES subscriptions(id),
+  period_start    TEXT NOT NULL,          -- YYYY-MM-DD inclusive
+  period_end      TEXT NOT NULL,          -- YYYY-MM-DD inclusive
+  amount_pence    INTEGER NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'pending',   -- pending|paid|failed
+  checkout_id     TEXT,
+  checkout_url    TEXT,
+  paid_at         INTEGER,
+  created_at      INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+-- The billing run is idempotent on this index: one invoice per period.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_subinvoice_period
+  ON subscription_invoices(subscription_id, period_start);
 """
 
 # Weekly slot template (UK local). After-school hours midweek, mornings at
@@ -853,6 +913,15 @@ def notify(booking: dict, kind: str) -> str:
     elif kind == "reminder_1h":
         body = (f"KS Sports: {booking['child_name']}'s session in 1 hour at "
                 f"{booking['start_time']}.")
+    elif kind == "absent_charge":
+        # A no-show is charged in full, so the parent has to be told what
+        # they have been charged and why — not just that they were missed.
+        fee = booking.get("price_pence") or 0
+        amount = f"£{fee / 100:.2f}".replace(".00", "") if fee else "the session fee"
+        body = (f"KS Sports: {booking['child_name']} was marked absent from "
+                f"{_pretty_date(booking['date'])} at {booking['start_time']}. "
+                f"As we weren't told in advance, {amount} is still payable. "
+                f"Please give us 24 hours' notice next time.")
     else:
         return "unknown kind"
 
@@ -872,6 +941,36 @@ def notify(booking: dict, kind: str) -> str:
     except sqlite3.IntegrityError:
         return "duplicate"                      # raced with another sender
     return status
+
+
+def send_notice(to_number: str, body: str, kind: str,
+                booking_id: int | None = None) -> str:
+    """Send and log a one-off SMS that is not tied to a booking's lifecycle.
+
+    Billing texts have no booking to hang off, so they log with a NULL
+    booking_id. SQLite treats NULLs as distinct in a UNIQUE index, which is
+    exactly what we want here: idx_sms_once must not collapse every
+    subscription receipt into one row. Callers that need send-once semantics
+    (the monthly billing run) enforce it on their own table instead.
+    """
+    to = (to_number or "").strip()
+    if not to:
+        return "failed"
+    status, error = _send_sms(to, body)
+    try:
+        conn = _conn()
+        conn.execute(
+            "INSERT INTO sms_log (booking_id, kind, to_number, body, status, error) "
+            "VALUES (?,?,?,?,?,?)", (booking_id, kind, to, body, status, error))
+        conn.commit()
+    except sqlite3.Error:
+        log.exception("ks: could not log %s sms", kind)
+    return status
+
+
+def parent_by_email(email: str) -> dict | None:
+    return _one("SELECT * FROM parents WHERE lower(email) = ?",
+                ((email or "").strip().lower(),))
 
 
 def send_confirmation(booking: dict) -> str:
