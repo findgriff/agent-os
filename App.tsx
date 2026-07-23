@@ -37,10 +37,12 @@ import KSAccount from './pages/ks/KSAccount';
 import KSCoach from './pages/ks/KSCoach';
 import SignOff from './pages/mg/SignOff';
 import CustomerPortal from './pages/mg/CustomerPortal';
+import CustomerPayments from './pages/mg/CustomerPayments';
 import CrewApp from './pages/mg/CrewApp';
 import Inventory from './pages/Inventory';
 import Comms from './pages/Comms';
 import Reports from './pages/mg/Reports';
+import Invoices from './pages/mg/Invoices';
 import TimeClock from './pages/mg/TimeClock';
 
 // Redirect to the static ops board page (not a React component)
@@ -103,6 +105,7 @@ function Shell() {
         <Route path="/investments" element={<Investments />} />
         <Route path="/call-center" element={<CallCenter />} />
         <Route path="/maxgleam/reports" element={<Reports />} />
+        <Route path="/maxgleam/invoices" element={<Invoices />} />
         <Route path="/inventory" element={<Inventory />} />
         <Route path="/comms" element={<Comms />} />
         <Route path="/integrations" element={<Integrations />} />
@@ -154,6 +157,8 @@ export default function App() {
         <Routes>
           <Route path="/signoff/:jobId" element={<SignOff />} />
           <Route path="/customer/login" element={<CustomerPortal />} />
+          {/* Must precede the /customer/* catch-all — SumUp redirects here. */}
+          <Route path="/customer/payments" element={<CustomerPayments />} />
           <Route path="/customer" element={<Navigate to="/customer/login" replace />} />
           <Route path="/customer/*" element={<Navigate to="/customer/login" replace />} />
           <Route path="/timeclock" element={<TimeClock />} />

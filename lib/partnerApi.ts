@@ -168,6 +168,33 @@ export interface OptimizedRoute {
 
 export interface Crew { id: number; name: string; phone: string | null }
 
+// ── Referrals ───────────────────────────────────────────────────────────
+export interface Referral {
+  id: number;
+  customer_id: number;
+  referrer_name: string | null;
+  referrer_email: string | null;
+  referred_email: string;
+  referred_name: string | null;
+  status: 'pending' | 'signed_up' | 'rewarded';
+  discount_pence: number;
+  rewarded_invoice_id: number | null;
+  rewarded_at: number | null;
+  created_at: number;
+}
+
+export interface Referrer { id: number; name: string; email: string | null; phone: string | null }
+
+export interface Referrals {
+  referrals: Referral[];
+  referrers: Referrer[];
+  summary: {
+    total: number; pending: number; signed_up: number; rewarded: number;
+    earned_pence: number; awaiting_invoice_pence: number;
+  };
+  discount_pence: number;
+}
+
 export interface NewWorkRequest {
   title: string;
   description?: string;
@@ -202,6 +229,11 @@ export const partnerApi = {
     req<OptimizedRoute>('GET', `/api/maxgleam/optimize-route?date=${encodeURIComponent(date)}`
       + (crewId ? `&crew_id=${crewId}` : '')),
   crews: () => req<{ crews: Crew[] }>('GET', '/api/maxgleam/crews'),
+
+  // Referrals — scoped to this partner's own customers, like everything else.
+  referrals: () => req<Referrals>('GET', '/api/maxgleam/referrals'),
+  createReferral: (data: { customer_id: number; referred_email: string; referred_name?: string }) =>
+    req<{ referral: Referral }>('POST', '/api/maxgleam/referrals/create', data),
 };
 
 export interface SignoffJob {

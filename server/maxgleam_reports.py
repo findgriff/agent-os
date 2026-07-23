@@ -36,6 +36,7 @@ import threading
 import time
 
 from server import partner
+from server import maxgleam_activity as activity
 from server.maxgleam_ops import DEFAULT_TENANT_ID, SERVICE_MINUTES
 
 MAXGLEAM_DB = os.environ.get("MAXGLEAM_DB", "/var/lib/maxgleam/app.db")
@@ -533,6 +534,13 @@ def clock_in(body: dict, tenant_id: int = DEFAULT_TENANT_ID,
         conn.execute("UPDATE jobs SET started_at = COALESCE(started_at, ?)"
                      " WHERE id = ?", (now, job_id))
     conn.commit()
+
+    activity.log("clock_in", tenant_id=tenant_id, actor_type="crew",
+                 actor_id=crew_id, actor_name=crew["name"],
+                 entity_type="job", entity_id=job_id,
+                 detail=(job or {}).get("address") or "General duties",
+                 at=now, source_key=f"timelog:{log_id}:in")
+
     return 200, {"log": {
         "id": log_id, "job_id": job_id, "subcontractor_id": crew_id,
         "clock_in": now, "clock_out": None, "total_minutes": None,
@@ -577,6 +585,20 @@ def clock_out(body: dict, tenant_id: int = DEFAULT_TENANT_ID,
     conn.execute("UPDATE time_logs SET clock_out = ?, total_minutes = ?, notes = ?"
                  " WHERE id = ?", (now, minutes, notes, log["id"]))
     conn.commit()
+
+    crew_name = _one("SELECT name FROM subcontractors WHERE id = ?",
+                     (log["subcontractor_id"],)) or {}
+    where_at = _one("""SELECT p.address FROM jobs j
+                        JOIN properties p ON p.id = j.property_id
+                       WHERE j.id = ?""", (log["job_id"],)) or {}
+    activity.log("clock_out", tenant_id=tenant_id, actor_type="crew",
+                 actor_id=log["subcontractor_id"], actor_name=crew_name.get("name"),
+                 entity_type="job", entity_id=log["job_id"],
+                 detail=where_at.get("address") or "General duties",
+                 meta={"total_minutes": minutes,
+                       "estimated_minutes": SERVICE_MINUTES,
+                       "variance_minutes": minutes - SERVICE_MINUTES},
+                 at=now, source_key=f'timelog:{log["id"]}:out')
 
     estimated = SERVICE_MINUTES
     return 200, {"log": {

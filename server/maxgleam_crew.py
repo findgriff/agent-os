@@ -320,7 +320,24 @@ def complete_job(crew: dict, body: dict) -> tuple[int, dict]:
     except Exception:                                       # noqa: BLE001
         log.exception("maxgleam crew: comms_log write failed for job %s", job["id"])
 
-    return 200, {"job": _job_dto(_crew_job(crew, job["id"]))}
+    # Completing a clean raises its invoice. maxgleam's own complete-job
+    # endpoint does this itself; a crew completing here would otherwise
+    # leave the job done and never billed. invoice_job is idempotent, so
+    # the two paths can never double-invoice the same job.
+    invoice = None
+    try:
+        from server import maxgleam_invoicing
+        row, outcome = maxgleam_invoicing.invoice_job(job["id"], job["tenant_id"])
+        if row:
+            invoice = {"id": row["id"], "number": row["number"],
+                       "amount_pence": row["amount_pence"], "outcome": outcome}
+        elif outcome not in ("already invoiced",):
+            log.info("maxgleam crew: job %s not invoiced — %s", job["id"], outcome)
+    except Exception:                                       # noqa: BLE001
+        # Billing must never cost a crew their completed job.
+        log.exception("maxgleam crew: auto-invoice failed for job %s", job["id"])
+
+    return 200, {"job": _job_dto(_crew_job(crew, job["id"])), "invoice": invoice}
 
 
 # ----------------------------------------------------------- issue reports --

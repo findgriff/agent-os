@@ -10,6 +10,7 @@ import {
   gbp, niceDate, niceStamp, photoUrl,
   type MgCompany, type MgCustomer, type MgInvoice, type MgJob,
 } from '../../lib/mgApi';
+import { PayButton } from './CustomerPayments';
 
 type Tab = 'cleans' | 'payments' | 'contact';
 
@@ -275,12 +276,10 @@ export default function CustomerPortal() {
                         </MGPill>
                       </div>
                     </div>
-                    {inv.status === 'unpaid' && inv.sumup_checkout_url && (
-                      <a href={inv.sumup_checkout_url} target="_blank" rel="noopener noreferrer"
-                        className="mt-3 block">
-                        <MGButton className="w-full">Pay this invoice</MGButton>
-                      </a>
-                    )}
+                    {/* Shared with /customer/payments — creates the SumUp
+                        checkout on demand rather than only showing a button
+                        when a link already happens to be stored. */}
+                    {inv.status === 'unpaid' && <PayButton invoice={inv} />}
                   </MGCard>
                 ))}
               </div>

@@ -73,6 +73,28 @@ export interface MgInvoice {
   address: string | null;
 }
 
+/** A booked clean that has not been invoiced yet. */
+export interface MgUpcomingClean {
+  job_id: number;
+  scheduled_date: string;
+  price_pence: number;
+  address: string;
+  postcode: string | null;
+}
+
+export interface MgPayments {
+  invoices: MgInvoice[];          // everything, newest first (legacy shape)
+  due: MgInvoice[];               // unpaid — what the Pay Now button acts on
+  history: MgInvoice[];           // settled
+  upcoming: MgUpcomingClean[];
+  summary: {
+    paid_pence: number; unpaid_pence: number; upcoming_pence: number;
+    count: number; newly_paid: string[];
+  };
+  can_pay_online: boolean;
+  currency: string;
+}
+
 export interface MgCustomer { id?: number; name: string; email: string | null; phone: string | null }
 
 export interface MgCompany {
@@ -110,8 +132,15 @@ export const mgApi = {
   jobs: () => req<{ upcoming: MgJob[]; past: MgJob[]; customer: MgCustomer }>(
     'GET', '/api/maxgleam/customer/jobs', undefined, getCustomerToken()),
 
-  payments: () => req<{ invoices: MgInvoice[]; summary: { paid_pence: number; unpaid_pence: number; count: number } }>(
+  payments: () => req<MgPayments>(
     'GET', '/api/maxgleam/customer/payments', undefined, getCustomerToken()),
+
+  // Starts a SumUp hosted checkout and returns the link to send the browser
+  // to. Card details are only ever entered on SumUp's own page.
+  pay: (invoiceId: number) => req<{
+    checkout_url: string;
+    invoice: { id: number; number: string; amount_pence: number };
+  }>('POST', '/api/maxgleam/customer/pay', { invoice_id: invoiceId }, getCustomerToken()),
 
   contact: () => req<{ company: MgCompany | null }>(
     'GET', '/api/maxgleam/customer/contact', undefined, getCustomerToken()),

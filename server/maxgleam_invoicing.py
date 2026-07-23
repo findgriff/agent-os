@@ -1,0 +1,575 @@
+"""Max Gleam — auto-invoicing and tax reporting.
+
+Raises an invoice for a completed clean, attaches a SumUp pay-link and
+emails it to the customer.
+
+Why this exists when maxgleam already invoices on completion: maxgleam's
+own "complete job" endpoint raises the invoice itself, but jobs completed
+anywhere else — the AGENT OS crew app, a bulk status change, an import —
+leave the job done and uninvoiced. This module is the safety net, and it is
+strictly idempotent: a job that already has an invoice is never invoiced
+twice, so running it alongside maxgleam is safe.
+
+Invoice shape matches maxgleam exactly (number scheme, VAT from tenant
+settings, amount_pence carrying the gross) so the two paths are
+indistinguishable downstream.
+
+Kill-switch: MAXGLEAM_INVOICE_DRY_RUN=1 stops outbound email and SumUp
+calls while still writing the invoice rows.
+"""
+from __future__ import annotations
+import csv
+import datetime as dt
+import io
+import json
+import logging
+import os
+import sqlite3
+import time
+import urllib.request
+from pathlib import Path
+
+from server import partner, sumup
+
+log = logging.getLogger("agentos.mg_invoicing")
+
+DEFAULT_TENANT_ID = int(os.environ.get("MAXGLEAM_TENANT_ID", "2"))
+RESEND_KEY_PATH = os.environ.get("MAXGLEAM_RESEND_KEY_PATH", "/etc/maxgleam/resend-api-key")
+FROM_ADDR = os.environ.get("MAXGLEAM_FROM", "Max Gleam <hello@mail.opspocket.com>")
+PUBLIC_BASE = os.environ.get("MAXGLEAM_PUBLIC_BASE", "").rstrip("/")
+DRY_RUN = os.environ.get("MAXGLEAM_INVOICE_DRY_RUN", "") == "1"
+
+# Invoices unpaid for longer than this are reported as overdue.
+OVERDUE_DAYS = int(os.environ.get("MAXGLEAM_INVOICE_OVERDUE_DAYS", "30"))
+USER_AGENT = "agent-os-invoicing/1.0"
+
+
+def _conn() -> sqlite3.Connection:
+    return partner._conn()
+
+
+def _rows(sql: str, args=()) -> list[dict]:
+    return [dict(r) for r in _conn().execute(sql, args).fetchall()]
+
+
+def _one(sql: str, args=()) -> dict | None:
+    r = _conn().execute(sql, args).fetchone()
+    return dict(r) if r else None
+
+
+def _read_secret(path: str) -> str:
+    try:
+        return Path(path).read_text().strip()
+    except OSError:
+        return ""
+
+
+# ------------------------------------------------------------------ tenant --
+
+def _tenant(tenant_id: int = DEFAULT_TENANT_ID) -> dict | None:
+    return _one("SELECT * FROM tenants WHERE id = ?", (tenant_id,))
+
+
+def _vat_rate(tenant: dict) -> float:
+    """VAT percentage for this tenant, or 0 when not VAT registered.
+
+    Mirrors maxgleam: VAT is only charged when settings.vat_enabled is set.
+    Chester Window Cleaner is not currently VAT registered, so this returns
+    0 and invoices carry vat_pence = 0 — the tax report must not invent a
+    VAT liability that was never charged.
+    """
+    try:
+        settings = json.loads(tenant.get("settings_json") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return 0.0
+    if not settings.get("vat_enabled"):
+        return 0.0
+    return float(settings.get("vat_rate") or 20)
+
+
+def vat_status(tenant_id: int = DEFAULT_TENANT_ID) -> dict:
+    tenant = _tenant(tenant_id) or {}
+    rate = _vat_rate(tenant)
+    return {"vat_registered": rate > 0, "vat_rate": rate}
+
+
+# ----------------------------------------------------------------- numbers --
+
+def _next_number(tenant_id: int, year: int | None = None) -> str:
+    """INV-<year>-<seq>, continuing maxgleam's series.
+
+    Derived from the highest existing number for that year rather than a
+    row count, so deleting or voiding an invoice can never mint a number
+    that already exists.
+    """
+    year = year or dt.date.today().year
+    prefix = f"INV-{year}-"
+    rows = _rows("SELECT number FROM invoices WHERE tenant_id = ? AND number LIKE ?",
+                 (tenant_id, prefix + "%"))
+    highest = 0
+    for r in rows:
+        tail = (r["number"] or "").rsplit("-", 1)[-1]
+        if tail.isdigit():
+            highest = max(highest, int(tail))
+    return f"{prefix}{highest + 1:04d}"
+
+
+# -------------------------------------------------------------- integrations --
+
+def _merchant_code(tenant: dict) -> str:
+    """Cached merchant code, fetched from SumUp on first use (as maxgleam does)."""
+    code = (tenant.get("sumup_merchant_code") or "").strip()
+    if code:
+        return code
+    api_key = (tenant.get("sumup_api_key") or "").strip()
+    if not api_key:
+        return ""
+    try:
+        code = sumup.merchant_code(api_key)
+    except Exception as exc:                                # noqa: BLE001
+        log.warning("sumup: could not read merchant profile: %s", exc)
+        return ""
+    if code:
+        conn = _conn()
+        conn.execute("UPDATE tenants SET sumup_merchant_code = ? WHERE id = ?",
+                     (code, tenant["id"]))
+        conn.commit()
+        tenant["sumup_merchant_code"] = code
+    return code
+
+
+def ensure_checkout(tenant: dict, invoice: dict) -> str:
+    """Return a SumUp pay-link for an invoice, creating one if needed.
+
+    Best-effort: a SumUp outage must never stop an invoice being raised.
+    """
+    if invoice.get("sumup_checkout_url"):
+        return invoice["sumup_checkout_url"]
+    api_key = (tenant.get("sumup_api_key") or "").strip()
+    if not api_key:
+        return ""
+    if DRY_RUN:
+        log.info("DRY-RUN sumup checkout for %s (%s)",
+                 invoice["number"], invoice["amount_pence"])
+        return ""
+    code = _merchant_code(tenant)
+    if not code:
+        return ""
+    try:
+        ck = sumup.create_hosted_checkout(
+            api_key=api_key, merchant_code=code,
+            amount_pence=invoice["amount_pence"],
+            currency=tenant.get("currency") or "GBP",
+            reference=f"{tenant['slug']}-{invoice['number']}",
+            description=f"{tenant['name']} — {invoice['number']}")
+    except Exception as exc:                                # noqa: BLE001
+        log.warning("sumup: checkout failed for %s: %s", invoice["number"], exc)
+        return ""
+    url = ck.get("hosted_checkout_url") or ""
+    if url:
+        conn = _conn()
+        conn.execute("UPDATE invoices SET sumup_checkout_id = ?, sumup_checkout_url = ? "
+                     "WHERE id = ?", (ck.get("id"), url, invoice["id"]))
+        conn.commit()
+        invoice["sumup_checkout_id"] = ck.get("id")
+        invoice["sumup_checkout_url"] = url
+    return url
+
+
+def _send_email(to: str, subject: str, text: str, reply_to: str | None = None) -> tuple[str, str | None]:
+    if not to:
+        return "skipped", "no email address"
+    if DRY_RUN:
+        log.info("DRY-RUN invoice email to=%s subject=%r", to, subject)
+        return "dry_run", None
+    key = _read_secret(RESEND_KEY_PATH)
+    if not key:
+        return "failed", "resend key not readable"
+    body = {"from": FROM_ADDR, "to": [to], "subject": subject, "text": text}
+    if reply_to:
+        body["reply_to"] = reply_to
+    req = urllib.request.Request(
+        "https://api.resend.com/emails", data=json.dumps(body).encode(), method="POST",
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
+                 "User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=15):
+            return "sent", None
+    except Exception as exc:                                # noqa: BLE001
+        log.warning("invoice email failed: %s", exc)
+        return "failed", str(exc)[:200]
+
+
+# ---------------------------------------------------------------- invoicing --
+
+_JOB_FOR_INVOICE = """
+  SELECT j.id, j.tenant_id, j.property_id, j.scheduled_date, j.status,
+         j.price_pence AS job_price, j.completed_at, j.partner_company_id,
+         p.price_pence AS property_price, p.address, p.postcode,
+         p.partner_company_id AS prop_partner_id,
+         c.id AS customer_id, c.name AS customer_name, c.email AS customer_email
+    FROM jobs j
+    JOIN properties p ON p.id = j.property_id
+    LEFT JOIN customers c ON c.id = p.customer_id
+"""
+
+
+def uninvoiced_jobs(tenant_id: int = DEFAULT_TENANT_ID,
+                    company_id: int | None = None) -> list[dict]:
+    """Completed jobs with no invoice against them."""
+    sql = _JOB_FOR_INVOICE + (
+        " WHERE j.status = 'done' AND j.tenant_id = ?"
+        "   AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.job_id = j.id)")
+    args: list = [tenant_id]
+    if company_id is not None:
+        sql += " AND (j.partner_company_id = ? OR p.partner_company_id = ?)"
+        args += [company_id, company_id]
+    sql += " ORDER BY j.completed_at ASC, j.id ASC"
+    return _rows(sql, tuple(args))
+
+
+def _invoice_amount(job: dict) -> int:
+    """Net amount for a job.
+
+    The standing price on the property is the contracted rate, so it wins.
+    Where a property has no price set (ad-hoc work), the price agreed on the
+    job itself is used instead — invoicing £0 would be worse than either.
+    """
+    return int(job.get("property_price") or 0) or int(job.get("job_price") or 0)
+
+
+def invoice_job(job_id: int, tenant_id: int = DEFAULT_TENANT_ID,
+                send: bool = True) -> tuple[dict | None, str]:
+    """Raise an invoice for one completed job. Returns (invoice, outcome)."""
+    job = _one(_JOB_FOR_INVOICE + " WHERE j.id = ?", (job_id,))
+    if not job:
+        return None, "job not found"
+    if job["status"] != "done":
+        return None, "job is not complete"
+    existing = _one("SELECT * FROM invoices WHERE job_id = ?", (job_id,))
+    if existing:
+        return existing, "already invoiced"
+    if not job["customer_id"]:
+        return None, "job has no customer"
+
+    net = _invoice_amount(job)
+    if net <= 0:
+        return None, "no price on the property or job"
+
+    tenant = _tenant(job["tenant_id"] or tenant_id)
+    if not tenant:
+        return None, "tenant not found"
+    rate = _vat_rate(tenant)
+    vat = round(net * rate / 100) if rate else 0
+
+    items = [{"label": f"Window clean — {job['address']}", "amount_pence": net}]
+    conn = _conn()
+    # A UNIQUE index guards (tenant_id, number); retry once if maxgleam's
+    # own invoicing claimed the same number in between.
+    for attempt in range(3):
+        number = _next_number(tenant["id"])
+        try:
+            cur = conn.execute(
+                "INSERT INTO invoices (tenant_id, customer_id, job_id, number, "
+                " amount_pence, vat_pence, status, items_json) "
+                "VALUES (?,?,?,?,?,?, 'unpaid', ?)",
+                (tenant["id"], job["customer_id"], job_id, number,
+                 net + vat, vat, json.dumps(items)))
+            conn.commit()
+            break
+        except sqlite3.IntegrityError:
+            conn.rollback()
+            if attempt == 2:
+                return None, "could not allocate an invoice number"
+            time.sleep(0.05)
+    else:                                                   # pragma: no cover
+        return None, "could not allocate an invoice number"
+
+    invoice = _one("SELECT * FROM invoices WHERE id = ?", (cur.lastrowid,))
+
+    # Absorb any referral credit this customer has earned, before the checkout
+    # link is minted and the invoice is emailed — applying it afterwards would
+    # bill them the full amount and then quietly change the figure.
+    try:
+        from server import maxgleam_referrals
+        maxgleam_referrals.apply_rewards(tenant["id"])
+        invoice = _one("SELECT * FROM invoices WHERE id = ?", (invoice["id"],))
+    except Exception:                                       # noqa: BLE001
+        log.exception("maxgleam: referral credit check failed for invoice %s",
+                      invoice["id"])
+
+    ensure_checkout(tenant, invoice)
+    if send:
+        email_invoice(invoice["id"], tenant_id=tenant["id"])
+    return _one("SELECT * FROM invoices WHERE id = ?", (invoice["id"],)), "created"
+
+
+def auto_generate(tenant_id: int = DEFAULT_TENANT_ID, company_id: int | None = None,
+                  send: bool = True, limit: int = 200) -> tuple[int, dict]:
+    """Invoice every completed-but-uninvoiced job."""
+    jobs = uninvoiced_jobs(tenant_id, company_id)[:limit]
+    created, skipped = [], []
+    for job in jobs:
+        invoice, outcome = invoice_job(job["id"], tenant_id, send=send)
+        if outcome == "created" and invoice:
+            created.append({"invoice_id": invoice["id"], "number": invoice["number"],
+                            "job_id": job["id"], "amount_pence": invoice["amount_pence"],
+                            "address": job["address"],
+                            "customer_email": job["customer_email"]})
+        else:
+            skipped.append({"job_id": job["id"], "address": job["address"],
+                            "reason": outcome})
+    return 200, {"created": created, "skipped": skipped,
+                 "created_count": len(created), "skipped_count": len(skipped),
+                 "candidates": len(jobs), "dry_run": DRY_RUN}
+
+
+def email_invoice(invoice_id: int, tenant_id: int = DEFAULT_TENANT_ID) -> tuple[int, dict]:
+    """Email (or re-email) an invoice to the customer with a pay-link."""
+    inv = _one(
+        "SELECT i.*, c.name AS customer_name, c.email AS customer_email, "
+        "       p.address, j.scheduled_date "
+        "  FROM invoices i "
+        "  LEFT JOIN customers c ON c.id = i.customer_id "
+        "  LEFT JOIN jobs j ON j.id = i.job_id "
+        "  LEFT JOIN properties p ON p.id = j.property_id "
+        " WHERE i.id = ?", (invoice_id,))
+    if not inv:
+        return 404, {"error": "invoice not found"}
+    tenant = _tenant(inv["tenant_id"] or tenant_id)
+    if not tenant:
+        return 404, {"error": "tenant not found"}
+    to = (inv["customer_email"] or "").strip()
+    if not to:
+        return 400, {"error": "no email address on file for this customer"}
+
+    url = ensure_checkout(tenant, dict(inv))
+    amount = f"£{inv['amount_pence'] / 100:.2f}"
+    lines = [
+        f"Hi {(inv['customer_name'] or '').split(' ')[0] or 'there'},",
+        "",
+        f"Here's your invoice {inv['number']} from {tenant['name']} for {amount}.",
+    ]
+    if inv["address"]:
+        lines.append(f"Clean at {inv['address']}"
+                     + (f" on {inv['scheduled_date']}." if inv["scheduled_date"] else "."))
+    if inv["vat_pence"]:
+        lines.append(f"Includes VAT of £{inv['vat_pence'] / 100:.2f}.")
+    lines.append("")
+    if url:
+        lines += [f"Pay online: {url}", ""]
+    if PUBLIC_BASE:
+        lines += [f"See all your cleans and invoices: {PUBLIC_BASE}/customer/login", ""]
+    lines += ["Thank you,", tenant["name"]]
+
+    status, error = _send_email(
+        to, f"{tenant['name']} — invoice {inv['number']} ({amount})",
+        "\n".join(lines), reply_to=tenant.get("email"))
+
+    conn = _conn()
+    try:
+        conn.execute(
+            "INSERT INTO comms_log (tenant_id, customer_id, kind, content) VALUES (?,?,?,?)",
+            (inv["tenant_id"], inv["customer_id"], "invoice_sent",
+             f"Invoice {inv['number']} {status} to {to}"))
+        conn.commit()
+    except Exception:                                       # noqa: BLE001
+        log.exception("comms_log write failed")
+
+    if status == "failed":
+        return 502, {"error": f"could not send the email: {error}"}
+    return 200, {"ok": True, "status": status, "to": to,
+                 "number": inv["number"], "checkout_url": url}
+
+
+# ------------------------------------------------------------------- listing --
+
+_INVOICE_SELECT = """
+  SELECT i.id, i.number, i.amount_pence, i.vat_pence, i.status, i.method,
+         i.issued_at, i.paid_at, i.sumup_checkout_url, i.job_id, i.customer_id,
+         c.name AS customer_name, c.email AS customer_email,
+         j.scheduled_date, j.signoff_status,
+         p.address, p.postcode, p.partner_company_id
+    FROM invoices i
+    LEFT JOIN customers c ON c.id = i.customer_id
+    LEFT JOIN jobs j ON j.id = i.job_id
+    LEFT JOIN properties p ON p.id = j.property_id
+"""
+
+
+def _invoice_dto(r: dict, now: int) -> dict:
+    overdue = (r["status"] == "unpaid"
+               and r["issued_at"] and now - r["issued_at"] > OVERDUE_DAYS * 86400)
+    return {
+        **r,
+        "net_pence": (r["amount_pence"] or 0) - (r["vat_pence"] or 0),
+        "is_overdue": bool(overdue),
+        # 'overdue' is a derived view of an unpaid invoice, never a stored
+        # status — the invoices table only knows paid/unpaid/void.
+        "display_status": "overdue" if overdue else r["status"],
+        "days_outstanding": (int((now - r["issued_at"]) / 86400)
+                             if r["status"] == "unpaid" and r["issued_at"] else None),
+    }
+
+
+def list_invoices(tenant_id: int = DEFAULT_TENANT_ID, company_id: int | None = None,
+                  status: str = "", limit: int = 500) -> tuple[int, dict]:
+    sql = _INVOICE_SELECT + " WHERE i.tenant_id = ?"
+    args: list = [tenant_id]
+    if company_id is not None:
+        sql += " AND p.partner_company_id = ?"
+        args.append(company_id)
+    sql += " ORDER BY i.issued_at DESC, i.id DESC LIMIT ?"
+    args.append(limit)
+
+    now = int(time.time())
+    dtos = [_invoice_dto(r, now) for r in _rows(sql, tuple(args))]
+
+    wanted = (status or "").strip().lower()
+    if wanted in ("paid", "unpaid", "void", "overdue"):
+        shown = [d for d in dtos if d["display_status"] == wanted]
+    else:
+        shown = dtos
+
+    return 200, {
+        "invoices": shown,
+        "summary": {
+            "total": len(dtos),
+            "paid": sum(1 for d in dtos if d["status"] == "paid"),
+            "unpaid": sum(1 for d in dtos if d["display_status"] == "unpaid"),
+            "overdue": sum(1 for d in dtos if d["is_overdue"]),
+            "paid_pence": sum(d["amount_pence"] for d in dtos if d["status"] == "paid"),
+            "unpaid_pence": sum(d["amount_pence"] for d in dtos if d["status"] == "unpaid"),
+            "overdue_pence": sum(d["amount_pence"] for d in dtos if d["is_overdue"]),
+            "overdue_days": OVERDUE_DAYS,
+        },
+        "uninvoiced_jobs": len(uninvoiced_jobs(tenant_id, company_id)),
+        "filter": wanted or "all",
+        **vat_status(tenant_id),
+    }
+
+
+# ---------------------------------------------------------------- tax report --
+
+def _month_bounds(frm: str, to: str) -> tuple[int, int, str, str]:
+    """YYYY-MM strings → inclusive epoch range covering whole months."""
+    today = dt.date.today()
+    def parse(value: str, fallback: dt.date) -> dt.date:
+        try:
+            year, month = value.split("-")
+            return dt.date(int(year), int(month), 1)
+        except (ValueError, AttributeError):
+            return fallback
+    start = parse(frm, today.replace(day=1))
+    end = parse(to, today.replace(day=1))
+    if end < start:
+        start, end = end, start
+    # exclusive upper bound = first day of the month after `end`
+    nxt = dt.date(end.year + (end.month // 12), (end.month % 12) + 1, 1)
+    return (int(dt.datetime.combine(start, dt.time.min).timestamp()),
+            int(dt.datetime.combine(nxt, dt.time.min).timestamp()),
+            start.strftime("%Y-%m"), end.strftime("%Y-%m"))
+
+
+def tax_report(frm: str = "", to: str = "", tenant_id: int = DEFAULT_TENANT_ID,
+               company_id: int | None = None) -> tuple[int, dict]:
+    """Revenue, VAT and settlement for a month range, by invoice issue date."""
+    start_ts, end_ts, from_month, to_month = _month_bounds(frm, to)
+
+    sql = (_INVOICE_SELECT + " WHERE i.tenant_id = ? AND i.status != 'void'"
+           "   AND i.issued_at >= ? AND i.issued_at < ?")
+    args: list = [tenant_id, start_ts, end_ts]
+    if company_id is not None:
+        sql += " AND p.partner_company_id = ?"
+        args.append(company_id)
+    sql += " ORDER BY i.issued_at ASC"
+
+    now = int(time.time())
+    invoices = [_invoice_dto(r, now) for r in _rows(sql, tuple(args))]
+
+    gross = sum(i["amount_pence"] for i in invoices)
+    vat = sum(i["vat_pence"] or 0 for i in invoices)
+    net = gross - vat
+    paid = sum(i["amount_pence"] for i in invoices if i["status"] == "paid")
+    unpaid = gross - paid
+
+    status = vat_status(tenant_id)
+    # Not VAT registered → nothing was charged. Show what the liability
+    # would be at the standard rate so the figure is available for planning,
+    # but never present it as VAT collected.
+    notional_vat = 0 if status["vat_registered"] else round(gross - gross / 1.2)
+
+    months: dict[str, dict] = {}
+    for i in invoices:
+        key = dt.datetime.fromtimestamp(i["issued_at"]).strftime("%Y-%m")
+        m = months.setdefault(key, {"month": key, "gross_pence": 0, "vat_pence": 0,
+                                    "net_pence": 0, "paid_pence": 0, "count": 0})
+        m["gross_pence"] += i["amount_pence"]
+        m["vat_pence"] += i["vat_pence"] or 0
+        m["net_pence"] += i["net_pence"]
+        m["paid_pence"] += i["amount_pence"] if i["status"] == "paid" else 0
+        m["count"] += 1
+
+    return 200, {
+        "from": from_month, "to": to_month,
+        "totals": {
+            "revenue_gross_pence": gross,
+            "revenue_net_pence": net,
+            "vat_pence": vat,
+            "paid_pence": paid,
+            "unpaid_pence": unpaid,
+            "invoice_count": len(invoices),
+            "notional_vat_at_20_pence": notional_vat,
+        },
+        "by_month": [months[k] for k in sorted(months)],
+        "invoices": invoices,
+        **status,
+    }
+
+
+def tax_csv(frm: str = "", to: str = "", tenant_id: int = DEFAULT_TENANT_ID,
+            company_id: int | None = None) -> tuple[int, str, str]:
+    code, report = tax_report(frm, to, tenant_id, company_id)
+    if code != 200:
+        return code, json.dumps(report), "application/json"
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    pounds = lambda p: f"{(p or 0) / 100:.2f}"                      # noqa: E731
+
+    w.writerow([f"Tax report {report['from']} to {report['to']}"])
+    w.writerow(["VAT registered", "yes" if report["vat_registered"] else "no"])
+    if report["vat_rate"]:
+        w.writerow(["VAT rate", f"{report['vat_rate']:g}%"])
+    w.writerow([])
+    t = report["totals"]
+    w.writerow(["Summary"])
+    w.writerow(["Invoices", t["invoice_count"]])
+    w.writerow(["Revenue (gross)", pounds(t["revenue_gross_pence"])])
+    w.writerow(["Revenue (net of VAT)", pounds(t["revenue_net_pence"])])
+    w.writerow(["VAT charged", pounds(t["vat_pence"])])
+    if not report["vat_registered"]:
+        w.writerow(["VAT at 20% if registered (not charged)",
+                    pounds(t["notional_vat_at_20_pence"])])
+    w.writerow(["Paid", pounds(t["paid_pence"])])
+    w.writerow(["Unpaid", pounds(t["unpaid_pence"])])
+    w.writerow([])
+
+    w.writerow(["Month", "Invoices", "Gross", "Net", "VAT", "Paid"])
+    for m in report["by_month"]:
+        w.writerow([m["month"], m["count"], pounds(m["gross_pence"]),
+                    pounds(m["net_pence"]), pounds(m["vat_pence"]), pounds(m["paid_pence"])])
+    w.writerow([])
+
+    w.writerow(["Invoice", "Issued", "Customer", "Address", "Gross", "Net", "VAT",
+                "Status", "Paid on"])
+    for i in report["invoices"]:
+        w.writerow([
+            i["number"],
+            dt.datetime.fromtimestamp(i["issued_at"]).strftime("%Y-%m-%d") if i["issued_at"] else "",
+            i.get("customer_name") or "", i.get("address") or "",
+            pounds(i["amount_pence"]), pounds(i["net_pence"]), pounds(i["vat_pence"]),
+            i["display_status"],
+            dt.datetime.fromtimestamp(i["paid_at"]).strftime("%Y-%m-%d") if i["paid_at"] else "",
+        ])
+    return 200, buf.getvalue(), "text/csv"

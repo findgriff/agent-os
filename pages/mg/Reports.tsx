@@ -4,19 +4,45 @@
 // The revenue chart is CSS bars, not a chart library: this is one series of
 // 30 buckets, and a charting dependency would cost more than it earns.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Badge, Button, Card, EmptyState, Icon, SkeletonList, useToast } from '../../components/ui';
 import {
-  reportsApi, downloadCsv, gbp, gbpShort, hoursMins, clockTime, dayLabel,
+  Badge, Button, Card, EmptyState, Icon, Input, Select, SkeletonList, useToast,
+} from '../../components/ui';
+import {
+  reportsApi, downloadCsv, downloadActivityCsv, gbp, gbpShort, hoursMins,
+  clockTime, dayLabel, timeAgo,
+  invoicesApi, downloadTaxCsv, type TaxReport,
   type ReportsData, type ReportKind, type TimeHistory,
+  type ActivityFeed, type ActorType, type AlertPreview, type AlertLogRow,
 } from '../../lib/reportsApi';
 
-type Tab = 'overview' | 'crew' | 'time';
+type Tab = 'overview' | 'crew' | 'time' | 'tax' | 'activity' | 'alerts';
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'overview', label: 'Overview', icon: 'monitoring' },
   { id: 'crew', label: 'Crew', icon: 'groups' },
   { id: 'time', label: 'Time', icon: 'schedule' },
+  { id: 'tax', label: 'Tax', icon: 'account_balance' },
+  { id: 'activity', label: 'Activity', icon: 'history' },
+  { id: 'alerts', label: 'Alerts', icon: 'notifications_active' },
 ];
+
+// How each activity action reads in the feed: icon + accent.
+const ACTION_STYLE: Record<string, { icon: string; colour: string; label: string }> = {
+  clock_in: { icon: 'play_circle', colour: '#22C55E', label: 'Clocked in' },
+  clock_out: { icon: 'stop_circle', colour: '#F59E0B', label: 'Clocked out' },
+  job_completed: { icon: 'task_alt', colour: '#22C55E', label: 'Completed job' },
+  job_signed_off: { icon: 'draw', colour: '#19C3E6', label: 'Signed off' },
+  office_action: { icon: 'admin_panel_settings', colour: '#A78BFA', label: 'Office action' },
+  customer_comms: { icon: 'forum', colour: '#38BDF8', label: 'Customer comms' },
+  alert_sent: { icon: 'mark_email_read', colour: '#19C3E6', label: 'Alert sent' },
+  alert_failed: { icon: 'error', colour: '#F43F5E', label: 'Alert failed' },
+};
+const actionStyle = (action: string) =>
+  ACTION_STYLE[action] || { icon: 'bolt', colour: '#8B96A8', label: action.replace(/_/g, ' ') };
+
+const ACTOR_TONE: Record<ActorType, 'ok' | 'info' | 'violet' | 'warn' | 'neutral'> = {
+  crew: 'ok', user: 'violet', partner: 'info', customer: 'warn', system: 'neutral',
+};
 
 const ACCENT = '#19C3E6';
 
@@ -434,6 +460,548 @@ function TimeTab({ data }: { data: ReportsData }) {
   );
 }
 
+// ── Activity tab ────────────────────────────────────────────────────────
+
+function ActivityTab() {
+  const toast = useToast();
+  const [feed, setFeed] = useState<ActivityFeed | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [actorType, setActorType] = useState('');
+  const [action, setAction] = useState('');
+  const [day, setDay] = useState('');
+  const [exporting, setExporting] = useState(false);
+
+  const filters = useMemo(() => ({
+    actor_type: actorType || undefined,
+    action: action || undefined,
+    day: day || undefined,
+  }), [actorType, action, day]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setFeed(await reportsApi.activity({ ...filters, limit: 300 }));
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not load activity', 'danger');
+    } finally {
+      setLoading(false);
+    }
+  }, [filters, toast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // The action list comes from the unfiltered feed, so filtering by one
+  // action does not empty the dropdown that got you there.
+  const [allActions, setAllActions] = useState<string[]>([]);
+  useEffect(() => {
+    if (feed && !actorType && !action && !day) setAllActions(feed.actions);
+  }, [feed, actorType, action, day]);
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile label="Events shown" value={String(feed?.count ?? 0)}
+          sub={day ? dayLabel(day) : 'most recent first'} icon="history" delay={0} />
+        <StatTile label="People active" value={String(feed?.by_actor.length ?? 0)}
+          sub="distinct actors" icon="groups" accent="#A78BFA" delay={60} />
+        <StatTile label="Event types" value={String(feed?.by_action.length ?? 0)}
+          sub={feed?.by_action[0]?.action.replace(/_/g, ' ') || '—'}
+          icon="category" accent="#22C55E" delay={120} />
+        <StatTile label="Last event"
+          value={feed?.activity[0] ? timeAgo(feed.activity[0].created_at) : '—'}
+          sub={feed?.activity[0]?.actor_name || ''} icon="bolt" accent="#F59E0B" delay={180} />
+      </div>
+
+      <Card className="flex flex-wrap items-end gap-3 p-3.5">
+        <div className="min-w-[9rem] flex-1">
+          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">Who</label>
+          <Select value={actorType} onChange={e => setActorType(e.target.value)}>
+            <option value="">Everyone</option>
+            <option value="crew">Crew</option>
+            <option value="user">Office</option>
+            <option value="partner">Partner</option>
+            <option value="customer">Customer</option>
+            <option value="system">System</option>
+          </Select>
+        </div>
+        <div className="min-w-[9rem] flex-1">
+          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">What</label>
+          <Select value={action} onChange={e => setAction(e.target.value)}>
+            <option value="">All actions</option>
+            {(allActions.length ? allActions : feed?.actions || []).map(a => (
+              <option key={a} value={a}>{actionStyle(a).label}</option>
+            ))}
+          </Select>
+        </div>
+        <div className="min-w-[9rem] flex-1">
+          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">Day</label>
+          <Input type="date" value={day} onChange={e => setDay(e.target.value)} />
+        </div>
+        <div className="flex gap-2">
+          {(actorType || action || day) && (
+            <Button variant="ghost" icon="filter_alt_off"
+              onClick={() => { setActorType(''); setAction(''); setDay(''); }}>Clear</Button>
+          )}
+          <Button variant="secondary" icon="download" loading={exporting}
+            onClick={async () => {
+              setExporting(true);
+              try {
+                await downloadActivityCsv(filters);
+                toast('Activity exported', 'ok');
+              } catch (e) {
+                toast(e instanceof Error ? e.message : 'Export failed', 'danger');
+              } finally { setExporting(false); }
+            }}>CSV</Button>
+        </div>
+      </Card>
+
+      {feed && feed.by_actor.length > 0 && (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {feed.by_actor.slice(0, 6).map(a => (
+            <Card key={`${a.actor_type}:${a.actor_id}`} className="flex items-center gap-3 p-3">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white/5 text-muted">
+                <Icon name={a.actor_type === 'crew' ? 'directions_car'
+                  : a.actor_type === 'user' ? 'person'
+                  : a.actor_type === 'customer' ? 'home' : 'settings'} size={19} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold text-ink">{a.name}</div>
+                <div className="text-[11px] text-muted">{timeAgo(a.last_at)}</div>
+              </div>
+              <Badge tone={ACTOR_TONE[a.actor_type] || 'neutral'}>{a.events}</Badge>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <div>
+        <SectionTitle count={feed?.count} accent="#A78BFA">Timeline</SectionTitle>
+        <Card className="p-2">
+          {loading ? <SkeletonList count={5} className="p-1" />
+            : !feed || feed.activity.length === 0 ? (
+              <EmptyState icon="history" title="No activity"
+                hint="Nothing matches these filters. Clock-ins, completed jobs, sign-offs and alerts all land here." />
+            ) : (
+              <div className="relative space-y-1 p-1">
+                {/* spine — the timeline rail the dots hang off */}
+                <span className="absolute bottom-3 left-[26px] top-3 w-px bg-white/8" />
+                {feed.activity.map(ev => {
+                  const st = actionStyle(ev.action);
+                  return (
+                    <div key={ev.id}
+                      className="relative flex items-start gap-3 rounded-xl p-2.5 transition-colors hover:bg-white/[0.04]">
+                      <span className="relative z-10 grid h-8 w-8 shrink-0 place-items-center rounded-full"
+                        style={{ background: `${st.colour}1a`, color: st.colour,
+                                 boxShadow: `0 0 0 3px var(--tw-ring-offset-color, #0B1220)` }}>
+                        <Icon name={st.icon} size={17} />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="text-sm font-medium text-ink">{st.label}</span>
+                          {ev.actor_name && (
+                            <span className="text-[12px] text-muted">by {ev.actor_name}</span>
+                          )}
+                          <Badge tone={ACTOR_TONE[ev.actor_type] || 'neutral'}>{ev.actor_type}</Badge>
+                        </div>
+                        {ev.detail && (
+                          <div className="mt-0.5 truncate text-[12px] text-muted/80">{ev.detail}</div>
+                        )}
+                        {typeof ev.meta.total_minutes === 'number' && (
+                          <div className="mt-0.5 text-[11px] text-muted/70">
+                            {hoursMins(ev.meta.total_minutes as number)} on site
+                            {typeof ev.meta.variance_minutes === 'number' && (
+                              <span className={(ev.meta.variance_minutes as number) > 0 ? ' text-amber' : ' text-emerald'}>
+                                {' '}({(ev.meta.variance_minutes as number) > 0 ? '+' : ''}
+                                {ev.meta.variance_minutes as number}m vs estimate)
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <div className="text-[11px] tabular-nums text-muted">{timeAgo(ev.created_at)}</div>
+                        <div className="font-mono text-[10px] text-muted/50">{clockTime(ev.created_at)}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+// ── Alerts tab ──────────────────────────────────────────────────────────
+
+const SEVERITY_TONE: Record<string, 'info' | 'warn' | 'danger'> = {
+  info: 'info', warn: 'warn', error: 'danger',
+};
+
+function AlertsTab() {
+  const toast = useToast();
+  const [preview, setPreview] = useState<AlertPreview | null>(null);
+  const [history, setHistory] = useState<AlertLogRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<'dry' | 'live' | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const [confirmLive, setConfirmLive] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [p, h] = await Promise.all([reportsApi.alerts(), reportsApi.alertHistory(50)]);
+      setPreview(p);
+      setHistory(h.alerts);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not load alerts', 'danger');
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const run = async (live: boolean) => {
+    setBusy(live ? 'live' : 'dry');
+    try {
+      const r = await reportsApi.runAlerts({ dry_run: !live });
+      toast(live ? `${r.sent} alert${r.sent === 1 ? '' : 's'} emailed`
+                 : `Dry run: ${r.sent} would send, ${r.skipped} skipped`,
+            r.failed ? 'danger' : 'ok');
+      await load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Alert run failed', 'danger');
+    } finally {
+      setBusy(null);
+      setConfirmLive(false);
+    }
+  };
+
+  const firing = preview?.alerts.filter(a => a.would_send).length ?? 0;
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile label="Firing now" value={String(firing)}
+          sub={`${preview?.alerts.length ?? 0} rules matched`} icon="notifications_active"
+          accent={firing ? '#F59E0B' : '#22C55E'} delay={0} />
+        <StatTile label="Email" value={preview?.mail_configured ? 'Configured' : 'Not set up'}
+          sub={preview?.mail_from || 'no Resend key found'} icon="mail"
+          accent={preview?.mail_configured ? '#22C55E' : '#F43F5E'} delay={60} />
+        <StatTile label="Sent (recent)"
+          value={String(history.filter(h => !h.dry_run && h.status === 'sent').length)}
+          sub={`${history.filter(h => h.dry_run).length} dry runs logged`}
+          icon="outgoing_mail" accent={ACCENT} delay={120} />
+        <StatTile label="Schedule" value="Mon–Fri 07:30"
+          sub="maxgleam-alerts.timer" icon="alarm" accent="#A78BFA" delay={180} />
+      </div>
+
+      <Card className="flex flex-wrap items-center gap-3 p-3.5">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-ink">Run the sweep now</div>
+          <div className="text-[12px] text-muted">
+            A dry run evaluates everything and logs it without sending. Sending live
+            respects each alert&rsquo;s cooldown so nothing goes out twice.
+          </div>
+        </div>
+        <Button variant="secondary" icon="science" loading={busy === 'dry'}
+          onClick={() => run(false)}>Dry run</Button>
+        {confirmLive ? (
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" onClick={() => setConfirmLive(false)}>Cancel</Button>
+            <Button variant="danger" icon="send" loading={busy === 'live'}
+              onClick={() => run(true)}>
+              Yes, email {firing || 'them'}
+            </Button>
+          </div>
+        ) : (
+          <Button variant="primary" icon="send" disabled={!preview?.mail_configured || !firing}
+            onClick={() => setConfirmLive(true)}>Send live</Button>
+        )}
+      </Card>
+
+      <div>
+        <SectionTitle count={preview?.alerts.length} accent="#F59E0B">Firing now</SectionTitle>
+        {loading ? <SkeletonList count={3} />
+          : !preview || preview.alerts.length === 0 ? (
+            <Card className="p-2">
+              <EmptyState icon="verified" accent="#22C55E" title="Nothing to report"
+                hint="No alert rule matches the estate right now." />
+            </Card>
+          ) : (
+            <div className="space-y-2">
+              {preview.alerts.map(a => (
+                <Card key={a.kind} className="overflow-hidden p-0">
+                  <button onClick={() => setOpen(open === a.kind ? null : a.kind)}
+                    className="flex w-full items-center gap-3 p-3.5 text-left transition-colors hover:bg-white/[0.04]">
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl"
+                      style={{
+                        background: a.severity === 'info' ? `${ACCENT}1a` : '#F59E0B1a',
+                        color: a.severity === 'info' ? ACCENT : '#F59E0B',
+                      }}>
+                      <Icon name={a.severity === 'info' ? 'summarize' : 'warning'} size={19} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-semibold text-ink">{a.subject}</div>
+                      <div className="text-[11px] text-muted">
+                        {a.kind.replace(/_/g, ' ')} · to {a.recipients.join(', ') || 'nobody'}
+                        {a.last_sent_at && ` · last sent ${timeAgo(a.last_sent_at)}`}
+                      </div>
+                    </div>
+                    <Badge tone={a.would_send ? SEVERITY_TONE[a.severity] || 'info' : 'neutral'}>
+                      {a.would_send ? 'will send' : `cooldown ${a.cooldown_hours}h`}
+                    </Badge>
+                    <Icon name={open === a.kind ? 'expand_less' : 'expand_more'}
+                      size={20} className="shrink-0 text-muted" />
+                  </button>
+                  {open === a.kind && (
+                    <pre className="max-h-72 overflow-auto border-t border-white/6 bg-black/20 p-4
+                        font-mono text-[11px] leading-relaxed text-muted whitespace-pre-wrap">
+{a.body}
+                    </pre>
+                  )}
+                </Card>
+              ))}
+            </div>
+          )}
+      </div>
+
+      <div>
+        <SectionTitle count={history.length} accent="#A78BFA">Alert history</SectionTitle>
+        <Card className="p-2">
+          {history.length === 0 ? (
+            <EmptyState icon="outgoing_mail" title="Nothing sent yet"
+              hint="The sweep runs weekday mornings. Anything it emails is logged here." />
+          ) : (
+            <div className="max-h-96 space-y-2 overflow-y-auto p-1">
+              {history.map(h => (
+                <div key={h.id}
+                  className="flex items-center gap-3 rounded-xl border border-white/6 bg-white/[0.02] p-2.5">
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg"
+                    style={{
+                      background: h.status === 'failed' ? '#F43F5E1a'
+                        : h.dry_run ? 'rgba(255,255,255,0.05)' : '#22C55E1a',
+                      color: h.status === 'failed' ? '#F43F5E' : h.dry_run ? '#8B96A8' : '#22C55E',
+                    }}>
+                    <Icon name={h.status === 'failed' ? 'error'
+                      : h.dry_run ? 'science' : 'mark_email_read'} size={17} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm text-ink">{h.subject}</div>
+                    <div className="truncate text-[11px] text-muted">
+                      {h.recipients.join(', ') || 'no recipients'}
+                      {h.error && <span className="text-rose"> · {h.error}</span>}
+                    </div>
+                  </div>
+                  {h.dry_run && <Badge tone="neutral">dry run</Badge>}
+                  <span className="shrink-0 text-[11px] tabular-nums text-muted">
+                    {timeAgo(h.sent_at)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+
+// ── Tax ─────────────────────────────────────────────────────────────────
+/** Current month as YYYY-MM. */
+const thisMonth = () => new Date().toISOString().slice(0, 7);
+
+/** N months back from now as YYYY-MM. */
+function monthsAgo(n: number): string {
+  const d = new Date();
+  d.setMonth(d.getMonth() - n);
+  return d.toISOString().slice(0, 7);
+}
+
+const RANGE_PRESETS: { label: string; from: () => string; to: () => string }[] = [
+  { label: 'This month', from: thisMonth, to: thisMonth },
+  { label: 'Last 3 months', from: () => monthsAgo(2), to: thisMonth },
+  { label: 'Last 12 months', from: () => monthsAgo(11), to: thisMonth },
+  { label: 'This year', from: () => `${new Date().getFullYear()}-01`, to: thisMonth },
+];
+
+function TaxTab() {
+  const toast = useToast();
+  const [from, setFrom] = useState(monthsAgo(2));
+  const [to, setTo] = useState(thisMonth());
+  const [data, setData] = useState<TaxReport | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
+
+  const load = useCallback(async (f: string, t: string) => {
+    setLoading(true);
+    try {
+      setData(await invoicesApi.tax(f, t));
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not load the tax report', 'danger');
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => { load(from, to); }, [load, from, to]);
+
+  const download = async () => {
+    setDownloading(true);
+    try {
+      await downloadTaxCsv(from, to);
+      toast('Tax report downloaded', 'ok');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Download failed', 'danger');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const t = data?.totals;
+  const peak = Math.max(1, ...(data?.by_month || []).map(m => m.gross_pence));
+
+  return (
+    <div className="space-y-5">
+      {/* Range picker */}
+      <Card className="flex flex-wrap items-end gap-3 p-4">
+        <div>
+          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted">From</label>
+          <input type="month" value={from} max={to} onChange={e => setFrom(e.target.value)}
+            className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-ink
+              focus:border-accent/50 focus:outline-none" />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted">To</label>
+          <input type="month" value={to} min={from} onChange={e => setTo(e.target.value)}
+            className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-ink
+              focus:border-accent/50 focus:outline-none" />
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {RANGE_PRESETS.map(p => (
+            <button key={p.label}
+              onClick={() => { setFrom(p.from()); setTo(p.to()); }}
+              className="rounded-lg border border-white/8 px-2.5 py-1.5 text-[12px] text-muted
+                transition-colors hover:border-accent/30 hover:text-ink">
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <Button variant="primary" icon="download" loading={downloading} onClick={download}
+          className="ml-auto">
+          Download CSV
+        </Button>
+      </Card>
+
+      {/* VAT status — the single most important caveat on this page */}
+      {data && !data.vat_registered && (
+        <Card className="flex flex-wrap items-start gap-3 border-amber/25 bg-amber/5 p-3.5">
+          <Icon name="info" size={20} className="mt-0.5 shrink-0 text-amber" />
+          <div className="min-w-0 flex-1 text-sm text-ink">
+            <span className="font-semibold">Not VAT registered.</span>{' '}
+            No VAT has been charged on any invoice, so VAT collected is £0. The
+            &ldquo;if registered&rdquo; figure below is what 20% would come to on this
+            revenue — it is a planning number, not a liability.
+          </div>
+        </Card>
+      )}
+
+      {loading && !data ? <SkeletonList count={3} /> : (
+        <>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <StatTile label="Revenue (gross)" icon="payments"
+              value={gbp(t?.revenue_gross_pence || 0)}
+              sub={`${t?.invoice_count ?? 0} invoices`} />
+            <StatTile label={data?.vat_registered ? 'VAT charged' : 'VAT at 20% if registered'}
+              icon="account_balance" accent="#A78BFA" delay={60}
+              value={gbp(data?.vat_registered
+                ? (t?.vat_pence || 0) : (t?.notional_vat_at_20_pence || 0))}
+              sub={data?.vat_registered ? `at ${data.vat_rate}%` : 'not charged'} />
+            <StatTile label="Paid" icon="check_circle" accent="#22C55E" delay={120}
+              value={gbp(t?.paid_pence || 0)} sub="settled" />
+            <StatTile label="Unpaid" icon="schedule" accent="#F59E0B" delay={180}
+              value={gbp(t?.unpaid_pence || 0)} sub="outstanding" />
+          </div>
+
+          <Card className="p-4">
+            <SectionTitle count={data?.by_month.length}>Month by month</SectionTitle>
+            {!data?.by_month.length ? (
+              <EmptyState icon="account_balance" title="No invoices in this range"
+                hint="Pick a wider range, or raise invoices from the Invoices page." />
+            ) : (
+              <div className="space-y-2">
+                {data.by_month.map(m => (
+                  <div key={m.month} className="flex items-center gap-3">
+                    <span className="w-16 shrink-0 font-mono text-[12px] text-muted">{m.month}</span>
+                    <div className="h-7 min-w-0 flex-1 overflow-hidden rounded-lg bg-white/[0.03]">
+                      <div className="h-full rounded-lg transition-all duration-500"
+                        style={{ width: `${Math.max(3, (m.gross_pence / peak) * 100)}%`,
+                          background: `linear-gradient(90deg, ${ACCENT}55, ${ACCENT})` }} />
+                    </div>
+                    <span className="w-20 shrink-0 text-right text-sm font-semibold tabular-nums text-ink">
+                      {gbp(m.gross_pence)}
+                    </span>
+                    <span className="hidden w-16 shrink-0 text-right text-[11px] tabular-nums text-muted sm:block">
+                      {m.count} inv
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          {!!data?.invoices.length && (
+            <Card className="p-4">
+              <SectionTitle count={data.invoices.length}>Invoices in range</SectionTitle>
+              <div className="-mx-1 overflow-x-auto">
+                <table className="w-full min-w-[560px] text-left text-sm">
+                  <thead>
+                    <tr className="text-[11px] uppercase tracking-wider text-muted">
+                      <th className="px-1 pb-2 font-semibold">Number</th>
+                      <th className="px-1 pb-2 font-semibold">Issued</th>
+                      <th className="px-1 pb-2 font-semibold">Customer</th>
+                      <th className="px-1 pb-2 text-right font-semibold">Net</th>
+                      <th className="px-1 pb-2 text-right font-semibold">VAT</th>
+                      <th className="px-1 pb-2 text-right font-semibold">Gross</th>
+                      <th className="px-1 pb-2 text-right font-semibold">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.invoices.map(i => (
+                      <tr key={i.id} className="border-t border-white/5 transition-colors hover:bg-white/[0.03]">
+                        <td className="px-1 py-2 font-mono text-[12px] text-ink">{i.number}</td>
+                        <td className="px-1 py-2 text-[12px] text-muted">
+                          {new Date(i.issued_at * 1000).toLocaleDateString('en-GB')}
+                        </td>
+                        <td className="max-w-[160px] truncate px-1 py-2 text-[12px] text-ink">
+                          {i.customer_name || '—'}
+                        </td>
+                        <td className="px-1 py-2 text-right tabular-nums text-muted">{gbp(i.net_pence)}</td>
+                        <td className="px-1 py-2 text-right tabular-nums text-muted">{gbp(i.vat_pence)}</td>
+                        <td className="px-1 py-2 text-right font-semibold tabular-nums text-ink">
+                          {gbp(i.amount_pence)}
+                        </td>
+                        <td className="px-1 py-2 text-right">
+                          <Badge tone={i.display_status === 'paid' ? 'ok'
+                            : i.display_status === 'overdue' ? 'danger' : 'warn'}>
+                            {i.display_status}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Page ────────────────────────────────────────────────────────────────
 
 export default function Reports() {
@@ -495,14 +1063,19 @@ export default function Reports() {
         </div>
       </div>
 
-      {loading ? <SkeletonList count={5} />
+      {/* Tax fetches its own data, so it stays available even if the main
+          reports payload fails to load. */}
+      {tab === 'tax' ? <TaxTab />
+        : loading ? <SkeletonList count={5} />
         : error ? (
           <EmptyState icon="error" accent="#F43F5E" title="Could not load reports" hint={error}
             action={<Button icon="refresh" onClick={() => load()}>Try again</Button>} />
         ) : data ? (
           tab === 'overview' ? <Overview data={data} />
             : tab === 'crew' ? <CrewTab data={data} />
-            : <TimeTab data={data} />
+            : tab === 'time' ? <TimeTab data={data} />
+            : tab === 'activity' ? <ActivityTab />
+            : <AlertsTab />
         ) : null}
     </div>
   );

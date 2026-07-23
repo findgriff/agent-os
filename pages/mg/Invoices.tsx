@@ -1,0 +1,269 @@
+// Max Gleam invoices — every invoice, filterable, with one-tap auto-generation
+// for completed cleans that slipped through unbilled.
+//
+// An HQ surface, so it wears the AGENT OS dark theme (unlike the customer
+// pages under pages/mg/, which are deliberately light).
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Badge, Button, Card, EmptyState, Icon, Input, SkeletonList, useToast } from '../../components/ui';
+import {
+  invoicesApi, gbp, type InvoiceList, type MgInvoiceRow,
+} from '../../lib/reportsApi';
+
+const ACCENT = '#19C3E6';
+
+type Filter = 'all' | 'unpaid' | 'overdue' | 'paid';
+
+const FILTERS: { id: Filter; label: string; icon: string }[] = [
+  { id: 'all', label: 'All', icon: 'receipt_long' },
+  { id: 'unpaid', label: 'Unpaid', icon: 'schedule' },
+  { id: 'overdue', label: 'Overdue', icon: 'warning' },
+  { id: 'paid', label: 'Paid', icon: 'check_circle' },
+];
+
+const STATUS_TONE: Record<string, 'ok' | 'warn' | 'danger' | 'neutral'> = {
+  paid: 'ok', unpaid: 'warn', overdue: 'danger', void: 'neutral',
+};
+
+function StatTile({ label, value, sub, icon, accent = ACCENT, delay = 0 }: {
+  label: string; value: string; sub?: string; icon: string; accent?: string; delay?: number;
+}) {
+  return (
+    <Card className="group p-3.5 sm:p-4 animate-fadeInUp transition-all duration-200 ease-out
+        hover:-translate-y-0.5 hover:border-white/12"
+      style={{ animationDelay: `${delay}ms` }}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted">{label}</div>
+          <div className="mt-1 truncate text-xl font-bold tabular-nums text-ink sm:text-2xl">{value}</div>
+          {sub && <div className="mt-0.5 truncate text-[11px] text-muted/70">{sub}</div>}
+        </div>
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl transition-transform duration-200 group-hover:scale-110"
+          style={{ background: `${accent}1a`, color: accent }}>
+          <Icon name={icon} size={19} />
+        </span>
+      </div>
+    </Card>
+  );
+}
+
+function InvoiceRow({ inv, onSend }: { inv: MgInvoiceRow; onSend: (i: MgInvoiceRow) => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const tone = STATUS_TONE[inv.display_status] || 'neutral';
+  const accent = inv.display_status === 'paid' ? '#22C55E'
+    : inv.display_status === 'overdue' ? '#F43F5E' : '#F59E0B';
+  return (
+    <div className="relative flex flex-col gap-2 rounded-xl border border-white/6 bg-white/[0.02] p-3 transition-colors hover:border-white/12 sm:flex-row sm:items-center sm:gap-4">
+      <span className="absolute bottom-3 left-0 top-3 w-[3px] rounded-r-full"
+        style={{ background: accent, boxShadow: `0 0 10px ${accent}88` }} />
+      <div className="shrink-0 pl-2.5 sm:w-36">
+        <div className="font-mono text-sm font-semibold text-ink">{inv.number}</div>
+        <div className="text-[11px] text-muted/70">
+          {inv.issued_at ? new Date(inv.issued_at * 1000).toLocaleDateString('en-GB') : '—'}
+        </div>
+      </div>
+
+      <div className="min-w-0 flex-1 pl-2.5 sm:pl-0">
+        <div className="truncate text-sm font-medium text-ink">{inv.customer_name || 'Unknown customer'}</div>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted">
+          {inv.address && <span className="truncate">{inv.address}</span>}
+          {inv.days_outstanding !== null && inv.display_status !== 'paid' && (
+            <span className={inv.is_overdue ? 'text-rose' : ''}>
+              · {inv.days_outstanding}d outstanding
+            </span>
+          )}
+          {!inv.customer_email && (
+            <span className="text-amber/80">· no email on file</span>
+          )}
+        </div>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-2 pl-2.5 sm:pl-0">
+        <div className="text-right">
+          <div className="text-sm font-semibold tabular-nums text-ink">{gbp(inv.amount_pence)}</div>
+          {inv.vat_pence > 0 && (
+            <div className="text-[10px] tabular-nums text-muted/70">inc. {gbp(inv.vat_pence)} VAT</div>
+          )}
+        </div>
+        <Badge tone={tone}>
+          {inv.display_status[0].toUpperCase() + inv.display_status.slice(1)}
+        </Badge>
+        {inv.sumup_checkout_url && inv.status === 'unpaid' && (
+          <a href={inv.sumup_checkout_url} target="_blank" rel="noopener noreferrer"
+            title="Open the SumUp pay-link">
+            <Button variant="ghost" icon="link" className="!px-2 !py-1.5" />
+          </a>
+        )}
+        <Button variant="secondary" icon="mail" loading={busy}
+          disabled={!inv.customer_email}
+          title={inv.customer_email ? `Email ${inv.customer_email}` : 'No email address on file'}
+          onClick={async () => { setBusy(true); await onSend(inv); setBusy(false); }}>
+          Send
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export default function Invoices() {
+  const toast = useToast();
+  const [data, setData] = useState<InvoiceList | null>(null);
+  const [filter, setFilter] = useState<Filter>('all');
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      setData(await invoicesApi.list());
+      setError('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load invoices');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Filtering is client-side: the list is already loaded in full, and the
+  // server's own filter would cost a round-trip per tab click.
+  const shown = useMemo(() => {
+    const rows = (data?.invoices || []).filter(
+      i => filter === 'all' || i.display_status === filter);
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter(i =>
+      i.number.toLowerCase().includes(q)
+      || (i.customer_name || '').toLowerCase().includes(q)
+      || (i.address || '').toLowerCase().includes(q));
+  }, [data, filter, search]);
+
+  const generate = async () => {
+    setGenerating(true);
+    try {
+      const res = await invoicesApi.autoGenerate();
+      if (res.created_count === 0 && res.skipped_count === 0) {
+        toast('Nothing to invoice — every completed clean is billed', 'info');
+      } else {
+        toast(
+          `${res.created_count} invoice${res.created_count === 1 ? '' : 's'} raised`
+          + (res.skipped_count ? `, ${res.skipped_count} skipped` : '')
+          + (res.dry_run ? ' (dry run — no email sent)' : ''),
+          res.created_count ? 'ok' : 'warn');
+      }
+      if (res.skipped.length) {
+        // Skips are usually a missing price — worth naming, not burying.
+        toast(`Skipped: ${res.skipped.slice(0, 2).map(s => `${s.address} (${s.reason})`).join('; ')}`, 'warn');
+      }
+      await load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not generate invoices', 'danger');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const send = async (inv: MgInvoiceRow) => {
+    try {
+      const res = await invoicesApi.send(inv.id);
+      toast(res.status === 'dry_run'
+        ? `Dry run — ${inv.number} not actually emailed to ${res.to}`
+        : `${inv.number} emailed to ${res.to}`, 'ok');
+      await load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not send that invoice', 'danger');
+    }
+  };
+
+  const s = data?.summary;
+
+  return (
+    <div className="mx-auto max-w-6xl space-y-5 p-4 sm:p-6">
+      <header className="flex flex-wrap items-center gap-3">
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-accent/10 text-accent"
+          style={{ boxShadow: `0 0 28px -8px ${ACCENT}88` }}>
+          <Icon name="receipt_long" size={24} />
+        </span>
+        <div className="min-w-0">
+          <h1 className="font-display text-xl font-bold text-ink sm:text-2xl">Invoices</h1>
+          <p className="text-[12px] text-muted">
+            {data ? `${s?.total} invoice${s?.total === 1 ? '' : 's'} · overdue after ${s?.overdue_days} days`
+                  : 'Loading…'}
+            {data && !data.vat_registered && ' · not VAT registered'}
+          </p>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <Button variant="primary" icon="auto_awesome" loading={generating} onClick={generate}>
+            Auto-generate
+          </Button>
+          <Button variant="secondary" icon="refresh" onClick={load}>Refresh</Button>
+        </div>
+      </header>
+
+      {error && (
+        <Card className="border-rose/25 bg-rose/5 p-3 text-sm text-rose">{error}</Card>
+      )}
+
+      {!!data?.uninvoiced_jobs && (
+        <Card className="flex flex-wrap items-center gap-3 border-amber/25 bg-amber/5 p-3.5">
+          <Icon name="info" size={20} className="text-amber" />
+          <span className="min-w-0 flex-1 text-sm text-ink">
+            {data.uninvoiced_jobs} completed clean{data.uninvoiced_jobs === 1 ? '' : 's'} with no invoice.
+          </span>
+          <Button variant="secondary" icon="auto_awesome" loading={generating} onClick={generate}>
+            Raise {data.uninvoiced_jobs === 1 ? 'it' : 'them'}
+          </Button>
+        </Card>
+      )}
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile label="Total billed" icon="receipt_long"
+          value={gbp((s?.paid_pence || 0) + (s?.unpaid_pence || 0))}
+          sub={`${s?.total ?? 0} invoices`} />
+        <StatTile label="Paid" icon="check_circle" accent="#22C55E" delay={60}
+          value={gbp(s?.paid_pence || 0)} sub={`${s?.paid ?? 0} settled`} />
+        <StatTile label="Unpaid" icon="schedule" accent="#F59E0B" delay={120}
+          value={gbp(s?.unpaid_pence || 0)} sub={`${s?.unpaid ?? 0} outstanding`} />
+        <StatTile label="Overdue" icon="warning" accent="#F43F5E" delay={180}
+          value={gbp(s?.overdue_pence || 0)} sub={`${s?.overdue ?? 0} past ${s?.overdue_days ?? 30}d`} />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex gap-1 overflow-x-auto rounded-2xl border border-white/6 bg-white/[0.02] p-1">
+          {FILTERS.map(f => {
+            const count = f.id === 'all' ? s?.total
+              : f.id === 'paid' ? s?.paid
+              : f.id === 'unpaid' ? s?.unpaid : s?.overdue;
+            return (
+              <button key={f.id} onClick={() => setFilter(f.id)}
+                className={`flex shrink-0 items-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium transition-all
+                  ${filter === f.id ? 'bg-accent/12 text-accent' : 'text-muted hover:bg-white/5 hover:text-ink'}`}>
+                <Icon name={f.icon} size={17} />
+                {f.label}
+                {count !== undefined && (
+                  <span className="rounded-full bg-white/8 px-1.5 text-[10px] tabular-nums">{count}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        <Input value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Search number, customer or address"
+          className="min-w-[200px] flex-1 sm:max-w-xs" />
+      </div>
+
+      {loading ? <SkeletonList count={5} /> : shown.length === 0 ? (
+        <EmptyState icon="receipt_long"
+          title={search ? 'Nothing matches that search' : `No ${filter === 'all' ? '' : filter} invoices`}
+          hint={filter === 'all'
+            ? 'Invoices appear here as cleans are completed.'
+            : 'Try a different filter.'} />
+      ) : (
+        <div className="space-y-2">
+          {shown.map(inv => <InvoiceRow key={inv.id} inv={inv} onSend={send} />)}
+        </div>
+      )}
+    </div>
+  );
+}

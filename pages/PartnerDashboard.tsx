@@ -9,7 +9,7 @@ import {
   partnerApi, clearPartnerToken, gbp, prettyDate, titleCase,
   type Partner, type PartnerJob, type PartnerJobs, type PartnerPayments,
   type PartnerProperty, type WorkRequest, type SignoffJob, type SignoffStatus,
-  type OptimizedRoute, type RouteStop, type Crew,
+  type OptimizedRoute, type RouteStop, type Crew, type Referrals,
 } from '../lib/partnerApi';
 
 type Tab = 'jobs' | 'route' | 'signoffs' | 'requests' | 'payments';
@@ -468,6 +468,136 @@ function RouteTab({ colour }: { colour: string }) {
   );
 }
 
+// ── Refer a friend ──────────────────────────────────────────────────────
+const REFERRAL_TONE: Record<string, 'warn' | 'info' | 'ok'> = {
+  pending: 'warn', signed_up: 'info', rewarded: 'ok',
+};
+const REFERRAL_HINT: Record<string, string> = {
+  pending: 'Waiting for them to book',
+  signed_up: 'Booked — credit due on your next invoice',
+  rewarded: 'Credit applied',
+};
+
+function ReferralCard() {
+  const toast = useToast();
+  const [data, setData] = useState<Referrals | null>(null);
+  const [customerId, setCustomerId] = useState('');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await partnerApi.referrals();
+      setData(r);
+      setCustomerId(c => c || (r.referrers[0] ? String(r.referrers[0].id) : ''));
+    } catch { /* card renders empty; the portal keeps working */ }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customerId) { toast('Choose which customer is referring', 'danger'); return; }
+    if (!email.trim()) { toast("Enter your friend's email", 'danger'); return; }
+    setBusy(true);
+    try {
+      await partnerApi.createReferral({
+        customer_id: Number(customerId),
+        referred_email: email.trim(),
+        referred_name: name.trim() || undefined,
+      });
+      toast('Referral recorded — credit lands once they book', 'ok');
+      setName(''); setEmail('');
+      load();
+    } catch (err: any) {
+      toast(err?.message || 'Could not save that referral', 'danger');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reward = gbp(data?.discount_pence ?? 2000);
+
+  return (
+    <Card className="p-4 sm:p-5">
+      <SectionTitle accent="#19C3E6">Refer a friend</SectionTitle>
+      <p className="-mt-1 mb-3 text-xs leading-relaxed text-muted">
+        Introduce someone who books a clean and <span className="font-semibold text-accent">{reward}</span>{' '}
+        comes off the referrer's next invoice, automatically.
+      </p>
+
+      <form onSubmit={submit} className="space-y-3">
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold text-muted">Referred by</label>
+          <Select value={customerId} onChange={e => setCustomerId(e.target.value)}>
+            {(data?.referrers || []).map(r => (
+              <option key={r.id} value={r.id}>{r.name}</option>
+            ))}
+          </Select>
+        </div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-muted">Friend's name</label>
+            <Input value={name} onChange={e => setName(e.target.value)} placeholder="Optional" />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-muted">Friend's email</label>
+            <Input type="email" value={email} onChange={e => setEmail(e.target.value)}
+              placeholder="friend@example.com" />
+          </div>
+        </div>
+        <Button type="submit" variant="primary" icon="card_giftcard" loading={busy}
+          className="w-full sm:w-auto">
+          Send referral
+        </Button>
+      </form>
+
+      {data && data.summary.total > 0 && (
+        <>
+          <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-xl bg-white/[0.03] py-2">
+              <div className="text-lg font-bold tabular-nums text-ink">{data.summary.pending}</div>
+              <div className="text-[10px] text-muted">Pending</div>
+            </div>
+            <div className="rounded-xl bg-white/[0.03] py-2">
+              <div className="text-lg font-bold tabular-nums text-accent">{data.summary.signed_up}</div>
+              <div className="text-[10px] text-muted">Signed up</div>
+            </div>
+            <div className="rounded-xl bg-white/[0.03] py-2">
+              <div className="text-lg font-bold tabular-nums text-emerald">
+                {gbp(data.summary.earned_pence)}
+              </div>
+              <div className="text-[10px] text-muted">Earned</div>
+            </div>
+          </div>
+
+          <div className="mt-3 space-y-1.5">
+            {data.referrals.slice(0, 8).map(r => (
+              <div key={r.id}
+                className="flex items-center justify-between gap-2 rounded-xl border border-white/6 bg-white/[0.02] px-3 py-2">
+                <div className="min-w-0">
+                  <div className="truncate text-xs font-medium text-ink">
+                    {r.referred_name || r.referred_email}
+                  </div>
+                  <div className="truncate text-[10px] text-muted">
+                    by {r.referrer_name || '—'} · {REFERRAL_HINT[r.status] || r.status}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className="text-xs font-semibold tabular-nums text-muted">
+                    {gbp(r.discount_pence)}
+                  </span>
+                  <Badge tone={REFERRAL_TONE[r.status] || 'neutral'}>{titleCase(r.status)}</Badge>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
 // ── Portal ──────────────────────────────────────────────────────────────
 export default function PartnerDashboard({ partner, onSignOut }:
   { partner: Partner; onSignOut: () => void }) {
@@ -717,8 +847,11 @@ export default function PartnerDashboard({ partner, onSignOut }:
             {/* ── Work requests ─────────────────────────────────────── */}
             {tab === 'requests' && (
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                <WorkRequestForm properties={properties} serviceTypes={serviceTypes}
-                  priorities={priorities} onSubmitted={refreshRequests} />
+                <div className="space-y-6">
+                  <WorkRequestForm properties={properties} serviceTypes={serviceTypes}
+                    priorities={priorities} onSubmitted={refreshRequests} />
+                  <ReferralCard />
+                </div>
 
                 <section>
                   <SectionTitle count={requests.length} accent="#A78BFA">Your requests</SectionTitle>
@@ -728,7 +861,7 @@ export default function PartnerDashboard({ partner, onSignOut }:
                   ) : (
                     <div className="space-y-2">
                       {requests.map(r => (
-                        <Card key={r.id} className="p-3.5">
+                        <Card key={r.id} className="p-3.5 transition-colors duration-200 hover:border-white/12 hover:bg-white/[0.03]">
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
                               <div className="truncate text-sm font-semibold text-ink">{r.title}</div>
@@ -782,7 +915,7 @@ export default function PartnerDashboard({ partner, onSignOut }:
                     <div className="space-y-2">
                       {payments.invoices.map(inv => (
                         <div key={inv.id}
-                          className="flex flex-col gap-2 rounded-xl border border-white/6 bg-white/[0.02] p-3 transition-colors hover:border-white/12 sm:flex-row sm:items-center sm:gap-4">
+                          className="flex flex-col gap-2 rounded-xl border border-white/6 bg-white/[0.02] p-3 transition-colors duration-200 hover:border-white/12 hover:bg-white/[0.05] sm:flex-row sm:items-center sm:gap-4">
                           <div className="shrink-0 sm:w-40">
                             <div className="font-mono text-sm font-semibold text-ink">{inv.number}</div>
                             <div className="text-[11px] text-muted/70">
