@@ -136,3 +136,54 @@ def test_hermes_history_shape(client):
     status, body = client.get("/api/hermes/history")
     assert status == 200
     assert isinstance(body.get("messages"), list)
+
+
+# ── GPS retention prune — deletion logic ────────────────────────────
+# The auth guard (test_gps_prune_requires_hq_session) covers who may call it;
+# these pin the destructive path the daily cron actually runs
+# (tools/maxgleam_gps_prune.py → maxgleam_gps.prune()). They drive an isolated
+# in-memory gps_log via the module's own _ensure_schema, so the suite stays
+# hermetic and never touches the live maxgleam DB while exercising the real
+# prune SQL and its cutoff boundary.
+
+def _gps_mem_conn(monkeypatch):
+    import sqlite3
+    from server import maxgleam_gps as gps
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    gps._ensure_schema(conn)
+    monkeypatch.setattr(gps, "_conn", lambda: conn)
+    return gps, conn
+
+
+def _insert_point(conn, ts):
+    conn.execute(
+        "INSERT INTO gps_log (job_id, subcontractor_id, lat, lng, timestamp) "
+        "VALUES (1, 1, 51.5, -0.1, ?)", (ts,))
+    conn.commit()
+
+
+def test_gps_prune_deletes_only_points_past_retention(monkeypatch):
+    gps, conn = _gps_mem_conn(monkeypatch)
+    now, day = 1_000_000_000, 86_400
+    fresh_ts = now - (gps.RETENTION_DAYS - 1) * day   # just inside the window
+    stale_ts = now - (gps.RETENTION_DAYS + 1) * day   # just past it
+    _insert_point(conn, fresh_ts)
+    _insert_point(conn, stale_ts)
+
+    result = gps.prune(now=now)
+
+    assert result["deleted"] == 1, "exactly the one stale point should be dropped"
+    assert result["retention_days"] == gps.RETENTION_DAYS
+    remaining = [r["timestamp"] for r in conn.execute("SELECT timestamp FROM gps_log")]
+    assert remaining == [fresh_ts], "the in-window point must survive"
+
+
+def test_gps_prune_is_idempotent_when_nothing_stale(monkeypatch):
+    gps, conn = _gps_mem_conn(monkeypatch)
+    now = 1_000_000_000
+    _insert_point(conn, now)
+
+    assert gps.prune(now=now)["deleted"] == 0
+    assert gps.prune(now=now)["deleted"] == 0, "a second run deletes nothing more"
+    assert conn.execute("SELECT COUNT(*) FROM gps_log").fetchone()[0] == 1
