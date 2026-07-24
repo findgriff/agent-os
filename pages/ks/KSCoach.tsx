@@ -19,7 +19,8 @@ import { Icon } from '../../components/ui';
 import {
   ksApi, getCoachToken, setCoachToken, clearCoachToken, dayName, shortDay, isoDate, money,
   type KsAttendanceStatus, type KsBlock, type KsBlockout, type KsBooking,
-  type KsChildAttendance, type KsFinance, type KsOutstanding, type KsSchedule,
+  type KsChildAttendance, type KsFinance, type KsOutstanding, type KsRoute,
+  type KsRouteStop, type KsSchedule,
   type KsService, type KsSkill, type KsStudent,
 } from '../../lib/ksApi';
 
@@ -1770,6 +1771,31 @@ function routeForDate(dateISO: string): RouteStop[] {
 const gmapsDir = (postcode: string) =>
   `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(postcode)}`;
 
+// Turn a real day's bookings into the same RouteStop shape the map and list
+// already render. Stops the backend couldn't geocode (no postcode on file, or
+// the lookup failed) carry no coords, so they're handed back separately for a
+// "not on the map" note rather than dropped silently.
+function realToStops(route: KsRoute): { stops: RouteStop[]; unmapped: KsRouteStop[] } {
+  const home: [number, number] = [route.home.lat, route.home.lng];
+  const unmapped = route.stops.filter(s => s.lat == null || s.lng == null);
+  let prev = home;
+  const stops = route.stops
+    .filter(s => s.lat != null && s.lng != null)
+    .map((s, i) => {
+      const coords: [number, number] = [s.lat as number, s.lng as number];
+      const km = kmBetween(prev, coords);
+      prev = coords;
+      return {
+        n: i + 1, child: s.child_name, type: typeOfService('', s.service_name),
+        start: s.start_time, end: s.end_time,
+        mins: Math.max(0, toMins(s.end_time) - toMins(s.start_time)),
+        venue: s.address || s.postcode, postcode: s.postcode, coords,
+        driveMins: driveMins(km), driveKm: Math.round(km * 10) / 10,
+      };
+    });
+  return { stops, unmapped };
+}
+
 function RouteTab() {
   const [dateISO, setDateISO] = useState(isoDate(0));
   const [mapReady, setMapReady] = useState(false);
@@ -1779,7 +1805,25 @@ function RouteTab() {
   const layerRef = useRef<any>(null);
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => isoDate(i)), []);
-  const stops = useMemo(() => routeForDate(dateISO), [dateISO]);
+
+  // Real bookings for the selected day. Until they exist (or if the fetch
+  // fails), the tab falls back to the seeded sample route, badged as such.
+  const [route, setRoute] = useState<KsRoute | null>(null);
+  useEffect(() => {
+    let dead = false;
+    ksApi.route(dateISO)
+      .then(r => { if (!dead) setRoute(r); })
+      .catch(() => { if (!dead) setRoute(null); });
+    return () => { dead = true; };
+  }, [dateISO]);
+
+  const real = !!route && route.date === dateISO && route.stops.length > 0;
+  const isSample = !real;
+  const { stops, unmapped } = useMemo(
+    () => (real
+      ? realToStops(route as KsRoute)
+      : { stops: routeForDate(dateISO), unmapped: [] as KsRouteStop[] }),
+    [real, route, dateISO]);
 
   const isToday = dateISO === isoDate(0);
   const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
@@ -1868,7 +1912,7 @@ function RouteTab() {
 
   return (
     <div className="space-y-5">
-      <SectionHead sample>Route</SectionHead>
+      <SectionHead sample={isSample}>Route</SectionHead>
 
       {/* Day selector */}
       <div className="flex gap-1.5 overflow-x-auto pb-1">
@@ -1907,9 +1951,21 @@ function RouteTab() {
             accent="#A78BFA" delay={180} sub={finish ? 'last session ends' : 'no sessions'} />
         </div>
 
+        {unmapped.length > 0 && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
+            <span className="font-bold">{unmapped.length} session{unmapped.length === 1 ? '' : 's'}</span>{' '}
+            {unmapped.length === 1 ? "isn't" : "aren't"} on the map — add the student's postcode to
+            place {unmapped.length === 1 ? 'it' : 'them'}:{' '}
+            {unmapped.map(u => `${u.start_time} ${u.child_name}`).join(', ')}.
+          </div>
+        )}
+
         {stops.length === 0 ? (
-          <EmptyNote icon="route" title="No sessions this day"
-            hint="Pick another day, or enjoy the day off — you've earned it." />
+          <EmptyNote icon="route"
+            title={unmapped.length > 0 ? 'Nothing to map yet' : 'No sessions this day'}
+            hint={unmapped.length > 0
+              ? "Today's sessions have no postcode on file — add one to each student to build the route."
+              : "Pick another day, or enjoy the day off — you've earned it."} />
         ) : (
           <div className="grid gap-4 lg:grid-cols-5">
             {/* Map — ~60% on desktop */}
