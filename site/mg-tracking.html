@@ -74,7 +74,7 @@
 
     /* Stat tiles */
     .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 18px; }
-    @media (min-width: 720px) { .stats { grid-template-columns: repeat(4, 1fr); } }
+    @media (min-width: 720px) { .stats { grid-template-columns: repeat(5, 1fr); } }
     .stat { padding: 14px 16px; }
     .stat .label { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
     .stat .value { font-family: 'Space Grotesk', sans-serif; font-size: 26px; font-weight: 700; margin-top: 4px; }
@@ -173,6 +173,7 @@
 
     <div class="stats">
       <div class="stat glass"><div class="label"><span class="dot" style="background:#19C3E6"></span>Tracking now</div><div class="value" id="s-tracking">0</div></div>
+      <div class="stat glass"><div class="label"><span class="dot" style="background:#60A5FA"></span>Driving</div><div class="value" id="s-driving">0</div></div>
       <div class="stat glass"><div class="label"><span class="dot" style="background:#34D399"></span>On site</div><div class="value" id="s-onsite">0</div></div>
       <div class="stat glass"><div class="label"><span class="dot" style="background:#A78BFA"></span>Seen today</div><div class="value" id="s-seen">0</div></div>
       <div class="stat glass"><div class="label"><span class="dot" style="background:#FBBF24"></span>Stops today</div><div class="value" id="s-jobs">0</div></div>
@@ -453,6 +454,7 @@
     function renderStats() {
       var sum = (state.data && state.data.summary) || {};
       $('s-tracking').textContent = sum.tracking || 0;
+      $('s-driving').textContent = sum.driving || 0;
       $('s-onsite').textContent = sum.on_site || 0;
       $('s-seen').textContent = sum.seen_today || 0;
       $('s-jobs').textContent = sum.jobs_today || 0;

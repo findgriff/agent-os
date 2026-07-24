@@ -89,6 +89,7 @@ export interface GpsActive {
   jobs: GpsStop[];
   summary: {
     tracking: number;
+    driving: number;
     on_site: number;
     seen_today: number;
     jobs_today: number;

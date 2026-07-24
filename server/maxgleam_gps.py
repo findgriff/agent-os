@@ -486,6 +486,8 @@ def active_crews(tenant_id: int = DEFAULT_TENANT_ID) -> tuple[int, dict]:
         "jobs": jobs,
         "summary": {
             "tracking": sum(1 for c in crews if c["live"]),
+            "driving": sum(1 for c in crews
+                           if c["live"] and c["movement"] and c["movement"]["moving"]),
             "on_site": sum(1 for c in crews
                            if c["live"] and c["geofence"] and c["geofence"]["on_site"]),
             "seen_today": len(crews),

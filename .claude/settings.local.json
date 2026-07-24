@@ -25,7 +25,18 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8100/healthz)",
       "Bash(curl -s http://localhost:8100/)",
       "Bash(journalctl -u agent-os --no-pager -n 40 --since \"2 minutes ago\")",
-      "Bash(sudo journalctl -u agent-os --no-pager -n 40 --since \"2 minutes ago\")"
+      "Bash(sudo journalctl -u agent-os --no-pager -n 40 --since \"2 minutes ago\")",
+      "Bash(sudo journalctl -u agent-os --no-pager -n 50 --since \"5 minutes ago\" -q 2>&1)",
+      "Bash(curl -s -o /dev/null -w \"healthz: %{http_code}\\\\n\" http://localhost:8100/healthz)",
+      "Bash(systemctl list-units *)",
+      "Bash(crontab -l)",
+      "Read(//etc/cron.d/**)",
+      "Bash(ps -eo pid,ppid,etimes,user,args --sort=start_time)",
+      "Bash(sudo journalctl -u opspocket-agents-worker --no-pager -n 8 -q)",
+      "Bash(tmux list-sessions *)",
+      "Bash(sudo -u claude-worker tmux list-sessions)",
+      "Bash(tmux kill-session *)",
+      "Bash(ps -eo pid,args)"
     ]
   }
 }
