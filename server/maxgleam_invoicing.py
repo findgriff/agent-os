@@ -794,6 +794,16 @@ def send_reminders(tenant_id: int = DEFAULT_TENANT_ID, company_id: int | None = 
     was already 65 days old when this first ran has its 30-day stage recorded
     as superseded, so it can never fire a stale message later.
     """
+    # Settle silent payments before deciding who to chase: a customer who paid
+    # on SumUp's hosted page but never reopened the portal still reads 'unpaid'
+    # here, and texting them a charge notice is the worst outcome this sweep
+    # has. Best-effort — a SumUp outage must not stop legitimate reminders.
+    try:
+        reconcile_payments(tenant_id, company_id)
+    except Exception as exc:                                   # noqa: BLE001
+        log.warning("maxgleam: pre-reminder reconcile failed, chasing on last "
+                    "known state: %s", exc)
+
     _code, overdue = overdue_invoices(tenant_id, company_id)
     candidates = [i for i in overdue["invoices"] if i["reminder_due"]]
     if invoice_id is not None:
@@ -857,6 +867,92 @@ def reminder_history(tenant_id: int = DEFAULT_TENANT_ID, limit: int = 100) -> li
         "  LEFT JOIN customers c ON c.id = r.customer_id "
         " WHERE r.tenant_id = ? ORDER BY r.sent_at DESC LIMIT ?",
         (tenant_id, limit)).fetchall()]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Payment reconciliation
+#
+# maxgleam_portal._sync_checkouts already flips an invoice to paid, but only
+# while the customer is *looking at the portal payments page*. A customer who
+# pays on SumUp's hosted checkout and then closes the tab never reloads that
+# page, so the invoice sits 'unpaid' with a completed checkout behind it — and
+# the overdue sweep above would text them a "you still owe us" reminder for
+# money they have already handed over. Chasing a paid invoice is the one
+# mistake this whole feature must never make.
+#
+# This is the server-side settle: poll SumUp for every unpaid invoice that has
+# a checkout and flip the ones SumUp reports PAID. It is a read against SumUp
+# whose only write is unpaid -> paid, so it is idempotent and cron-safe, and it
+# runs regardless of the email/SMS dry-run flags — marking a genuinely-paid
+# invoice paid is a settle, never a "send".
+# ─────────────────────────────────────────────────────────────────────────
+
+def reconcile_payments(tenant_id: int = DEFAULT_TENANT_ID,
+                       company_id: int | None = None,
+                       limit: int = 100) -> tuple[int, dict]:
+    """Flip invoices whose SumUp checkout has completed but weren't marked paid."""
+    now = int(time.time())
+    tenant = _tenant(tenant_id)
+    api_key = ((tenant or {}).get("sumup_api_key") or "").strip()
+    if not api_key:
+        return 200, {"checked": 0, "reconciled": [], "reconciled_count": 0,
+                     "reconciled_pence": 0, "errors": [], "ran_at": now,
+                     "note": "SumUp is not configured for this tenant"}
+
+    # _INVOICE_SELECT omits sumup_checkout_id, so this poll uses its own query.
+    sql = ("SELECT i.id, i.number, i.amount_pence, i.customer_id, "
+           "       i.sumup_checkout_id "
+           "  FROM invoices i "
+           "  LEFT JOIN jobs j ON j.id = i.job_id "
+           "  LEFT JOIN properties p ON p.id = j.property_id "
+           " WHERE i.status = 'unpaid' AND i.tenant_id = ? "
+           "   AND i.sumup_checkout_id IS NOT NULL AND i.sumup_checkout_id != ''")
+    args: list = [tenant_id]
+    if company_id is not None:
+        sql += " AND p.partner_company_id = ?"
+        args.append(company_id)
+    sql += " ORDER BY i.issued_at ASC LIMIT ?"
+    args.append(limit)
+
+    pending = _rows(sql, tuple(args))
+    conn = _conn()
+    reconciled: list[dict] = []
+    errors: list[dict] = []
+    for inv in pending:
+        try:
+            ck = sumup.checkout_status(api_key=api_key,
+                                       checkout_id=inv["sumup_checkout_id"])
+        except sumup.SumUpError as exc:
+            # A SumUp outage settles nothing this run; the invoice stays unpaid
+            # and is retried next time rather than being lost.
+            log.warning("maxgleam: sumup status failed for %s: %s", inv["number"], exc)
+            errors.append({"number": inv["number"], "error": str(exc)})
+            continue
+        if ck.get("status") != "PAID":
+            continue
+        # The status guard keeps the flip idempotent under a concurrent portal
+        # sync — whichever writer gets there first wins, the other is a no-op.
+        cur = conn.execute(
+            "UPDATE invoices SET status = 'paid', method = 'sumup_online', "
+            "paid_at = strftime('%s','now') WHERE id = ? AND status = 'unpaid'",
+            (inv["id"],))
+        if cur.rowcount:
+            reconciled.append({"id": inv["id"], "number": inv["number"],
+                               "amount_pence": inv["amount_pence"]})
+    if reconciled:
+        conn.commit()
+        log.info("maxgleam: reconciled %d invoice(s) as paid from SumUp: %s",
+                 len(reconciled), ", ".join(r["number"] for r in reconciled))
+
+    return 200, {
+        "checked": len(pending),
+        "reconciled": reconciled,
+        "reconciled_count": len(reconciled),
+        "reconciled_pence": sum(r["amount_pence"] for r in reconciled),
+        "still_unpaid": len(pending) - len(reconciled),
+        "errors": errors,
+        "ran_at": now,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────

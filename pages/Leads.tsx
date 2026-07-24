@@ -268,7 +268,7 @@ export default function Leads() {
         <div className="aurora-bg pointer-events-none absolute inset-0 opacity-30" />
         <div className="relative">
           <div className="mb-3 flex items-center gap-2">
-            <div className="grid h-8 w-8 place-items-center rounded-lg" style={{ background: '#19C3E61a', color: '#19C3E6' }}>
+            <div className="grid h-8 w-8 place-items-center rounded-lg bg-accent/10 text-accent">
               <Icon name="travel_explore" size={18} />
             </div>
             <div>

@@ -45,7 +45,7 @@ export default function Factory() {
     <div className="mx-auto max-w-4xl space-y-6 p-4 md:p-6">
       {/* Header */}
       <div className="flex items-center gap-3 animate-fadeInUp">
-        <div className="grid h-11 w-11 place-items-center rounded-2xl" style={{ background: '#22C55E1a', color: '#22C55E', boxShadow: '0 0 26px -6px #22C55E88' }}>
+        <div className="grid h-11 w-11 place-items-center rounded-2xl bg-emerald/10 text-emerald" style={{ boxShadow: '0 0 26px -6px #22C55E88' }}>
           <Icon name="precision_manufacturing" size={24} />
         </div>
         <div>

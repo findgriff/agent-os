@@ -88,6 +88,7 @@ export interface KsBooking {
   coach_notes: string | null;
   price_pence: number;
   status: string;
+  series_ref?: string | null;
   created_at: number;
   is_upcoming: boolean;
   can_cancel: boolean;
@@ -106,16 +107,55 @@ export interface KsBlock {
   id: number; coach_id: number; date: string; start_time: string; end_time: string; reason: string | null;
 }
 
+export interface KsBlockout {
+  id: number; coach_id: number; date: string; reason: string | null; created_at: number;
+}
+
 export interface KsDay {
   date: string; is_today: boolean; sessions: KsBooking[]; blocks: KsBlock[];
+  blockout?: KsBlockout | null;
 }
 
 export interface KsSchedule {
   coach: { id: number; slug: string; name: string };
+  coaches?: { id: number; name: string }[];
   week_start: string; week_end: string; today: string;
   days: KsDay[];
   today_sessions: KsBooking[];
   totals: { sessions: number; completed: number; cancelled: number };
+}
+
+export interface KsStudent {
+  id: number; name: string; dob: string | null; age: number | null;
+  address: string | null; postcode: string | null;
+  emergency_name: string | null; emergency_phone: string | null;
+  medical_notes: string | null; source: string | null; created_at: number;
+  parent: { id: number; name: string; email: string; phone: string | null };
+  bookings: { ref: string; date: string; start_time: string; end_time: string;
+    service_name: string; status: string }[];
+  attendance: { attended: number; absent: number; cancelled: number };
+}
+
+export interface NewStudent {
+  child_name: string; dob?: string; age?: number | string;
+  parent_name: string; parent_email: string; parent_phone: string;
+  address: string; postcode: string;
+  emergency_name?: string; emergency_phone?: string;
+  medical_notes?: string; source?: string;
+}
+
+export interface NewCoachBooking {
+  service_key: string; date: string; start_time: string;
+  duration_minutes?: number; coach_id?: number;
+  student_id?: number | null;
+  child_name?: string; parent_name?: string; parent_email?: string; parent_phone?: string;
+  repeat_weeks?: number; notify?: boolean; notes?: string;
+}
+
+export interface BookingPatch {
+  date?: string; start_time?: string; duration_minutes?: number;
+  coach_id?: number; child_name?: string;
+  status?: 'cancelled'; scope?: 'one' | 'series';
 }
 
 export type KsAttendanceStatus = 'attended' | 'absent' | 'cancelled';
@@ -268,8 +308,41 @@ export const ksApi = {
 
   coachLogout: () => req<{ ok: boolean }>('POST', '/api/ks/logout', {}, getCoachToken()),
 
-  schedule: (week?: string) =>
-    req<KsSchedule>('GET', '/api/ks/coach/schedule' + (week ? `?week=${week}` : ''),
+  schedule: (week?: string, span?: number) =>
+    req<KsSchedule>('GET', '/api/ks/coach/schedule'
+      + (week || span ? `?week=${week || ''}${span ? `&span=${span}` : ''}` : ''),
+      undefined, getCoachToken()),
+
+  // ── Students (coach-managed onboarding) ──────────────────────────────
+  students: () =>
+    req<{ students: KsStudent[] }>('GET', '/api/ks/students', undefined, getCoachToken()),
+
+  addStudent: (data: NewStudent) =>
+    req<{ student: KsStudent }>('POST', '/api/ks/students/add', data, getCoachToken()),
+
+  // ── Coach booking CRUD ───────────────────────────────────────────────
+  coachCreateBooking: (data: NewCoachBooking) =>
+    req<{ bookings: KsBooking[]; skipped: { date: string; reason: string }[];
+      series_ref: string | null }>(
+      'POST', '/api/ks/coach/bookings', data, getCoachToken()),
+
+  updateBooking: (id: number, patch: BookingPatch) =>
+    req<{ booking?: KsBooking; cancelled?: number }>(
+      'PUT', `/api/ks/bookings/${id}`, patch, getCoachToken()),
+
+  // ── Day blockouts (leave / holiday) ──────────────────────────────────
+  blockouts: () =>
+    req<{ blockouts: KsBlockout[] }>('GET', '/api/ks/coach/block-outs',
+      undefined, getCoachToken()),
+
+  addBlockout: (date: string, reason: string) =>
+    req<{ blockout: KsBlockout; clashing_bookings: {
+      id: number; ref: string; start_time: string; end_time: string;
+      child_name: string; service_name: string }[] }>(
+      'POST', '/api/ks/coach/block-out', { date, reason }, getCoachToken()),
+
+  deleteBlockout: (id: number) =>
+    req<{ ok: boolean }>('DELETE', `/api/ks/coach/block-out/${id}`,
       undefined, getCoachToken()),
 
   complete: (ref: string, completed: boolean, coachNotes?: string) =>

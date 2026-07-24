@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge, Button, Card, EmptyState, Icon, Stat } from '../../components/ui';
 import {
-  gpsApi, agoLabel, clockTime,
+  gpsApi, agoLabel, clockTime, durationLabel, distanceLabel,
   type GpsActive, type GpsCrew, type GpsHistory,
 } from '../../lib/gpsApi';
 
@@ -35,10 +35,14 @@ function useLeaflet(): boolean {
   return ready;
 }
 
-/** A van pin: crew initials in their colour, dimmed when the fix is stale. */
+/** A van pin: crew initials in their colour, dimmed when the fix is stale.
+ *  A live crew reporting away from its stop gets an amber ring — a glance-level
+ *  flag that someone is not where the round says they should be. */
 function vanIcon(crew: GpsCrew): any {
   const initials = crew.name.split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
   const colour = colourFor(crew.crew_id);
+  const offSite = crew.live && !!crew.geofence && !crew.geofence.on_site;
+  const ring = offSite ? '#FBBF24' : colour;
   return window.L.divIcon({
     className: '',
     iconSize: [34, 34],
@@ -46,10 +50,18 @@ function vanIcon(crew: GpsCrew): any {
     html: `<div style="
       width:34px;height:34px;border-radius:50%;display:grid;place-items:center;
       font:700 12px/1 'Space Grotesk',system-ui,sans-serif;color:#05080C;
-      background:${colour};border:2px solid rgba(255,255,255,0.85);
-      box-shadow:0 0 0 4px ${colour}33, 0 4px 12px rgba(0,0,0,0.5);
+      background:${colour};border:2px solid ${offSite ? '#FBBF24' : 'rgba(255,255,255,0.85)'};
+      box-shadow:0 0 0 4px ${ring}${offSite ? '55' : '33'}, 0 4px 12px rgba(0,0,0,0.5);
       opacity:${crew.live ? 1 : 0.45};">${initials}</div>`,
   });
+}
+
+/** The on-site / off-site line shown in a crew's map popup. */
+function siteLine(crew: GpsCrew): string {
+  if (!crew.geofence || !crew.live) return '';
+  return crew.geofence.on_site
+    ? `<br><span style="color:#34D399">On site · ${durationLabel(crew.on_site_seconds)}</span>`
+    : `<br><span style="color:#FBBF24">${distanceLabel(crew.geofence.distance_m)} from stop</span>`;
 }
 
 function stopIcon(done: boolean): any {
@@ -148,8 +160,9 @@ export default function CrewTracking() {
     for (const crew of data.crews) {
       const marker = L.marker([crew.position.lat, crew.position.lng], { icon: vanIcon(crew) })
         .bindPopup(
-          `<b>${crew.name}</b><br>${crew.job?.address || 'Between jobs'}<br>` +
-          `<span style="opacity:0.7">Last seen ${agoLabel(crew.age_seconds)}</span>`)
+          `<b>${crew.name}</b><br>${crew.job?.address || 'Between jobs'}` +
+          siteLine(crew) +
+          `<br><span style="opacity:0.7">Last seen ${agoLabel(crew.age_seconds)}</span>`)
         .on('click', () => setSelected(crew.crew_id))
         .addTo(layer);
       pins.push(marker);
@@ -194,10 +207,11 @@ export default function CrewTracking() {
         <Card className="border-red-500/30 bg-red-500/5 p-4 text-sm text-red-300">{error}</Card>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-4">
         <Stat label="Tracking now" value={data?.summary.tracking ?? 0} icon="my_location" accent={ACCENT} />
+        <Stat label="On site" value={data?.summary.on_site ?? 0} icon="where_to_vote" accent="#34D399" />
         <Stat label="Seen today" value={data?.summary.seen_today ?? 0} icon="groups" accent="#A78BFA" />
-        <Stat label="Stops today" value={data?.summary.jobs_today ?? 0} icon="pin_drop" accent="#34D399" />
+        <Stat label="Stops today" value={data?.summary.jobs_today ?? 0} icon="pin_drop" accent="#FBBF24" />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
@@ -229,9 +243,21 @@ export default function CrewTracking() {
                   {crew.live ? 'Live' : 'Stale'}
                 </Badge>
               </div>
-              <div className="mt-2.5 flex items-center justify-between text-[11px] text-muted">
+              <div className="mt-2.5 flex items-center justify-between gap-2 text-[11px] text-muted">
                 <span>Last seen {agoLabel(crew.age_seconds)}</span>
-                {crew.job?.started_at && <span>On site {clockTime(crew.job.started_at)}</span>}
+                {crew.geofence && crew.live ? (
+                  crew.geofence.on_site ? (
+                    <span className="flex items-center gap-1 text-emerald-300">
+                      <Icon name="where_to_vote" size={12} />On site {durationLabel(crew.on_site_seconds)}
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 text-amber-300">
+                      <Icon name="wrong_location" size={12} />{distanceLabel(crew.geofence.distance_m)} from stop
+                    </span>
+                  )
+                ) : crew.job?.started_at ? (
+                  <span>Started {clockTime(crew.job.started_at)}</span>
+                ) : null}
               </div>
               {selected === crew.crew_id && history && (
                 <div className="mt-2.5 flex items-center gap-3 border-t border-white/8 pt-2.5 text-[11px] text-muted">
@@ -267,6 +293,9 @@ export default function CrewTracking() {
           <div className="flex flex-wrap items-center gap-4 border-t border-white/8 px-4 py-2.5 text-[11px] text-muted">
             <span className="flex items-center gap-1.5">
               <span className="h-2.5 w-2.5 rounded-full" style={{ background: ACCENT }} />Crew
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-full ring-2 ring-amber-400" style={{ background: ACCENT }} />Off site
             </span>
             <span className="flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-emerald-400/90" />Done

@@ -108,7 +108,7 @@ export default function Oracle() {
     <div className="flex h-full flex-col">
       {/* Top bar */}
       <div className="flex items-center gap-3 border-b border-white/6 bg-surface/60 px-4 py-3">
-        <div className="grid h-8 w-8 place-items-center rounded-lg" style={{ background: '#F59E0B1a', color: '#F59E0B' }}>
+        <div className="grid h-8 w-8 place-items-center rounded-lg bg-amber/10 text-amber">
           <Icon name="travel_explore" size={18} />
         </div>
         <h1 className="font-display text-base font-bold text-ink">Hermes Oracle</h1>

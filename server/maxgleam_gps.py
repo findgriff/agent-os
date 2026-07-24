@@ -44,6 +44,12 @@ ACTIVE_WINDOW = 30 * 60
 MAX_ACCURACY_M = 500
 UK_BOUNDS = {"lat": (49.0, 61.5), "lng": (-9.0, 2.5)}
 
+# A fix within this radius of the assigned stop counts as "on site". Generous
+# enough to survive an urban GPS fix and a big car park, tight enough that a
+# crew reporting from the wrong street reads as off-site — which is the signal
+# the office actually wants.
+GEOFENCE_M = 150
+
 _local = threading.local()
 _last_write: dict[int, float] = {}
 _last_write_lock = threading.Lock()
@@ -198,6 +204,29 @@ def _point_dto(p: dict) -> dict:
             "job_id": p["job_id"]}
 
 
+def _geofence(position: dict | None, job: dict | None) -> dict | None:
+    """How far the last fix sits from the stop it belongs to.
+
+    None when it can't be told — no fix yet, or the property was never
+    geocoded. When it can, ``on_site`` lets the office spot a crew reporting
+    from somewhere other than the job they are meant to be on.
+    """
+    if not position or not job:
+        return None
+    lat, lng = job.get("latitude"), job.get("longitude")
+    if lat is None or lng is None:
+        return None
+    metres = haversine_m(position["lat"], position["lng"], lat, lng)
+    return {"distance_m": round(metres), "on_site": metres <= GEOFENCE_M}
+
+
+def _on_site_seconds(job: dict | None, now: int) -> int | None:
+    """Seconds since the crew started the job they are stood on."""
+    if not job or not job.get("started_at"):
+        return None
+    return max(0, now - int(job["started_at"]))
+
+
 def crew_position(crew_id: int, tenant_id: int = DEFAULT_TENANT_ID) -> tuple[int, dict]:
     """GET /api/maxgleam/gps/crew/:id — where this crew was last seen."""
     crew = _crew_row(crew_id, tenant_id)
@@ -207,13 +236,17 @@ def crew_position(crew_id: int, tenant_id: int = DEFAULT_TENANT_ID) -> tuple[int
     last = _one("SELECT * FROM gps_log WHERE subcontractor_id = ? "
                 "ORDER BY timestamp DESC LIMIT 1", (crew_id,))
     now = int(time.time())
+    position = _point_dto(last) if last else None
+    job = _current_job(crew_id)
     return 200, {
         "crew": {"id": crew["id"], "name": crew["name"], "phone": crew["phone"],
                  "company_name": crew["company_name"]},
-        "position": _point_dto(last) if last else None,
+        "position": position,
         "age_seconds": (now - last["timestamp"]) if last else None,
         "live": bool(last and now - last["timestamp"] <= ACTIVE_WINDOW),
-        "job": _current_job(crew_id),
+        "job": job,
+        "geofence": _geofence(position, job),
+        "on_site_seconds": _on_site_seconds(job, now),
     }
 
 
@@ -279,16 +312,19 @@ def active_crews(tenant_id: int = DEFAULT_TENANT_ID) -> tuple[int, dict]:
     crews = []
     for r in rs:
         job = _current_job(r["subcontractor_id"])
+        position = {"lat": r["lat"], "lng": r["lng"], "timestamp": r["timestamp"],
+                    "job_id": r["job_id"]}
         crews.append({
             "crew_id": r["subcontractor_id"],
             "name": r["name"],
             "phone": r["phone"],
             "company_name": r["company_name"],
-            "position": {"lat": r["lat"], "lng": r["lng"], "timestamp": r["timestamp"],
-                         "job_id": r["job_id"]},
+            "position": position,
             "age_seconds": now - r["timestamp"],
             "live": now - r["timestamp"] <= ACTIVE_WINDOW,
             "job": job,
+            "geofence": _geofence(position, job),
+            "on_site_seconds": _on_site_seconds(job, now),
         })
 
     # Today's stops give the map something to show before anyone clocks on.
@@ -307,9 +343,12 @@ def active_crews(tenant_id: int = DEFAULT_TENANT_ID) -> tuple[int, dict]:
         "jobs": jobs,
         "summary": {
             "tracking": sum(1 for c in crews if c["live"]),
+            "on_site": sum(1 for c in crews
+                           if c["live"] and c["geofence"] and c["geofence"]["on_site"]),
             "seen_today": len(crews),
             "jobs_today": len(jobs),
             "active_window_minutes": ACTIVE_WINDOW // 60,
+            "geofence_m": GEOFENCE_M,
         },
         "now": now,
     }

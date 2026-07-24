@@ -166,7 +166,7 @@ export default function SignOff() {
               <p className="mt-6 text-sm text-slate-500">
                 Something not right?{' '}
                 <a href={`tel:${job.company_phone.replace(/\s/g, '')}`}
-                  className="font-bold text-[#19C3E6] hover:underline">Call {job.company_name}</a>
+                  className="font-bold text-accent hover:underline">Call {job.company_name}</a>
               </p>
             )}
           </MGCard>

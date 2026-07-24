@@ -230,6 +230,17 @@ export const partnerApi = {
       + (crewId ? `&crew_id=${crewId}` : '')),
   crews: () => req<{ crews: Crew[] }>('GET', '/api/maxgleam/crews'),
 
+  // Office job actions — all server-scoped to this partner's own jobs. Each
+  // returns the fresh job row so the caller can patch the list in place.
+  rescheduleJob: (jobId: number, date: string) =>
+    req<{ job: PartnerJob; unchanged?: boolean }>(
+      'POST', `/api/partner/jobs/${jobId}/reschedule`, { date }),
+  assignJob: (jobId: number, crewId: number | null) =>
+    req<{ job: PartnerJob }>('POST', `/api/partner/jobs/${jobId}/assign`, { crew_id: crewId }),
+  cancelJob: (jobId: number, reason?: string) =>
+    req<{ job: PartnerJob; unchanged?: boolean }>(
+      'POST', `/api/partner/jobs/${jobId}/cancel`, { reason: reason || '' }),
+
   // Referrals — scoped to this partner's own customers, like everything else.
   referrals: () => req<Referrals>('GET', '/api/maxgleam/referrals'),
   createReferral: (data: { customer_id: number; referred_email: string; referred_name?: string }) =>

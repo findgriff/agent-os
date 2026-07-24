@@ -221,6 +221,147 @@ def jobs(session: dict) -> tuple[int, dict]:
     }
 
 
+# --------------------------------------------------------- job management --
+# Office actions a partner may take on their OWN jobs: move the date, hand it
+# to a different crew, or call it off. Every one re-checks ownership on the
+# job id from the URL — a partner token proves which company you are, never
+# which job you may touch, so the id is validated against the company on each
+# call rather than trusted from the client.
+
+# Terminal states cannot be rescheduled or reassigned: a done job has been
+# completed and very likely invoiced; a cancelled one is closed.
+_LOCKED_STATUSES = ("done", "cancelled")
+
+
+def _owned_job(session: dict, job_id) -> dict | None:
+    """The job, only if it belongs to this partner's company.
+
+    Matches maxgleam's dual ownership model (direct dispatch OR inherited from
+    the managed property), exactly as the job list does, so a partner can act
+    on precisely the jobs they can see and no others.
+    """
+    try:
+        jid = int(job_id)
+    except (TypeError, ValueError):
+        return None
+    cid = session["company"]["id"]
+    return _one(
+        "SELECT j.*, p.address, p.partner_company_id AS prop_partner_id "
+        "  FROM jobs j JOIN properties p ON p.id = j.property_id "
+        " WHERE j.id = ? AND (j.partner_company_id = ? OR p.partner_company_id = ?)",
+        (jid, cid, cid))
+
+
+def _log_office_action(job: dict, content: str) -> None:
+    """Best-effort audit trail in comms_log. A failed write must never fail
+    the action it is recording."""
+    try:
+        conn = _conn()
+        conn.execute(
+            "INSERT INTO comms_log (tenant_id, customer_id, kind, content) "
+            "VALUES (?, ?, 'office_action', ?)",
+            (job["tenant_id"], None, content))
+        conn.commit()
+    except Exception:                                       # noqa: BLE001
+        pass
+
+
+def _fresh_job_dto(job_id: int) -> dict | None:
+    row = _one(_JOB_SELECT.replace(
+        "WHERE (j.partner_company_id = ? OR p.partner_company_id = ?)",
+        "WHERE j.id = ?"), (job_id,))
+    return _job_dto(row) if row else None
+
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def reschedule_job(session: dict, job_id, body: dict) -> tuple[int, dict]:
+    """Move a job to a new date. Body: {date: 'YYYY-MM-DD'}."""
+    job = _owned_job(session, job_id)
+    if not job:
+        return 404, {"error": "that job is not on your books"}
+    if job["status"] in _LOCKED_STATUSES:
+        return 409, {"error": f"a {job['status']} job cannot be rescheduled"}
+
+    date = (str(body.get("date") or body.get("scheduled_date") or "")).strip()
+    if not _DATE_RE.match(date):
+        return 400, {"error": "a date in YYYY-MM-DD form is required"}
+    try:
+        time.strptime(date, "%Y-%m-%d")                     # rejects 2026-13-40
+    except ValueError:
+        return 400, {"error": "that is not a real date"}
+
+    was = job["scheduled_date"]
+    if date == was:
+        return 200, {"job": _fresh_job_dto(job["id"]), "unchanged": True}
+
+    conn = _conn()
+    conn.execute("UPDATE jobs SET scheduled_date = ? WHERE id = ?", (date, job["id"]))
+    conn.commit()
+    _log_office_action(job, f"Job {job['id']} ({job['address']}) rescheduled "
+                            f"{was} → {date} by {session['company']['name']}")
+    return 200, {"job": _fresh_job_dto(job["id"])}
+
+
+def assign_job(session: dict, job_id, body: dict) -> tuple[int, dict]:
+    """Reassign a job to a different crew. Body: {crew_id} (null to unassign)."""
+    job = _owned_job(session, job_id)
+    if not job:
+        return 404, {"error": "that job is not on your books"}
+    if job["status"] in _LOCKED_STATUSES:
+        return 409, {"error": f"a {job['status']} job cannot be reassigned"}
+
+    raw = body.get("crew_id", body.get("subcontractor_id"))
+    if raw in ("", None):
+        conn = _conn()
+        conn.execute("UPDATE jobs SET subcontractor_id = NULL WHERE id = ?", (job["id"],))
+        conn.commit()
+        _log_office_action(job, f"Job {job['id']} ({job['address']}) unassigned "
+                                f"by {session['company']['name']}")
+        return 200, {"job": _fresh_job_dto(job["id"])}
+
+    try:
+        crew_id = int(raw)
+    except (TypeError, ValueError):
+        return 400, {"error": "invalid crew"}
+
+    # The crew must be an active subcontractor on this job's tenant — a partner
+    # cannot hand work to a crew from another tenant by guessing an id.
+    crew = _one("SELECT id, name FROM subcontractors "
+                " WHERE id = ? AND tenant_id = ? AND active = 1",
+                (crew_id, job["tenant_id"]))
+    if not crew:
+        return 404, {"error": "that crew is not available to take this job"}
+
+    conn = _conn()
+    conn.execute("UPDATE jobs SET subcontractor_id = ? WHERE id = ?", (crew_id, job["id"]))
+    conn.commit()
+    _log_office_action(job, f"Job {job['id']} ({job['address']}) assigned to "
+                            f"{crew['name']} by {session['company']['name']}")
+    return 200, {"job": _fresh_job_dto(job["id"])}
+
+
+def cancel_job(session: dict, job_id, body: dict | None = None) -> tuple[int, dict]:
+    """Call a job off — status becomes 'cancelled'. A done job is left alone."""
+    job = _owned_job(session, job_id)
+    if not job:
+        return 404, {"error": "that job is not on your books"}
+    if job["status"] == "done":
+        return 409, {"error": "a completed job cannot be cancelled"}
+    if job["status"] == "cancelled":
+        return 200, {"job": _fresh_job_dto(job["id"]), "unchanged": True}
+
+    reason = (str((body or {}).get("reason") or "").strip())[:500]
+    conn = _conn()
+    conn.execute("UPDATE jobs SET status = 'cancelled' WHERE id = ?", (job["id"],))
+    conn.commit()
+    _log_office_action(job, f"Job {job['id']} ({job['address']}) cancelled "
+                            f"by {session['company']['name']}"
+                            + (f" — {reason}" if reason else ""))
+    return 200, {"job": _fresh_job_dto(job["id"])}
+
+
 def properties(session: dict) -> tuple[int, dict]:
     """Properties this partner manages — the picker for a work request."""
     cid = session["company"]["id"]

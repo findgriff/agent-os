@@ -49,7 +49,7 @@ export default function SearchPage() {
       <div className="border-b border-white/6 bg-surface/60 px-4 py-3">
         <div className="mx-auto max-w-2xl">
           <div className="flex items-center gap-3">
-            <div className="grid h-8 w-8 place-items-center rounded-lg" style={{ background: '#38BDF81a', color: '#38BDF8' }}>
+            <div className="grid h-8 w-8 place-items-center rounded-lg bg-sky/10 text-sky">
               <Icon name="search" size={18} />
             </div>
             <div className="flex-1">

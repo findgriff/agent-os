@@ -1,7 +1,7 @@
 // Partner portal dashboard — jobs, work requests and payment status for a
 // single partner company. Standalone shell (no AGENT OS sidebar): partners
 // only ever see their own estate.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Badge, Button, Card, EmptyState, Icon, Input, Select, SkeletonList, Textarea, useToast,
 } from '../components/ui';
@@ -30,41 +30,223 @@ const PRIORITY_TONE: Record<string, 'ok' | 'warn' | 'danger' | 'info' | 'neutral
   low: 'neutral', normal: 'info', high: 'warn', urgent: 'danger',
 };
 
-// ── Job row ─────────────────────────────────────────────────────────────
-function JobRow({ job, tone }: { job: PartnerJob; tone: 'upcoming' | 'done' | 'overdue' }) {
-  const accent = tone === 'done' ? '#22C55E' : tone === 'overdue' ? '#F43F5E' : '#19C3E6';
+// ── Kebab (⋯) menu ──────────────────────────────────────────────────────
+// A click-to-open dropdown that closes on outside click or Escape. Kept
+// local to this file — it is the only surface that needs one, and the AGENT
+// OS kit has no menu primitive.
+interface KebabItem {
+  label: string;
+  icon: string;
+  onClick: () => void;
+  danger?: boolean;
+  disabled?: boolean;
+}
+
+function KebabMenu({ items, label = 'Job actions' }:
+  { items: KebabItem[]; label?: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
   return (
-    <div className="group relative flex flex-col gap-2 rounded-xl border border-white/6 bg-white/[0.02] p-3 transition-colors hover:border-white/12 hover:bg-white/[0.05] sm:flex-row sm:items-center sm:gap-4">
-      <span className="absolute bottom-3 left-0 top-3 w-[3px] rounded-r-full"
-        style={{ background: accent, boxShadow: `0 0 10px ${accent}88` }} />
-      <div className="shrink-0 pl-2.5 sm:w-32">
-        <div className="text-sm font-semibold text-ink">{prettyDate(job.scheduled_date)}</div>
-        <div className="font-mono text-[11px] text-muted/70">{job.scheduled_date}</div>
-      </div>
-      <div className="min-w-0 flex-1 pl-2.5 sm:pl-0">
-        <div className="truncate text-sm font-medium text-ink">{job.address}</div>
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted">
-          {job.postcode && <span className="font-mono">{job.postcode}</span>}
-          {job.customer_name && <span className="truncate">· {job.customer_name}</span>}
-          {job.crew_name && (
-            <span className="flex items-center gap-1">
-              <Icon name="person" size={12} />{job.crew_name}
-            </span>
+    <div className="relative" ref={ref}>
+      <button type="button" aria-haspopup="menu" aria-expanded={open} aria-label={label}
+        onClick={() => setOpen(o => !o)}
+        className={`grid h-8 w-8 place-items-center rounded-lg border border-white/8 text-muted
+          transition-colors hover:border-white/16 hover:bg-white/5 hover:text-ink
+          ${open ? 'bg-white/5 text-ink' : ''}`}>
+        <Icon name="more_vert" size={18} />
+      </button>
+      {open && (
+        <div role="menu"
+          className="absolute right-0 z-40 mt-1 w-44 overflow-hidden rounded-xl border border-white/10
+            bg-surface/95 p-1 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.6)] backdrop-blur-xl
+            animate-[fadeInUp_0.12s_ease-out_both]">
+          {items.map(item => (
+            <button key={item.label} type="button" role="menuitem" disabled={item.disabled}
+              onClick={() => { setOpen(false); item.onClick(); }}
+              className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm
+                transition-colors disabled:cursor-not-allowed disabled:opacity-40
+                ${item.danger ? 'text-rose hover:bg-rose/10' : 'text-ink hover:bg-white/6'}`}>
+              <Icon name={item.icon} size={16} className={item.danger ? 'text-rose' : 'text-muted'} />
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Job row ─────────────────────────────────────────────────────────────
+type JobPanel = 'none' | 'details' | 'reschedule' | 'assign' | 'cancel';
+
+function JobRow({ job, tone, crews, onChanged }: {
+  job: PartnerJob; tone: 'upcoming' | 'done' | 'overdue';
+  crews?: Crew[]; onChanged?: () => void;
+}) {
+  const toast = useToast();
+  const accent = tone === 'done' ? '#22C55E' : tone === 'overdue' ? '#F43F5E' : '#19C3E6';
+  const [panel, setPanel] = useState<JobPanel>('none');
+  const [busy, setBusy] = useState(false);
+  const [date, setDate] = useState(job.scheduled_date);
+  const [crewId, setCrewId] = useState<string>('');
+
+  // A done or cancelled job is closed: the office can look but not move it.
+  const locked = job.status === 'done' || job.status === 'cancelled';
+  const canAct = !!onChanged && !locked;
+
+  const run = async (fn: () => Promise<unknown>, ok: string) => {
+    setBusy(true);
+    try {
+      await fn();
+      toast(ok, 'ok');
+      setPanel('none');
+      onChanged?.();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'That didn’t work', 'danger');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const items: KebabItem[] = [
+    { label: 'View details', icon: 'info',
+      onClick: () => setPanel(p => (p === 'details' ? 'none' : 'details')) },
+  ];
+  if (canAct) {
+    items.push(
+      { label: 'Reschedule', icon: 'event',
+        onClick: () => { setDate(job.scheduled_date); setPanel('reschedule'); } },
+      { label: 'Assign crew', icon: 'group',
+        onClick: () => { setCrewId(''); setPanel('assign'); } },
+      { label: 'Cancel job', icon: 'cancel', danger: true,
+        onClick: () => setPanel('cancel') },
+    );
+  }
+
+  return (
+    <div className="group relative rounded-xl border border-white/6 bg-white/[0.02] transition-colors hover:border-white/12 hover:bg-white/[0.05]">
+      <div className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:gap-4">
+        <span className="absolute bottom-3 left-0 top-3 w-[3px] rounded-r-full"
+          style={{ background: accent, boxShadow: `0 0 10px ${accent}88` }} />
+        <div className="shrink-0 pl-2.5 sm:w-32">
+          <div className="text-sm font-semibold text-ink">{prettyDate(job.scheduled_date)}</div>
+          <div className="font-mono text-[11px] text-muted/70">{job.scheduled_date}</div>
+        </div>
+        <div className="min-w-0 flex-1 pl-2.5 sm:pl-0">
+          <div className="truncate text-sm font-medium text-ink">{job.address}</div>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted">
+            {job.postcode && <span className="font-mono">{job.postcode}</span>}
+            {job.customer_name && <span className="truncate">· {job.customer_name}</span>}
+            {job.crew_name && (
+              <span className="flex items-center gap-1">
+                <Icon name="person" size={12} />{job.crew_name}
+              </span>
+            )}
+          </div>
+          {job.access_notes && (
+            <div className="mt-1 flex items-start gap-1 text-[11px] text-amber/80">
+              <Icon name="key" size={12} className="mt-px shrink-0" />
+              <span className="line-clamp-2">{job.access_notes}</span>
+            </div>
           )}
         </div>
-        {job.access_notes && (
-          <div className="mt-1 flex items-start gap-1 text-[11px] text-amber/80">
-            <Icon name="key" size={12} className="mt-px shrink-0" />
-            <span className="line-clamp-2">{job.access_notes}</span>
+        <div className="flex shrink-0 items-center gap-2 pl-2.5 sm:pl-0">
+          <span className="text-sm font-semibold tabular-nums text-ink">{gbp(job.price_pence)}</span>
+          <Badge tone={job.status === 'cancelled' ? 'neutral'
+            : tone === 'done' ? 'ok' : tone === 'overdue' ? 'danger' : 'info'}>
+            {tone === 'overdue' && job.status !== 'cancelled' ? 'Overdue' : titleCase(job.status)}
+          </Badge>
+          <KebabMenu items={items} />
+        </div>
+      </div>
+
+      {/* Inline action panels — one at a time, below the row */}
+      {panel === 'details' && (
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2 border-t border-white/6 px-4 py-3 text-[12px] sm:grid-cols-3">
+          <Detail label="Status" value={titleCase(job.status)} />
+          <Detail label="Scheduled" value={prettyDate(job.scheduled_date)} />
+          <Detail label="Price" value={gbp(job.price_pence)} />
+          <Detail label="Crew" value={job.crew_name || 'Unassigned'} />
+          <Detail label="Customer" value={job.customer_name || '—'} />
+          <Detail label="Sign-off" value={job.signoff_status ? titleCase(job.signoff_status) : 'Not requested'} />
+          {job.access_notes && <div className="col-span-2 sm:col-span-3"><Detail label="Access" value={job.access_notes} /></div>}
+          {job.notes && <div className="col-span-2 sm:col-span-3"><Detail label="Notes" value={job.notes} /></div>}
+        </div>
+      )}
+
+      {panel === 'reschedule' && (
+        <div className="flex flex-wrap items-end gap-2 border-t border-white/6 px-4 py-3">
+          <div>
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">New date</label>
+            <Input type="date" value={date} min={new Date().toISOString().slice(0, 10)}
+              onChange={e => setDate(e.target.value)} className="!w-auto" />
           </div>
-        )}
-      </div>
-      <div className="flex shrink-0 items-center gap-2 pl-2.5 sm:pl-0">
-        <span className="text-sm font-semibold tabular-nums text-ink">{gbp(job.price_pence)}</span>
-        <Badge tone={tone === 'done' ? 'ok' : tone === 'overdue' ? 'danger' : 'info'}>
-          {tone === 'overdue' ? 'Overdue' : titleCase(job.status)}
-        </Badge>
-      </div>
+          <Button variant="primary" icon="event_available" loading={busy}
+            disabled={!date || date === job.scheduled_date}
+            onClick={() => run(() => partnerApi.rescheduleJob(job.id, date),
+              `Moved to ${prettyDate(date)}`)}>
+            Save
+          </Button>
+          <Button variant="ghost" onClick={() => setPanel('none')}>Cancel</Button>
+        </div>
+      )}
+
+      {panel === 'assign' && (
+        <div className="flex flex-wrap items-end gap-2 border-t border-white/6 px-4 py-3">
+          <div>
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">Crew</label>
+            <Select value={crewId} onChange={e => setCrewId(e.target.value)}>
+              <option value="">Unassign</option>
+              {(crews || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Select>
+          </div>
+          <Button variant="primary" icon="group" loading={busy}
+            onClick={() => run(
+              () => partnerApi.assignJob(job.id, crewId ? Number(crewId) : null),
+              crewId ? 'Crew assigned' : 'Crew removed')}>
+            Save
+          </Button>
+          <Button variant="ghost" onClick={() => setPanel('none')}>Cancel</Button>
+        </div>
+      )}
+
+      {panel === 'cancel' && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-rose/20 bg-rose/[0.04] px-4 py-3">
+          <Icon name="warning" size={18} className="text-rose" />
+          <span className="flex-1 text-[12px] text-muted">
+            Cancel this clean at {job.address}? The crew and customer keep their record; the job stops being scheduled.
+          </span>
+          <Button variant="danger" icon="cancel" loading={busy}
+            onClick={() => run(() => partnerApi.cancelJob(job.id), 'Job cancelled')}>
+            Cancel job
+          </Button>
+          <Button variant="ghost" onClick={() => setPanel('none')}>Keep it</Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted/70">{label}</div>
+      <div className="truncate text-[12px] text-ink" title={value}>{value}</div>
     </div>
   );
 }
@@ -610,14 +792,15 @@ export default function PartnerDashboard({ partner, onSignOut }:
   const [priorities, setPriorities] = useState<string[]>([]);
   const [requests, setRequests] = useState<WorkRequest[]>([]);
   const [signoffs, setSignoffs] = useState<SignoffStatus | null>(null);
+  const [crews, setCrews] = useState<Crew[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [j, p, pr, wr, so] = await Promise.allSettled([
+    const [j, p, pr, wr, so, cr] = await Promise.allSettled([
       partnerApi.jobs(), partnerApi.payments(),
       partnerApi.properties(), partnerApi.workRequests(),
-      partnerApi.signoffStatus(),
+      partnerApi.signoffStatus(), partnerApi.crews(),
     ]);
     if (j.status === 'fulfilled') setJobs(j.value);
     if (p.status === 'fulfilled') setPayments(p.value);
@@ -628,6 +811,7 @@ export default function PartnerDashboard({ partner, onSignOut }:
     }
     if (wr.status === 'fulfilled') setRequests(wr.value.work_requests || []);
     if (so.status === 'fulfilled') setSignoffs(so.value);
+    if (cr.status === 'fulfilled') setCrews(cr.value.crews || []);
     setLoading(false);
   }, []);
 
@@ -736,7 +920,7 @@ export default function PartnerDashboard({ partner, onSignOut }:
                   <section>
                     <SectionTitle count={jobs.overdue.length} accent="#F43F5E">Overdue</SectionTitle>
                     <div className="space-y-2">
-                      {jobs.overdue.map(j => <JobRow key={j.id} job={j} tone="overdue" />)}
+                      {jobs.overdue.map(j => <JobRow key={j.id} job={j} tone="overdue" crews={crews} onChanged={load} />)}
                     </div>
                   </section>
                 )}
@@ -750,7 +934,7 @@ export default function PartnerDashboard({ partner, onSignOut }:
                       hint="Jobs booked for your properties in the next 7 days appear here." />
                   ) : (
                     <div className="space-y-2">
-                      {jobs.upcoming.map(j => <JobRow key={j.id} job={j} tone="upcoming" />)}
+                      {jobs.upcoming.map(j => <JobRow key={j.id} job={j} tone="upcoming" crews={crews} onChanged={load} />)}
                     </div>
                   )}
                 </section>
@@ -764,7 +948,7 @@ export default function PartnerDashboard({ partner, onSignOut }:
                       hint="Cleans signed off in the last 30 days are listed here." />
                   ) : (
                     <div className="space-y-2">
-                      {jobs.completed.map(j => <JobRow key={j.id} job={j} tone="done" />)}
+                      {jobs.completed.map(j => <JobRow key={j.id} job={j} tone="done" crews={crews} onChanged={load} />)}
                     </div>
                   )}
                 </section>

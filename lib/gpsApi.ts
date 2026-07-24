@@ -41,6 +41,12 @@ export interface GpsJob {
   longitude: number | null;
 }
 
+/** How far the last fix sits from the assigned stop. null when unknowable. */
+export interface GpsGeofence {
+  distance_m: number;
+  on_site: boolean;
+}
+
 export interface GpsCrew {
   crew_id: number;
   name: string;
@@ -50,6 +56,8 @@ export interface GpsCrew {
   age_seconds: number;
   live: boolean;
   job: GpsJob | null;
+  geofence: GpsGeofence | null;
+  on_site_seconds: number | null;
 }
 
 /** Today's stops, drawn on the map whether or not anyone is tracking. */
@@ -72,9 +80,11 @@ export interface GpsActive {
   jobs: GpsStop[];
   summary: {
     tracking: number;
+    on_site: number;
     seen_today: number;
     jobs_today: number;
     active_window_minutes: number;
+    geofence_m: number;
   };
   now: number;
 }
@@ -85,6 +95,8 @@ export interface GpsPosition {
   age_seconds: number | null;
   live: boolean;
   job: GpsJob | null;
+  geofence: GpsGeofence | null;
+  on_site_seconds: number | null;
 }
 
 export interface GpsHistory {
@@ -123,3 +135,17 @@ export function agoLabel(seconds: number | null): string {
 export const clockTime = (epoch: number | null) =>
   epoch ? new Date(epoch * 1000).toLocaleTimeString('en-GB',
     { hour: '2-digit', minute: '2-digit' }) : '—';
+
+/** "34m" / "1h 20m" — how long a crew has been stood on the job. */
+export function durationLabel(seconds: number | null): string {
+  if (seconds === null || seconds === undefined) return '—';
+  const m = Math.round(seconds / 60);
+  if (m < 1) return 'just started';
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+/** "80 m" / "1.2 km" — a fix's distance from its stop, in a dispatcher's units. */
+export function distanceLabel(metres: number): string {
+  return metres < 950 ? `${Math.round(metres)} m` : `${(metres / 1000).toFixed(1)} km`;
+}

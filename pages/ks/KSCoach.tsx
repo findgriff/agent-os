@@ -16,8 +16,8 @@ import {
 import { Icon } from '../../components/ui';
 import {
   ksApi, getCoachToken, setCoachToken, clearCoachToken, dayName, shortDay, isoDate, money,
-  type KsAttendanceStatus, type KsBlock, type KsBooking, type KsChildAttendance,
-  type KsSchedule, type KsSkill,
+  type KsAttendanceStatus, type KsBlock, type KsBlockout, type KsBooking,
+  type KsChildAttendance, type KsSchedule, type KsService, type KsSkill, type KsStudent,
 } from '../../lib/ksApi';
 
 const ORANGE = '#FF6B00';
@@ -288,6 +288,45 @@ const toMins = (t: string) => {
   return h * 60 + (m || 0);
 };
 const minsToTime = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+
+const addDaysISO = (iso: string, days: number) => {
+  const d = new Date(`${iso}T12:00:00`);
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const mondayOf = (iso: string) =>
+  addDaysISO(iso, -((new Date(`${iso}T12:00:00`).getDay() + 6) % 7));
+
+function isoWeek(dateISO: string): number {
+  const d = new Date(`${dateISO}T12:00:00`);
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7) + 3);      // Thursday of the week
+  const firstThu = new Date(d.getFullYear(), 0, 4);
+  firstThu.setDate(firstThu.getDate() - ((firstThu.getDay() + 6) % 7) + 3);
+  return 1 + Math.round((d.getTime() - firstThu.getTime()) / (7 * 86400000));
+}
+
+// Decorative day-header weather: deterministic per date, sunnier in summer.
+const WEATHER_SET = ['☀️', '🌤️', '⛅', '🌦️', '🌧️'];
+function weatherFor(dateISO: string): string {
+  const month = Number(dateISO.slice(5, 7)) - 1;
+  const gloom = [3, 3, 2, 2, 1, 0, 0, 0, 1, 2, 3, 3][month];
+  let h = 0;
+  for (let i = 0; i < dateISO.length; i++) h = (h * 31 + dateISO.charCodeAt(i)) >>> 0;
+  return WEATHER_SET[Math.min(4, (h % 3) + Math.floor(gloom / 1.5))];
+}
+
+function untilLabel(startsAtMs: number, nowMs: number): string {
+  const mins = Math.max(0, Math.round((startsAtMs - nowMs) / 60000));
+  const d = Math.floor(mins / 1440), h = Math.floor((mins % 1440) / 60), m = mins % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m} min`;
+}
+
+// 30-minute booking start times across the coaching day.
+const TIME_OPTIONS = Array.from(
+  { length: (DAY_END - DAY_START) / 30 },
+  (_, i) => minsToTime(DAY_START + i * 30));
 
 interface CalEvent {
   key: string;
@@ -626,8 +665,9 @@ function SessionRow({ b, onToggle, showContact, skills, onSaved }:
 }
 
 // ── Calendar ────────────────────────────────────────────────────────────
-function EventBlock({ ev, lane, laneCount, onOpen }:
-  { ev: CalEvent; lane: number; laneCount: number; onOpen: (ev: CalEvent) => void }) {
+function EventBlock({ ev, lane, laneCount, dayBlocked, onOpen, onCtx }:
+  { ev: CalEvent; lane: number; laneCount: number; dayBlocked?: boolean;
+    onOpen: (ev: CalEvent) => void; onCtx?: (ev: CalEvent, x: number, y: number) => void }) {
   const st = TYPE_STYLE[ev.type];
   const s = Math.max(toMins(ev.start), DAY_START);
   const e = Math.min(Math.max(toMins(ev.end), s + 25), DAY_END);
@@ -637,19 +677,28 @@ function EventBlock({ ev, lane, laneCount, onOpen }:
   const durMins = toMins(ev.end) - toMins(ev.start);
   const done = ev.booking?.status === 'completed';
   const cancelled = ev.booking?.status === 'cancelled';
+  const interactive = !!ev.booking && !ev.demo;
+  // A confirmed booking sitting on a blocked-out day needs rearranging.
+  const clashing = dayBlocked && interactive && ev.booking!.status === 'confirmed';
   return (
-    <button onClick={() => onOpen(ev)}
+    <button
+      onClick={e2 => { e2.stopPropagation(); onOpen(ev); }}
+      onContextMenu={interactive && onCtx
+        ? e2 => { e2.preventDefault(); e2.stopPropagation(); onCtx(ev, e2.clientX, e2.clientY); }
+        : undefined}
       className={`absolute overflow-hidden rounded-lg border-l-[3px] px-1.5 py-1 text-left shadow-sm
         transition-all duration-200 ease-out hover:z-10 hover:-translate-y-px hover:shadow-md
-        ${st.chip} ${st.border} ${st.text} ${cancelled ? 'opacity-45' : done ? 'opacity-75' : ''}`}
+        ${st.chip} ${st.border} ${st.text} ${cancelled ? 'opacity-45' : done ? 'opacity-75' : ''}
+        ${clashing ? 'z-[6] ring-2 ring-red-500' : ''}`}
       style={{
         top, height,
         left: `calc(${(lane * 100) / laneCount}% + 2px)`,
         width: `calc(${100 / laneCount}% - 5px)`,
       }}
-      title={`${ev.start}–${ev.end} · ${ev.title}`}>
+      title={`${ev.start}–${ev.end} · ${ev.title}${clashing ? ' — booked on a blocked day!' : ''}`}>
       <div className="truncate text-[10px] font-semibold opacity-75">
-        {ev.start}{height > 34 ? `–${ev.end}` : ''}{done ? ' ✓' : ''}
+        {clashing ? '⚠️ ' : ''}{ev.start}{height > 34 ? `–${ev.end}` : ''}{done ? ' ✓' : ''}
+        {ev.booking?.series_ref ? ' ↻' : ''}
       </div>
       <div className="truncate text-[11px] font-bold leading-tight">
         {cancelled ? <s>{ev.title}</s> : ev.title}
@@ -663,16 +712,597 @@ function EventBlock({ ev, lane, laneCount, onOpen }:
   );
 }
 
-function CalendarTab({ schedule, loading, onShiftWeek, onToday, onOpen }: {
+// ── Calendar modals + widgets ───────────────────────────────────────────
+function AddBookingModal({ at, students, coaches, services, defaultCoachId, onClose, onDone }: {
+  at: { date: string; time: string };
+  students: KsStudent[];
+  coaches: { id: number; name: string }[];
+  services: KsService[];
+  defaultCoachId: number;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [studentId, setStudentId] = useState(students[0] ? String(students[0].id) : 'manual');
+  const [childName, setChildName] = useState('');
+  const [parentName, setParentName] = useState('');
+  const [parentEmail, setParentEmail] = useState('');
+  const [parentPhone, setParentPhone] = useState('');
+  const [serviceKey, setServiceKey] = useState(services[0]?.key || '1-to-1-coaching');
+  const [date, setDate] = useState(at.date);
+  const [time, setTime] = useState(at.time);
+  const [duration, setDuration] = useState('');
+  const [coachId, setCoachId] = useState(String(defaultCoachId));
+  const [repeat, setRepeat] = useState('1');
+  const [notify, setNotify] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [done, setDone] =
+    useState<{ n: number; skipped: { date: string; reason: string }[] } | null>(null);
+
+  const manual = studentId === 'manual';
+  const svc = services.find(s => s.key === serviceKey);
+
+  const submit = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const res = await ksApi.coachCreateBooking({
+        service_key: serviceKey, date, start_time: time,
+        duration_minutes: duration ? Number(duration) : undefined,
+        coach_id: Number(coachId),
+        student_id: manual ? undefined : Number(studentId),
+        child_name: manual ? childName.trim() : undefined,
+        parent_name: manual ? parentName.trim() : undefined,
+        parent_email: manual ? parentEmail.trim() : undefined,
+        parent_phone: manual ? parentPhone.trim() : undefined,
+        repeat_weeks: Number(repeat), notify,
+      });
+      setDone({ n: res.bookings.length, skipped: res.skipped || [] });
+      onDone();
+    } catch (e: any) {
+      setError(e?.message || 'Could not book that.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <KSModal onClose={onClose}>
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="text-lg font-extrabold tracking-tight text-slate-900">Add booking</h3>
+        <button onClick={onClose} aria-label="Close"
+          className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700">
+          <Icon name="close" size={20} />
+        </button>
+      </div>
+
+      {done ? (
+        <div className="space-y-3">
+          <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-semibold text-green-800">
+            Booked {done.n} session{done.n === 1 ? '' : 's'}.
+          </div>
+          {done.skipped.length > 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <div className="font-bold">Skipped {done.skipped.length}:</div>
+              {done.skipped.map(s => (
+                <div key={s.date}>{shortDay(s.date)} — {s.reason}</div>
+              ))}
+            </div>
+          )}
+          <KSButton onClick={onClose} className="w-full">Done</KSButton>
+        </div>
+      ) : (
+        <div className="space-y-3.5">
+          <div>
+            <KSLabel>Student</KSLabel>
+            <KSSelect value={studentId} onChange={e => setStudentId(e.target.value)} className="w-full py-2.5">
+              {students.map(s => (
+                <option key={s.id} value={s.id}>{s.name}{s.age ? ` (age ${s.age})` : ''}</option>
+              ))}
+              <option value="manual">Someone else — type their details…</option>
+            </KSSelect>
+          </div>
+          {manual && (
+            <div className="space-y-2.5 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+              <KSInput value={childName} onChange={e => setChildName(e.target.value)}
+                placeholder="Child's full name *" />
+              <KSInput value={parentName} onChange={e => setParentName(e.target.value)}
+                placeholder="Parent name *" />
+              <div className="grid grid-cols-2 gap-2.5">
+                <KSInput type="email" value={parentEmail} onChange={e => setParentEmail(e.target.value)}
+                  placeholder="Parent email *" />
+                <KSInput value={parentPhone} onChange={e => setParentPhone(e.target.value)}
+                  placeholder="Parent phone" />
+              </div>
+            </div>
+          )}
+
+          <div>
+            <KSLabel>Session type</KSLabel>
+            <KSSelect value={serviceKey} onChange={e => setServiceKey(e.target.value)} className="w-full py-2.5">
+              {services.map(s => (
+                <option key={s.key} value={s.key}>{s.name}{s.minutes ? ` · ${s.minutes}m` : ''}</option>
+              ))}
+            </KSSelect>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2.5">
+            <div>
+              <KSLabel>Date</KSLabel>
+              <KSInput type="date" value={date} onChange={e => setDate(e.target.value)} />
+            </div>
+            <div>
+              <KSLabel>Start</KSLabel>
+              <KSSelect value={time} onChange={e => setTime(e.target.value)} className="w-full py-2.5">
+                {TIME_OPTIONS.map(t => <option key={t}>{t}</option>)}
+              </KSSelect>
+            </div>
+            <div>
+              <KSLabel>Length</KSLabel>
+              <KSSelect value={duration} onChange={e => setDuration(e.target.value)} className="w-full py-2.5">
+                <option value="">{svc?.minutes ? `${svc.minutes}m (default)` : 'Default'}</option>
+                {[45, 60, 90, 120].map(m => <option key={m} value={m}>{m}m</option>)}
+              </KSSelect>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2.5">
+            <div>
+              <KSLabel>Coach</KSLabel>
+              <KSSelect value={coachId} onChange={e => setCoachId(e.target.value)} className="w-full py-2.5">
+                {coaches.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </KSSelect>
+            </div>
+            <div>
+              <KSLabel>Repeat</KSLabel>
+              <KSSelect value={repeat} onChange={e => setRepeat(e.target.value)} className="w-full py-2.5">
+                <option value="1">One-off</option>
+                {[4, 6, 8, 10, 12].map(w => (
+                  <option key={w} value={w}>Weekly × {w}</option>
+                ))}
+              </KSSelect>
+            </div>
+          </div>
+
+          <label className="flex items-start gap-2.5 rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-sm text-slate-700">
+            <input type="checkbox" checked={notify} onChange={e => setNotify(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-slate-300 accent-[#FF6B00]" />
+            <span>
+              <span className="font-bold">Text the parent a confirmation.</span>{' '}
+              This sends a real SMS (first session only for a weekly series).
+            </span>
+          </label>
+
+          {error && <KSAlert>{error}</KSAlert>}
+          <KSButton onClick={submit} loading={busy} className="w-full">
+            {Number(repeat) > 1 ? `Book ${repeat} weekly sessions` : 'Book session'}
+          </KSButton>
+        </div>
+      )}
+    </KSModal>
+  );
+}
+
+function EditBookingModal({ b, coaches, students, onClose, onDone }: {
+  b: KsBooking;
+  coaches: { id: number; name: string }[];
+  students: KsStudent[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [date, setDate] = useState(b.date);
+  const [time, setTime] = useState(b.start_time);
+  const [coachId, setCoachId] = useState(String(b.coach_id));
+  const [childName, setChildName] = useState(b.child_name);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [confirming, setConfirming] = useState<'one' | 'series' | null>(null);
+
+  const run = async (patch: Parameters<typeof ksApi.updateBooking>[1]) => {
+    setBusy(true);
+    setError('');
+    try {
+      await ksApi.updateBooking(b.id, patch);
+      onDone();
+      onClose();
+    } catch (e: any) {
+      setError(e?.message || 'Could not update that booking.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <KSModal onClose={onClose}>
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-extrabold tracking-tight text-slate-900">Edit booking</h3>
+          <div className="text-xs text-slate-500">
+            {b.service_name} · <span className="font-mono">{b.ref}</span>
+            {b.series_ref && <span> · part of a weekly series</span>}
+          </div>
+        </div>
+        <button onClick={onClose} aria-label="Close"
+          className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700">
+          <Icon name="close" size={20} />
+        </button>
+      </div>
+
+      <div className="space-y-3.5">
+        <div>
+          <KSLabel>Student</KSLabel>
+          <KSInput value={childName} onChange={e => setChildName(e.target.value)}
+            list="ks-student-names" placeholder="Child's name" />
+          <datalist id="ks-student-names">
+            {students.map(s => <option key={s.id} value={s.name} />)}
+          </datalist>
+        </div>
+        <div className="grid grid-cols-2 gap-2.5">
+          <div>
+            <KSLabel>Date</KSLabel>
+            <KSInput type="date" value={date} onChange={e => setDate(e.target.value)} />
+          </div>
+          <div>
+            <KSLabel>Start</KSLabel>
+            <KSSelect value={time} onChange={e => setTime(e.target.value)} className="w-full py-2.5">
+              {TIME_OPTIONS.map(t => <option key={t}>{t}</option>)}
+              {!TIME_OPTIONS.includes(time) && <option value={time}>{time}</option>}
+            </KSSelect>
+          </div>
+        </div>
+        <div>
+          <KSLabel>Coach</KSLabel>
+          <KSSelect value={coachId} onChange={e => setCoachId(e.target.value)} className="w-full py-2.5">
+            {coaches.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </KSSelect>
+        </div>
+
+        {error && <KSAlert>{error}</KSAlert>}
+        <KSButton loading={busy} className="w-full"
+          onClick={() => run({ date, start_time: time, coach_id: Number(coachId),
+            child_name: childName.trim() })}>
+          Save changes
+        </KSButton>
+
+        <div className="border-t border-slate-100 pt-3">
+          {confirming ? (
+            <div className="space-y-2">
+              <p className="text-sm text-slate-600">
+                {confirming === 'series'
+                  ? 'Cancel every remaining session in this weekly series?'
+                  : 'Cancel this session?'}{' '}
+                The parent is <span className="font-bold">not texted automatically</span> — let them know.
+              </p>
+              <div className="flex gap-2">
+                <KSButton tone="danger" loading={busy} className="flex-1"
+                  onClick={() => run({ status: 'cancelled', scope: confirming })}>
+                  Yes, cancel {confirming === 'series' ? 'series' : 'it'}
+                </KSButton>
+                <KSButton tone="ghost" onClick={() => setConfirming(null)}>Keep</KSButton>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              <KSButton tone="danger" onClick={() => setConfirming('one')}>Cancel session</KSButton>
+              {b.series_ref && (
+                <KSButton tone="danger" onClick={() => setConfirming('series')}>
+                  Cancel whole series
+                </KSButton>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </KSModal>
+  );
+}
+
+function CalContextMenu({ x, y, ev, onClose, onAction }: {
+  x: number; y: number; ev: CalEvent;
+  onClose: () => void;
+  onAction: (a: 'edit' | 'complete' | 'cancel' | 'student') => void;
+}) {
+  const left = Math.min(x, window.innerWidth - 200);
+  const top = Math.min(y, window.innerHeight - 200);
+  const done = ev.booking?.status === 'completed';
+  const items: [string, string, string][] = [
+    ['edit', 'edit_calendar', 'Reschedule'],
+    ['complete', 'task_alt', done ? 'Mark not done' : 'Mark complete'],
+    ['student', 'person_search', 'View student'],
+    ['cancel', 'event_busy', 'Cancel session'],
+  ];
+  return (
+    <div className="fixed inset-0 z-50" onClick={onClose}
+      onContextMenu={e => { e.preventDefault(); onClose(); }}>
+      <div onClick={e => e.stopPropagation()}
+        className="absolute w-48 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-2xl animate-scaleIn"
+        style={{ left, top }}>
+        {items.map(([a, icon, label]) => (
+          <button key={a}
+            onClick={() => { onAction(a as 'edit' | 'complete' | 'cancel' | 'student'); onClose(); }}
+            className={`flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm font-semibold transition-colors hover:bg-slate-50
+              ${a === 'cancel' ? 'text-red-600' : 'text-slate-700'}`}>
+            <Icon name={icon} size={17} />{label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BlockDayModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [date, setDate] = useState(isoDate(0));
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState<{ clashes: number } | null>(null);
+
+  const submit = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const res = await ksApi.addBlockout(date, reason.trim());
+      setResult({ clashes: res.clashing_bookings.length });
+      onDone();
+    } catch (e: any) {
+      setError(e?.message || 'Could not block that day.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <KSModal onClose={onClose}>
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="text-lg font-extrabold tracking-tight text-slate-900">Block out a day</h3>
+        <button onClick={onClose} aria-label="Close"
+          className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700">
+          <Icon name="close" size={20} />
+        </button>
+      </div>
+
+      {result ? (
+        <div className="space-y-3">
+          <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-semibold text-green-800">
+            {shortDay(date)} is blocked — no new bookings can land on it.
+          </div>
+          {result.clashes > 0 && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+              <span className="font-bold">{result.clashes} session{result.clashes === 1 ? ' is' : 's are'} already
+              booked that day</span> — they're highlighted on the calendar so you can rearrange or cancel them.
+            </div>
+          )}
+          <KSButton onClick={onClose} className="w-full">Done</KSButton>
+        </div>
+      ) : (
+        <div className="space-y-3.5">
+          <p className="text-sm text-slate-600">
+            Holiday, sick day or personal time — parents won't be offered any slot on this date.
+          </p>
+          <div>
+            <KSLabel>Date</KSLabel>
+            <KSInput type="date" value={date} onChange={e => setDate(e.target.value)} />
+          </div>
+          <div>
+            <KSLabel hint="(optional)">Reason</KSLabel>
+            <KSInput value={reason} onChange={e => setReason(e.target.value)}
+              placeholder="Holiday, sick, personal…" />
+          </div>
+          {error && <KSAlert>{error}</KSAlert>}
+          <KSButton onClick={submit} loading={busy} className="w-full">Block this day</KSButton>
+        </div>
+      )}
+    </KSModal>
+  );
+}
+
+function MiniCalendar({ anchor, monthData, weekStart, onNavMonth, onPickDay }: {
+  anchor: string;
+  monthData: KsSchedule | null;
+  weekStart?: string;
+  onNavMonth: (dir: number) => void;
+  onPickDay: (iso: string) => void;
+}) {
+  const first = new Date(`${anchor}T12:00:00`);
+  const label = first.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  const gridStart = mondayOf(anchor);
+  const cells = Array.from({ length: 42 }, (_, i) => addDaysISO(gridStart, i));
+  const byDate = new Map((monthData?.days || []).map(d => [d.date, d]));
+  const today = isoDate(0);
+  const inWeek = (iso: string) =>
+    !!weekStart && iso >= weekStart && iso <= addDaysISO(weekStart, 6);
+  return (
+    <KSCard className="p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <button onClick={() => onNavMonth(-1)} aria-label="Previous month"
+          className="grid h-7 w-7 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700">
+          <Icon name="chevron_left" size={17} />
+        </button>
+        <div className="text-sm font-extrabold text-slate-800">{label}</div>
+        <button onClick={() => onNavMonth(1)} aria-label="Next month"
+          className="grid h-7 w-7 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700">
+          <Icon name="chevron_right" size={17} />
+        </button>
+      </div>
+      <div className="grid grid-cols-7 text-center text-[10px] font-bold uppercase text-slate-400">
+        {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => <div key={i} className="py-1">{d}</div>)}
+      </div>
+      <div className="grid grid-cols-7">
+        {cells.map(iso => {
+          const day = byDate.get(iso);
+          const sessions = day?.sessions.filter(s => s.status !== 'cancelled').length || 0;
+          const inMonth = iso.slice(0, 7) === anchor.slice(0, 7);
+          return (
+            <button key={iso} onClick={() => onPickDay(iso)}
+              className={`relative mx-auto grid h-8 w-8 place-items-center rounded-lg text-xs font-semibold transition-colors
+                ${iso === today ? 'bg-[#FF6B00] text-white'
+                  : inWeek(iso) ? 'bg-orange-100 text-slate-900'
+                  : inMonth ? 'text-slate-700 hover:bg-slate-100' : 'text-slate-300 hover:bg-slate-50'}
+                ${day?.blockout ? 'line-through decoration-red-400 decoration-2' : ''}`}>
+              {Number(iso.slice(8, 10))}
+              {sessions > 0 && (
+                <span className={`absolute bottom-0.5 h-1 w-1 rounded-full
+                  ${iso === today ? 'bg-white' : 'bg-[#FF6B00]'}`} />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </KSCard>
+  );
+}
+
+function MonthView({ anchor, monthData, loading, onPickDay }: {
+  anchor: string;
+  monthData: KsSchedule | null;
+  loading: boolean;
+  onPickDay: (iso: string) => void;
+}) {
+  if (loading || !monthData) return <Skeleton className="h-[560px] w-full" />;
+  const gridStart = mondayOf(anchor);
+  const weeks = Array.from({ length: 6 }, (_, w) =>
+    Array.from({ length: 7 }, (_, i) => addDaysISO(gridStart, w * 7 + i)));
+  const byDate = new Map(monthData.days.map(d => [d.date, d]));
+  const today = isoDate(0);
+  return (
+    <KSCard className="overflow-hidden">
+      <div className="overflow-x-auto">
+        <div className="min-w-[720px]">
+          <div className="grid border-b border-slate-200 text-center text-[11px] font-bold uppercase tracking-wider text-slate-400"
+            style={{ gridTemplateColumns: '34px repeat(7, minmax(0, 1fr))' }}>
+            <div className="py-2">Wk</div>
+            {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
+              <div key={d} className="border-l border-slate-100 py-2">{d}</div>
+            ))}
+          </div>
+          {weeks.map(week => (
+            <div key={week[0]} className="grid border-b border-slate-100 last:border-0"
+              style={{ gridTemplateColumns: '34px repeat(7, minmax(0, 1fr))' }}>
+              <div className="grid place-items-center text-[10px] font-bold text-slate-300">
+                {isoWeek(week[0])}
+              </div>
+              {week.map(iso => {
+                const day = byDate.get(iso);
+                const live = (day?.sessions || []).filter(s => s.status !== 'cancelled');
+                const inMonth = iso.slice(0, 7) === anchor.slice(0, 7);
+                return (
+                  <button key={iso} onClick={() => onPickDay(iso)}
+                    className={`relative min-h-[92px] border-l border-slate-100 p-1.5 text-left align-top transition-colors
+                      ${inMonth ? 'hover:bg-orange-50/60' : 'bg-slate-50/60 hover:bg-slate-100/60'}`}>
+                    {day?.blockout && (
+                      <span className="pointer-events-none absolute inset-0"
+                        style={{ background: 'repeating-linear-gradient(45deg, rgba(239,68,68,0.05) 0 8px, rgba(239,68,68,0.13) 8px 16px)' }} />
+                    )}
+                    <span className="relative flex items-center justify-between">
+                      <span className={`grid h-6 w-6 place-items-center rounded-full text-xs font-extrabold
+                        ${iso === today ? 'bg-[#FF6B00] text-white'
+                          : inMonth ? 'text-slate-800' : 'text-slate-300'}`}>
+                        {Number(iso.slice(8, 10))}
+                      </span>
+                      <span className="text-xs">{weatherFor(iso)}</span>
+                    </span>
+                    <span className="relative mt-1 block space-y-0.5">
+                      {live.slice(0, 2).map(s => (
+                        <span key={s.id}
+                          className={`block truncate rounded px-1 py-px text-[10px] font-bold leading-tight
+                            ${TYPE_STYLE[typeOfService(s.service_key, s.service_name)].chip}
+                            ${TYPE_STYLE[typeOfService(s.service_key, s.service_name)].text}`}>
+                          {s.start_time} {s.child_name.split(' ')[0]}
+                        </span>
+                      ))}
+                      {live.length > 2 && (
+                        <span className="block text-[10px] font-bold text-slate-400">
+                          +{live.length - 2} more
+                        </span>
+                      )}
+                      {live.length > 0 && (
+                        <span className="block text-[9px] font-semibold text-slate-400">
+                          {live.length} session{live.length === 1 ? '' : 's'}
+                        </span>
+                      )}
+                      {day?.blockout && (
+                        <span className="block truncate text-[10px] font-bold text-red-500">
+                          ⛔ {day.blockout.reason || 'Blocked'}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+    </KSCard>
+  );
+}
+
+function CalendarTab({ schedule, loading, students, skills, onToggle, afterMark,
+  onShiftWeek, onGoWeek, onToday, onViewStudent, refresh }: {
   schedule: KsSchedule | null;
   loading: boolean;
+  students: KsStudent[];
+  skills: KsSkill[];
+  onToggle: (b: KsBooking) => Promise<void>;
+  afterMark: () => void;
   onShiftWeek: (days: number) => void;
+  onGoWeek: (iso: string) => void;
   onToday: () => void;
-  onOpen: (ev: CalEvent) => void;
+  onViewStudent: (name: string) => void;
+  refresh: () => void;
 }) {
+  const [view, setView] = useState<'week' | 'month'>('week');
+  const [monthAnchor, setMonthAnchor] = useState(() => `${isoDate(0).slice(0, 7)}-01`);
+  const [monthData, setMonthData] = useState<KsSchedule | null>(null);
+  const [monthLoading, setMonthLoading] = useState(false);
+  const [services, setServices] = useState<KsService[]>([]);
+  const [addAt, setAddAt] = useState<{ date: string; time: string } | null>(null);
+  const [editing, setEditing] = useState<KsBooking | null>(null);
+  const [selected, setSelected] = useState<CalEvent | null>(null);
+  const [ctx, setCtx] = useState<{ x: number; y: number; ev: CalEvent } | null>(null);
+  const [blocking, setBlocking] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const t = setInterval(() => setNowMs(Date.now()), 60000);
+    return () => clearInterval(t);
+  }, []);
+  useEffect(() => {
+    ksApi.info().then(r => setServices(r.services.filter(s => s.bookable))).catch(() => { /* selector empty */ });
+  }, []);
+
+  // One 42-day fetch feeds both the mini calendar and the month view.
+  const loadMonth = useCallback(() => {
+    setMonthLoading(true);
+    ksApi.schedule(mondayOf(monthAnchor), 42)
+      .then(setMonthData)
+      .catch(() => setMonthData(null))
+      .finally(() => setMonthLoading(false));
+  }, [monthAnchor]);
+  useEffect(loadMonth, [loadMonth]);
+
+  // The mini calendar follows the visible week when the coach navigates.
+  const weekStart = schedule?.week_start;
+  useEffect(() => {
+    if (weekStart) setMonthAnchor(a => {
+      const m = `${weekStart.slice(0, 7)}-01`;
+      return m === a ? a : m;
+    });
+  }, [weekStart]);
+
+  const refreshAll = useCallback(() => { refresh(); loadMonth(); }, [refresh, loadMonth]);
+
+  // Keep an open detail popup in step after mark-done toggles.
+  const toggle = async (b: KsBooking) => {
+    await onToggle(b);
+    setSelected(sel => (sel?.booking?.ref === b.ref
+      ? { ...sel, booking: { ...sel.booking!, status: b.status === 'completed' ? 'confirmed' : 'completed' } }
+      : sel));
+    loadMonth();
+  };
+
   const hours = Array.from({ length: (DAY_END - DAY_START) / 60 + 1 }, (_, i) => DAY_START / 60 + i);
-  const now = new Date();
-  const nowMins = now.getHours() * 60 + now.getMinutes();
+  const nowMins = new Date(nowMs).getHours() * 60 + new Date(nowMs).getMinutes();
 
   const days = useMemo(() => {
     if (!schedule) return [];
@@ -701,6 +1331,39 @@ function CalendarTab({ schedule, loading, onShiftWeek, onToday, onOpen }: {
     });
   }, [schedule]);
 
+  const nextSession = useMemo(() => {
+    let best: KsBooking | null = null;
+    for (const d of schedule?.days || []) {
+      for (const s of d.sessions) {
+        if (s.status === 'confirmed' && s.starts_at * 1000 > nowMs
+          && (!best || s.starts_at < best.starts_at)) best = s;
+      }
+    }
+    return best;
+  }, [schedule, nowMs]);
+
+  const clickSlot = (e: React.MouseEvent<HTMLDivElement>, d: (typeof days)[number]) => {
+    if (d.blockout) return;                    // no new bookings on a blocked day
+    const rect = e.currentTarget.getBoundingClientRect();
+    const mins = DAY_START + Math.floor(((e.clientY - rect.top) / HOUR_H) * 2) * 30;
+    setAddAt({ date: d.date, time: minsToTime(Math.max(DAY_START, Math.min(DAY_END - 30, mins))) });
+  };
+
+  const ctxAction = (a: 'edit' | 'complete' | 'cancel' | 'student') => {
+    const b = ctx?.ev.booking;
+    if (!b) return;
+    if (a === 'edit') setEditing(b);
+    else if (a === 'complete') toggle(b);
+    else if (a === 'student') onViewStudent(b.child_name);
+    else if (a === 'cancel'
+      && window.confirm(`Cancel ${b.child_name}'s session on ${shortDay(b.date)} at ${b.start_time}? `
+        + `The parent is not texted automatically.`)) {
+      ksApi.updateBooking(b.id, { status: 'cancelled' }).then(refreshAll).catch(() => { /* refresh shows truth */ });
+    }
+  };
+
+  const pickDay = (iso: string) => { onGoWeek(mondayOf(iso)); setView('week'); };
+
   if (loading || !schedule) {
     return (
       <div className="space-y-3">
@@ -718,110 +1381,223 @@ function CalendarTab({ schedule, loading, onShiftWeek, onToday, onOpen }: {
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1">
-          <button onClick={() => onShiftWeek(-7)} aria-label="Previous week"
+          <button onClick={() => (view === 'week' ? onShiftWeek(-7)
+            : setMonthAnchor(a => addDaysISO(a, -1).slice(0, 8) + '01'))}
+            aria-label="Previous"
             className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-colors hover:border-[#FF6B00] hover:text-[#FF6B00]">
             <Icon name="chevron_left" size={20} />
           </button>
-          <button onClick={() => onShiftWeek(7)} aria-label="Next week"
+          <button onClick={() => (view === 'week' ? onShiftWeek(7)
+            : setMonthAnchor(a => addDaysISO(a, 32).slice(0, 8) + '01'))}
+            aria-label="Next"
             className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-colors hover:border-[#FF6B00] hover:text-[#FF6B00]">
             <Icon name="chevron_right" size={20} />
           </button>
-          <KSButton tone="secondary" className="ml-1 py-2" onClick={onToday}>Today</KSButton>
+          <KSButton tone="secondary" className="ml-1 py-2"
+            onClick={() => { onToday(); setMonthAnchor(`${isoDate(0).slice(0, 7)}-01`); setView('week'); }}>
+            Today
+          </KSButton>
         </div>
+
         <div className="text-sm font-extrabold text-slate-800">
-          {shortDay(schedule.week_start)} – {shortDay(schedule.week_end)}
+          {view === 'week'
+            ? <>Wk {isoWeek(schedule.week_start)} · {shortDay(schedule.week_start)} – {shortDay(schedule.week_end)}</>
+            : new Date(`${monthAnchor}T12:00:00`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}
         </div>
-        {/* Legend */}
-        <div className="ml-auto flex flex-wrap items-center gap-3 text-[11px] font-semibold text-slate-500">
-          {(['oneone', 'group', 'camp', 'block'] as SessionType[]).map(t => (
-            <span key={t} className="flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full" style={{ background: TYPE_STYLE[t].dot }} />
-              {TYPE_STYLE[t].label}
-            </span>
+
+        {/* View toggle */}
+        <div className="flex overflow-hidden rounded-xl border border-slate-200 bg-white">
+          {(['week', 'month'] as const).map(v => (
+            <button key={v} onClick={() => setView(v)}
+              className={`px-3.5 py-2 text-xs font-bold uppercase tracking-wide transition-colors
+                ${view === v ? 'bg-[#FF6B00] text-white' : 'text-slate-500 hover:text-slate-800'}`}>
+              {v}
+            </button>
           ))}
+        </div>
+
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {/* Next-session countdown */}
+          <span className="hidden items-center gap-1.5 rounded-xl bg-orange-50 px-3 py-2 text-xs font-bold text-[#C24F00] sm:flex">
+            <Icon name="timer" size={15} />
+            {nextSession
+              ? `Next session in ${untilLabel(nextSession.starts_at * 1000, nowMs)}`
+              : 'No upcoming sessions this week'}
+          </span>
+          <KSButton tone="secondary" className="py-2" onClick={() => setBlocking(true)}>
+            <Icon name="event_busy" size={17} />Block day
+          </KSButton>
+          <KSButton className="py-2" onClick={() => setAddAt({ date: isoDate(0), time: '16:00' })}>
+            <Icon name="add" size={17} />Add booking
+          </KSButton>
         </div>
       </div>
 
-      {/* Week grid */}
-      <KSCard className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <div className="min-w-[860px]">
-            {/* Day headers */}
-            <div className="grid border-b border-slate-200"
-              style={{ gridTemplateColumns: '56px repeat(7, minmax(0, 1fr))' }}>
-              <div />
-              {days.map(d => {
-                const dt = new Date(`${d.date}T12:00:00`);
-                return (
-                  <div key={d.date}
-                    className={`border-l border-slate-100 px-2 py-2.5 text-center ${d.is_today ? 'bg-orange-50' : ''}`}>
-                    <div className={`text-[11px] font-bold uppercase tracking-wider
-                      ${d.is_today ? 'text-[#FF6B00]' : 'text-slate-400'}`}>
-                      {dt.toLocaleDateString('en-GB', { weekday: 'short' })}
-                    </div>
-                    <div className={`mx-auto mt-0.5 grid h-7 w-7 place-items-center rounded-full text-sm font-extrabold
-                      ${d.is_today ? 'bg-[#FF6B00] text-white' : 'text-slate-800'}`}>
-                      {dt.getDate()}
-                    </div>
-                  </div>
-                );
+      {/* Colour legend */}
+      <div className="flex flex-wrap items-center gap-3 text-[11px] font-semibold text-slate-500">
+        {(['oneone', 'group', 'camp', 'block'] as SessionType[]).map(t => (
+          <span key={t} className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ background: TYPE_STYLE[t].dot }} />
+            {TYPE_STYLE[t].label}
+          </span>
+        ))}
+        <span className="flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-sm"
+            style={{ background: 'repeating-linear-gradient(45deg, rgba(239,68,68,0.25) 0 2px, rgba(239,68,68,0.5) 2px 4px)' }} />
+          Day off
+        </span>
+      </div>
+
+      {view === 'month' ? (
+        <MonthView anchor={monthAnchor} monthData={monthData} loading={monthLoading}
+          onPickDay={pickDay} />
+      ) : (
+        <div className="flex items-start gap-4">
+          {/* Mini calendar rail */}
+          <div className="hidden w-60 shrink-0 space-y-3 xl:block">
+            <MiniCalendar anchor={monthAnchor} monthData={monthData}
+              weekStart={schedule.week_start}
+              onNavMonth={dir => setMonthAnchor(a => {
+                const d = new Date(`${a}T12:00:00`);
+                d.setMonth(d.getMonth() + dir);
+                return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
               })}
-            </div>
+              onPickDay={pickDay} />
+            <p className="px-1 text-[11px] leading-relaxed text-slate-400">
+              Dots mark days with sessions; a struck-through date is a day off.
+              Click any empty slot on the grid to book it.
+            </p>
+          </div>
 
-            {/* Time grid */}
-            <div className="grid" style={{ gridTemplateColumns: '56px repeat(7, minmax(0, 1fr))' }}>
-              {/* Hour labels */}
-              <div className="relative" style={{ height: GRID_H }}>
-                {hours.map(h => (
-                  <div key={h} className="absolute right-2 -translate-y-1/2 text-[11px] font-semibold tabular-nums text-slate-400"
-                    style={{ top: (h - DAY_START / 60) * HOUR_H }}>
-                    {String(h).padStart(2, '0')}:00
+          {/* Week grid */}
+          <KSCard className="min-w-0 flex-1 overflow-hidden">
+            <div className="overflow-x-auto">
+              <div className="min-w-[860px]">
+                {/* Day headers */}
+                <div className="grid border-b border-slate-200"
+                  style={{ gridTemplateColumns: '56px repeat(7, minmax(0, 1fr))' }}>
+                  <div />
+                  {days.map(d => {
+                    const dt = new Date(`${d.date}T12:00:00`);
+                    const liveCount = d.sessions.filter(s => s.status !== 'cancelled').length;
+                    return (
+                      <div key={d.date}
+                        className={`border-l border-slate-100 px-2 py-2 text-center
+                          ${d.blockout ? 'bg-red-50' : d.is_today ? 'bg-orange-50' : ''}`}>
+                        <div className={`flex items-center justify-center gap-1 text-[11px] font-bold uppercase tracking-wider
+                          ${d.is_today ? 'text-[#FF6B00]' : 'text-slate-400'}`}>
+                          {dt.toLocaleDateString('en-GB', { weekday: 'short' })}
+                          <span aria-hidden>{weatherFor(d.date)}</span>
+                        </div>
+                        <div className={`mx-auto mt-0.5 grid h-7 w-7 place-items-center rounded-full text-sm font-extrabold
+                          ${d.is_today ? 'bg-[#FF6B00] text-white' : 'text-slate-800'}`}>
+                          {dt.getDate()}
+                        </div>
+                        <div className={`mt-0.5 truncate text-[10px] font-semibold
+                          ${d.blockout ? 'text-red-500' : 'text-slate-400'}`}>
+                          {d.blockout
+                            ? `⛔ ${d.blockout.reason || 'Day off'}`
+                            : liveCount ? `${liveCount} session${liveCount === 1 ? '' : 's'}` : '—'}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Time grid */}
+                <div className="grid" style={{ gridTemplateColumns: '56px repeat(7, minmax(0, 1fr))' }}>
+                  {/* Hour labels */}
+                  <div className="relative" style={{ height: GRID_H }}>
+                    {hours.map(h => (
+                      <div key={h} className="absolute right-2 -translate-y-1/2 text-[11px] font-semibold tabular-nums text-slate-400"
+                        style={{ top: (h - DAY_START / 60) * HOUR_H }}>
+                        {String(h).padStart(2, '0')}:00
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
 
-              {days.map(d => (
-                <div key={d.date}
-                  className={`relative border-l border-slate-100 ${d.is_today ? 'bg-orange-50/40' : ''}`}
-                  style={{ height: GRID_H }}>
-                  {/* Empty slots as subtle dashed hour lines */}
-                  {hours.slice(0, -1).map(h => (
-                    <div key={h} className="absolute inset-x-0 border-t border-dashed border-slate-200/80"
-                      style={{ top: (h - DAY_START / 60) * HOUR_H }} />
-                  ))}
-                  {/* Current-time line */}
-                  {d.is_today && nowMins > DAY_START && nowMins < DAY_END && (
-                    <div className="pointer-events-none absolute inset-x-0 z-10 flex items-center"
-                      style={{ top: ((nowMins - DAY_START) / 60) * HOUR_H }}>
-                      <span className="-ml-1 h-2 w-2 rounded-full bg-[#FF6B00]" />
-                      <span className="h-px flex-1 bg-[#FF6B00]" />
+                  {days.map(d => (
+                    <div key={d.date}
+                      onClick={e => clickSlot(e, d)}
+                      title={d.blockout ? `Blocked out${d.blockout.reason ? ` — ${d.blockout.reason}` : ''}`
+                        : 'Click a slot to add a booking'}
+                      className={`relative border-l border-slate-100
+                        ${d.blockout ? 'cursor-not-allowed' : 'cursor-pointer'}
+                        ${d.is_today ? 'bg-orange-50/40' : ''}`}
+                      style={{ height: GRID_H }}>
+                      {/* Empty slots as subtle dashed hour lines */}
+                      {hours.slice(0, -1).map(h => (
+                        <div key={h} className="absolute inset-x-0 border-t border-dashed border-slate-200/80"
+                          style={{ top: (h - DAY_START / 60) * HOUR_H }} />
+                      ))}
+                      {/* Day-off diagonal stripes */}
+                      {d.blockout && (
+                        <div className="pointer-events-none absolute inset-0 z-[4]"
+                          style={{ background: 'repeating-linear-gradient(45deg, rgba(239,68,68,0.06) 0 10px, rgba(239,68,68,0.14) 10px 20px)' }} />
+                      )}
+                      {/* Current-time line */}
+                      {d.is_today && nowMins > DAY_START && nowMins < DAY_END && (
+                        <div className="pointer-events-none absolute inset-x-0 z-10 flex items-center"
+                          style={{ top: ((nowMins - DAY_START) / 60) * HOUR_H }}>
+                          <span className="-ml-1 h-2 w-2 rounded-full bg-[#FF6B00]" />
+                          <span className="h-px flex-1 bg-[#FF6B00]" />
+                        </div>
+                      )}
+                      {d.layout.placed.map(({ ev, lane }) => (
+                        <EventBlock key={ev.key} ev={ev} lane={lane}
+                          laneCount={d.layout.laneCount} dayBlocked={!!d.blockout}
+                          onOpen={setSelected}
+                          onCtx={(cev, x, y) => setCtx({ x, y, ev: cev })} />
+                      ))}
                     </div>
-                  )}
-                  {d.layout.placed.map(({ ev, lane }) => (
-                    <EventBlock key={ev.key} ev={ev} lane={lane}
-                      laneCount={d.layout.laneCount} onOpen={onOpen} />
                   ))}
                 </div>
-              ))}
+              </div>
             </div>
-          </div>
+          </KSCard>
         </div>
-      </KSCard>
+      )}
 
       <p className="text-xs text-slate-400">
-        Sessions in soft colours are seeded examples while real bookings build up — they open
-        read-only. Click any real session to see details, mark it done or take the register.
+        Click an empty slot to book it · click a session for details · right-click (or long-press
+        with a mouse alternative) a session for quick actions. Soft-coloured sessions are seeded
+        examples and open read-only.
       </p>
+
+      {/* ── Popups ─────────────────────────────────────────────────── */}
+      {selected && (
+        <EventModal ev={selected} skills={skills}
+          onClose={() => setSelected(null)}
+          onToggle={toggle} onSaved={afterMark}
+          onEdit={b => { setSelected(null); setEditing(b); }} />
+      )}
+      {addAt && (
+        <AddBookingModal at={addAt} students={students}
+          coaches={schedule.coaches || [{ id: schedule.coach.id, name: schedule.coach.name }]}
+          services={services} defaultCoachId={schedule.coach.id}
+          onClose={() => setAddAt(null)} onDone={refreshAll} />
+      )}
+      {editing && (
+        <EditBookingModal b={editing} students={students}
+          coaches={schedule.coaches || [{ id: schedule.coach.id, name: schedule.coach.name }]}
+          onClose={() => setEditing(null)} onDone={refreshAll} />
+      )}
+      {ctx && (
+        <CalContextMenu x={ctx.x} y={ctx.y} ev={ctx.ev}
+          onClose={() => setCtx(null)} onAction={ctxAction} />
+      )}
+      {blocking && <BlockDayModal onClose={() => setBlocking(false)} onDone={refreshAll} />}
     </div>
   );
 }
 
-function EventModal({ ev, skills, onClose, onToggle, onSaved }: {
+function EventModal({ ev, skills, onClose, onToggle, onSaved, onEdit }: {
   ev: CalEvent;
   skills: KsSkill[];
   onClose: () => void;
   onToggle: (b: KsBooking) => Promise<void>;
   onSaved: () => void;
+  onEdit?: (b: KsBooking) => void;
 }) {
   const st = TYPE_STYLE[ev.type];
   return (
@@ -832,16 +1608,25 @@ function EventModal({ ev, skills, onClose, onToggle, onSaved }: {
             <span className="h-3 w-3 rounded-full" style={{ background: st.dot }} />
             <h3 className="text-lg font-extrabold tracking-tight text-slate-900">{ev.title}</h3>
             {ev.demo && <KSPill tone="slate">Demo session</KSPill>}
+            {ev.booking?.series_ref && <KSPill tone="blue">↻ Weekly series</KSPill>}
           </div>
           <div className="mt-1 text-sm text-slate-600">
             {dayName(ev.date)} · <span className="font-mono font-bold">{ev.start}–{ev.end}</span>
             {ev.service ? ` · ${ev.service}` : ''}
           </div>
         </div>
-        <button onClick={onClose} aria-label="Close"
-          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700">
-          <Icon name="close" size={20} />
-        </button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {ev.booking && !ev.demo && onEdit && ev.booking.status !== 'cancelled' && (
+            <KSButton tone="secondary" className="px-3 py-1.5 text-xs"
+              onClick={() => onEdit(ev.booking!)}>
+              <Icon name="edit_calendar" size={15} />Reschedule
+            </KSButton>
+          )}
+          <button onClick={onClose} aria-label="Close"
+            className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700">
+            <Icon name="close" size={20} />
+          </button>
+        </div>
       </div>
 
       {ev.booking ? (
@@ -1224,6 +2009,23 @@ function DashboardTab({ coachName, schedule, unmarked, skills, onToggle, afterMa
   const daypart = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
   const today = schedule?.today_sessions || [];
 
+  // The rest of this week, grouped by day, so the coach sees what's ahead
+  // without switching to the calendar. Cancelled slots are dropped; we stop
+  // once we've gathered ~8 sessions but never cut a day in half.
+  const upcoming = useMemo(() => {
+    const groups: [string, KsBooking[]][] = [];
+    let count = 0;
+    for (const d of schedule?.days || []) {
+      if (d.date <= (schedule?.today || '')) continue;
+      const items = d.sessions.filter(b => b.status !== 'cancelled');
+      if (!items.length) continue;
+      groups.push([d.date, items]);
+      count += items.length;
+      if (count >= 8) break;
+    }
+    return groups;
+  }, [schedule]);
+
   if (!schedule) {
     return (
       <div className="space-y-4">
@@ -1273,6 +2075,44 @@ function DashboardTab({ coachName, schedule, unmarked, skills, onToggle, afterMa
           </div>
         )}
       </section>
+
+      {upcoming.length > 0 && (
+        <section>
+          <SectionHead action={
+            <KSButton tone="ghost" onClick={goCalendar}>Full week →</KSButton>
+          }>Coming up this week</SectionHead>
+          <div className="space-y-4">
+            {upcoming.map(([date, items]) => (
+              <div key={date}>
+                <div className="mb-1.5 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400">
+                  {shortDay(date)}
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-500">{items.length}</span>
+                </div>
+                <div className="space-y-1.5">
+                  {items.map(b => {
+                    const st = TYPE_STYLE[typeOfService('', b.service_name)];
+                    return (
+                      <div key={b.id}
+                        className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 transition-colors hover:border-slate-300">
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: st.dot }} />
+                        <span className="w-24 shrink-0 font-mono text-sm font-bold text-slate-800">
+                          {b.start_time}–{b.end_time}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate">
+                          <span className="font-bold text-slate-900">{b.child_name}</span>
+                          <span className="text-slate-500"> · {b.service_name}</span>
+                        </span>
+                        {b.series_ref && <Icon name="repeat" size={15} className="shrink-0 text-slate-300" />}
+                        {b.status === 'completed' && <KSPill tone="blue">Done</KSPill>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section>
         <SectionHead>Still to mark</SectionHead>
@@ -1399,35 +2239,292 @@ function StudentCard({ s, open, onToggle, delay }:
   );
 }
 
-function StudentsTab({ attendance }: { attendance: KsChildAttendance[] }) {
-  const [query, setQuery] = useState('');
-  const [openId, setOpenId] = useState<number | null>(null);
+// ── Student onboarding ──────────────────────────────────────────────────
+function AddStudentModal({ onClose, onAdded }:
+  { onClose: () => void; onAdded: (s: KsStudent) => void }) {
+  const [f, setF] = useState({
+    child_name: '', dob: '', age: '', parent_name: '', parent_email: '',
+    parent_phone: '', address: '', postcode: '', emergency_name: '',
+    emergency_phone: '', medical_notes: '', source: 'word of mouth',
+  });
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+    setF(v => ({ ...v, [k]: e.target.value }));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return MOCK_STUDENTS;
-    return MOCK_STUDENTS.filter(s =>
-      s.child.toLowerCase().includes(q) || s.parent.toLowerCase().includes(q) ||
-      s.sport.toLowerCase().includes(q) || s.email.toLowerCase().includes(q));
-  }, [query]);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const res = await ksApi.addStudent({ ...f, age: f.age || undefined, dob: f.dob || undefined });
+      onAdded(res.student);
+      onClose();
+    } catch (err: any) {
+      setError(err?.message || 'Could not save the student.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <KSModal onClose={onClose} wide>
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-extrabold tracking-tight text-slate-900">Add a student</h3>
+          <p className="text-xs text-slate-500">
+            Creates the parent record too — they can claim it later with the same email.
+          </p>
+        </div>
+        <button onClick={onClose} aria-label="Close"
+          className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700">
+          <Icon name="close" size={20} />
+        </button>
+      </div>
+
+      <form onSubmit={submit} className="space-y-3.5">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <KSLabel>Child's full name *</KSLabel>
+            <KSInput value={f.child_name} onChange={set('child_name')} placeholder="e.g. Bobby Ashton" />
+          </div>
+          <div className="grid grid-cols-2 gap-2.5">
+            <div>
+              <KSLabel>Date of birth</KSLabel>
+              <KSInput type="date" value={f.dob} onChange={set('dob')} />
+            </div>
+            <div>
+              <KSLabel>…or age *</KSLabel>
+              <KSInput type="number" min={3} max={18} value={f.age} onChange={set('age')} placeholder="9" />
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <KSLabel>Parent name *</KSLabel>
+            <KSInput value={f.parent_name} onChange={set('parent_name')} placeholder="e.g. Jo Ashton" />
+          </div>
+          <div>
+            <KSLabel>Parent phone *</KSLabel>
+            <KSInput value={f.parent_phone} onChange={set('parent_phone')} placeholder="07…" />
+          </div>
+        </div>
+        <div>
+          <KSLabel>Parent email *</KSLabel>
+          <KSInput type="email" value={f.parent_email} onChange={set('parent_email')}
+            placeholder="parent@example.com" />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-[1fr,9rem]">
+          <div>
+            <KSLabel>Address *</KSLabel>
+            <KSInput value={f.address} onChange={set('address')} placeholder="14 Birch Grove, Chester" />
+          </div>
+          <div>
+            <KSLabel>Postcode *</KSLabel>
+            <KSInput value={f.postcode} onChange={set('postcode')} placeholder="CH1 2HT" />
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <KSLabel>Emergency contact</KSLabel>
+            <KSInput value={f.emergency_name} onChange={set('emergency_name')} placeholder="Name" />
+          </div>
+          <div>
+            <KSLabel>Emergency phone</KSLabel>
+            <KSInput value={f.emergency_phone} onChange={set('emergency_phone')} placeholder="07…" />
+          </div>
+        </div>
+
+        <div>
+          <KSLabel hint="allergies, conditions, anything the coach must know">Medical notes</KSLabel>
+          <KSTextarea rows={2} value={f.medical_notes} onChange={set('medical_notes')}
+            placeholder="e.g. mild asthma — carries an inhaler" />
+        </div>
+
+        <div>
+          <KSLabel>How did they hear about us?</KSLabel>
+          <KSSelect value={f.source} onChange={set('source')} className="w-full py-2.5">
+            {['word of mouth', 'social media', 'website', 'other'].map(s => (
+              <option key={s} value={s}>{s[0].toUpperCase() + s.slice(1)}</option>
+            ))}
+          </KSSelect>
+        </div>
+
+        {error && <KSAlert>{error}</KSAlert>}
+        <KSButton type="submit" loading={busy} className="w-full">Save student</KSButton>
+      </form>
+    </KSModal>
+  );
+}
+
+function RealStudentCard({ s, open, onToggle, delay }:
+  { s: KsStudent; open: boolean; onToggle: () => void; delay: number }) {
+  const total = s.attendance.attended + s.attendance.absent;
+  return (
+    <div className="animate-fadeInUp overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md"
+      style={{ animationDelay: `${delay}ms` }}>
+      <button onClick={onToggle} className="flex w-full items-center gap-3.5 p-4 text-left">
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-[#FF8A2B] to-[#FF6B00] text-sm font-extrabold text-white">
+          {s.name.split(' ').map(w => w[0]).join('').slice(0, 2)}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="font-extrabold text-slate-900">{s.name}</span>
+            {s.age != null && <KSPill tone="slate">Age {s.age}</KSPill>}
+            {s.medical_notes && <KSPill tone="red">Medical</KSPill>}
+          </span>
+          <span className="mt-0.5 block truncate text-sm text-slate-500">
+            {s.parent.name} · {s.parent.phone || s.parent.email}
+          </span>
+        </span>
+        <Icon name="expand_more" size={22}
+          className={`shrink-0 text-slate-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="animate-[fadeInUp_0.25s_ease-out_both] border-t border-slate-100 bg-slate-50/50 p-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl bg-white p-3.5 shadow-sm">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Parent</div>
+              <div className="mt-1 font-bold text-slate-900">{s.parent.name}</div>
+              <div className="mt-1 space-y-0.5 text-sm">
+                {s.parent.phone && (
+                  <a href={`tel:${s.parent.phone.replace(/\s/g, '')}`}
+                    className="block font-semibold text-[#FF6B00] hover:underline">{s.parent.phone}</a>
+                )}
+                <a href={`mailto:${s.parent.email}`}
+                  className="block break-words text-slate-500 hover:text-slate-800">{s.parent.email}</a>
+              </div>
+              {(s.address || s.postcode) && (
+                <div className="mt-2 flex items-start gap-1.5 text-xs text-slate-500">
+                  <Icon name="home" size={14} className="mt-px shrink-0" />
+                  {[s.address, s.postcode].filter(Boolean).join(', ')}
+                </div>
+              )}
+              {s.source && (
+                <div className="mt-2 text-[11px] text-slate-400">Heard about us via {s.source}</div>
+              )}
+            </div>
+            <div className="rounded-xl bg-white p-3.5 shadow-sm">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Emergency contact</div>
+              <div className="mt-1 text-sm font-semibold text-slate-800">
+                {s.emergency_name || '—'}{s.emergency_phone ? ` · ${s.emergency_phone}` : ''}
+              </div>
+              {s.medical_notes && (
+                <div className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-800">
+                  ⚕ {s.medical_notes}
+                </div>
+              )}
+              <div className="mt-3 text-[11px] font-bold uppercase tracking-wider text-slate-400">Attendance</div>
+              <div className="mt-1 text-sm font-semibold text-slate-700">
+                {total === 0 ? 'No register marks yet'
+                  : `${s.attendance.attended}/${total} attended`}
+                {s.attendance.cancelled > 0 && ` · ${s.attendance.cancelled} called off`}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 rounded-xl bg-white p-3.5 shadow-sm">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Booking history</div>
+            {s.bookings.length === 0 ? (
+              <p className="mt-1.5 text-sm text-slate-400">
+                No bookings yet — add one from the calendar.
+              </p>
+            ) : (
+              <div className="mt-2 space-y-1.5">
+                {s.bookings.map(h => (
+                  <div key={h.ref} className="flex items-center gap-3 rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-slate-50">
+                    <Icon name="event_available" size={16} className="shrink-0 text-slate-300" />
+                    <span className="w-28 shrink-0 font-semibold text-slate-800">{shortDay(h.date)}</span>
+                    <span className="min-w-0 flex-1 truncate text-slate-600">{h.service_name}</span>
+                    <span className="shrink-0 font-mono text-xs text-slate-400">{h.start_time}</span>
+                    <KSPill tone={STATUS_PILL[h.status] || 'slate'}>
+                      {h.status[0].toUpperCase() + h.status.slice(1)}
+                    </KSPill>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StudentsTab({ students, attendance, focus, onReload }: {
+  students: KsStudent[]; attendance: KsChildAttendance[]; focus: string; onReload: () => void;
+}) {
+  const [query, setQuery] = useState(focus);
+  const [openId, setOpenId] = useState<number | null>(null);
+  const [openReal, setOpenReal] = useState<number | null>(null);
+  const [adding, setAdding] = useState(false);
+
+  // "View student" from the calendar deep-links here with a name.
+  useEffect(() => {
+    if (!focus) return;
+    setQuery(focus);
+    const real = students.find(s => s.name.toLowerCase() === focus.toLowerCase());
+    if (real) setOpenReal(real.id);
+    const mock = MOCK_STUDENTS.find(s => s.child.toLowerCase() === focus.toLowerCase());
+    if (mock) setOpenId(mock.id);
+  }, [focus, students]);
+
+  const q = query.trim().toLowerCase();
+  const real = q
+    ? students.filter(s =>
+        s.name.toLowerCase().includes(q) || s.parent.name.toLowerCase().includes(q) ||
+        s.parent.email.toLowerCase().includes(q) || (s.postcode || '').toLowerCase().includes(q))
+    : students;
+  const mocks = q
+    ? MOCK_STUDENTS.filter(s =>
+        s.child.toLowerCase().includes(q) || s.parent.toLowerCase().includes(q) ||
+        s.sport.toLowerCase().includes(q) || s.email.toLowerCase().includes(q))
+    : MOCK_STUDENTS;
 
   return (
     <div className="space-y-7">
       <section>
-        <SectionHead sample>Students</SectionHead>
+        <SectionHead action={
+          <KSButton onClick={() => setAdding(true)}>
+            <Icon name="person_add" size={17} />Add student
+          </KSButton>
+        }>Students</SectionHead>
         <div className="relative mb-4">
           <Icon name="search" size={19}
             className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <KSInput value={query} onChange={e => setQuery(e.target.value)}
-            placeholder="Search by child, parent, sport or email…" className="pl-10" />
+            placeholder="Search by child, parent, postcode or email…" className="pl-10" />
         </div>
 
-        {filtered.length === 0 ? (
-          <EmptyNote icon="person_search" title="No students match"
-            hint={`Nothing found for "${query}". Try a different name or sport.`} />
+        {real.length === 0 ? (
+          students.length === 0 ? (
+            <EmptyNote icon="person_add" title="No students on the books yet"
+              hint="Add your first student and they'll appear here — and in the calendar's booking picker." />
+          ) : (
+            <EmptyNote icon="person_search" title="No students match"
+              hint={`Nothing found for "${query}".`} />
+          )
         ) : (
           <div className="space-y-2.5">
-            {filtered.map((s, i) => (
+            {real.map((s, i) => (
+              <RealStudentCard key={s.id} s={s} open={openReal === s.id}
+                onToggle={() => setOpenReal(v => (v === s.id ? null : s.id))}
+                delay={Math.min(i * 50, 400)} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section>
+        <SectionHead sample>Sample students</SectionHead>
+        {mocks.length === 0 ? (
+          <p className="text-sm text-slate-400">No sample students match "{query}".</p>
+        ) : (
+          <div className="space-y-2.5">
+            {mocks.map((s, i) => (
               <StudentCard key={s.id} s={s} open={openId === s.id}
                 onToggle={() => setOpenId(v => (v === s.id ? null : s.id))}
                 delay={Math.min(i * 50, 400)} />
@@ -1435,6 +2532,8 @@ function StudentsTab({ attendance }: { attendance: KsChildAttendance[] }) {
           </div>
         )}
       </section>
+
+      {adding && <AddStudentModal onClose={() => setAdding(false)} onAdded={() => onReload()} />}
 
       {/* Real attendance pulled from actual bookings, when it exists */}
       {attendance.length > 0 && (
@@ -1956,11 +3055,97 @@ function SettingsTab({ coach, onChanged, onSignOut }:
               </div>
             </div>
           </KSCard>
+          <DaysOffCard onChanged={onChanged} />
         </div>
 
         <AvailabilityPanel onChanged={onChanged} />
       </div>
     </div>
+  );
+}
+
+// ── Days off (whole-day blockouts) ──────────────────────────────────────
+function DaysOffCard({ onChanged }: { onChanged: () => void }) {
+  const [blockouts, setBlockouts] = useState<KsBlockout[]>([]);
+  const [date, setDate] = useState(isoDate(1));
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [warn, setWarn] = useState('');
+
+  const load = useCallback(() => {
+    ksApi.blockouts().then(r => setBlockouts(r.blockouts)).catch(() => setBlockouts([]));
+  }, []);
+  useEffect(load, [load]);
+
+  const add = async () => {
+    setBusy(true);
+    setError('');
+    setWarn('');
+    try {
+      const res = await ksApi.addBlockout(date, reason.trim());
+      if (res.clashing_bookings.length) {
+        setWarn(`${res.clashing_bookings.length} session(s) already booked that day — `
+          + 'they show with a warning on the calendar until you rearrange or cancel them.');
+      }
+      setReason('');
+      load();
+      onChanged();
+    } catch (e: any) {
+      setError(e?.message || 'Could not block that day.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (id: number) => {
+    try { await ksApi.deleteBlockout(id); load(); onChanged(); } catch { /* refresh shows truth */ }
+  };
+
+  return (
+    <KSCard className="p-5">
+      <h3 className="font-extrabold tracking-tight text-slate-900">Days off</h3>
+      <p className="mt-1 text-sm text-slate-600">
+        Whole days you're away — holiday, sick or personal. Blocked days take no new bookings
+        and show striped red on the calendar.
+      </p>
+
+      <div className="mt-4 flex flex-wrap items-end gap-2">
+        <div className="min-w-[9rem] flex-1">
+          <KSLabel>Date</KSLabel>
+          <KSInput type="date" value={date} min={isoDate(0)} onChange={e => setDate(e.target.value)} />
+        </div>
+        <div className="min-w-[9rem] flex-1">
+          <KSLabel hint="(optional)">Reason</KSLabel>
+          <KSInput value={reason} onChange={e => setReason(e.target.value)} placeholder="Holiday…" />
+        </div>
+        <KSButton onClick={add} loading={busy}>Block day</KSButton>
+      </div>
+      {error && <div className="mt-2"><KSAlert>{error}</KSAlert></div>}
+      {warn && (
+        <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-sm text-amber-900">
+          {warn}
+        </div>
+      )}
+
+      <div className="mt-4 space-y-2">
+        {blockouts.length === 0 ? (
+          <p className="text-sm text-slate-500">No days off booked — the calendar is fully open.</p>
+        ) : blockouts.map(b => (
+          <div key={b.id} className="flex items-center gap-2 rounded-lg bg-red-50/70 px-3 py-2 text-sm transition-colors hover:bg-red-50">
+            <Icon name="event_busy" size={16} className="shrink-0 text-red-500" />
+            <div className="min-w-0 flex-1">
+              <span className="font-semibold text-slate-800">{shortDay(b.date)}</span>
+              {b.reason && <span className="text-slate-500"> · {b.reason}</span>}
+            </div>
+            <button onClick={() => remove(b.id)}
+              className="shrink-0 rounded-lg px-2 py-1 text-xs font-bold text-slate-400 transition-colors hover:bg-white hover:text-red-600">
+              Remove
+            </button>
+          </div>
+        ))}
+      </div>
+    </KSCard>
   );
 }
 
@@ -2058,7 +3243,9 @@ export default function KSCoach() {
   const [skills, setSkills] = useState<KsSkill[]>([]);
   const [unmarked, setUnmarked] = useState<KsBooking[]>([]);
   const [attendance, setAttendance] = useState<KsChildAttendance[]>([]);
-  const [selectedEvent, setSelectedEvent] = useState<CalEvent | null>(null);
+  const [students, setStudents] = useState<KsStudent[]>([]);
+  // "View student" from the calendar deep-links the Students tab to a name.
+  const [studentFocus, setStudentFocus] = useState('');
   // Leads live here (not in the tab) so pipeline changes survive tab switches.
   const [leads, setLeads] = useState<Lead[]>(MOCK_LEADS);
 
@@ -2083,14 +3270,20 @@ export default function KSCoach() {
     } catch { /* the schedule still works without it */ }
   }, []);
 
+  const loadStudents = useCallback(async () => {
+    try {
+      setStudents((await ksApi.students()).students);
+    } catch { /* the tab shows samples regardless */ }
+  }, []);
+
   useEffect(() => {
     if (!getCoachToken()) { setBooting(false); return; }
     ksApi.coachMe()
-      .then(r => { setCoach(r.coach); return Promise.all([load(), loadRegister()]); })
+      .then(r => { setCoach(r.coach); return Promise.all([load(), loadRegister(), loadStudents()]); })
       .catch(() => clearCoachToken())
       .finally(() => setBooting(false));
     ksApi.skills().then(r => setSkills(r.skills)).catch(() => { /* chips hide */ });
-  }, [load, loadRegister]);
+  }, [load, loadRegister, loadStudents]);
 
   const afterMark = useCallback(() => {
     load(week);
@@ -2107,14 +3300,14 @@ export default function KSCoach() {
 
   const goToday = () => { setWeek(undefined); load(undefined); };
 
+  const goWeek = (iso: string) => { setWeek(iso); load(iso); };
+
+  const goStudents = (name: string) => { setStudentFocus(name); setTab('students'); };
+
   const toggleDone = async (b: KsBooking) => {
     try {
       await ksApi.complete(b.ref, b.status !== 'completed');
       await load(week);
-      // Keep an open detail popup in sync with the new status.
-      setSelectedEvent(sel => (sel?.booking?.ref === b.ref
-        ? { ...sel, booking: { ...sel.booking!, status: b.status === 'completed' ? 'confirmed' : 'completed' } }
-        : sel));
     } catch (e: any) {
       setError(e?.message || 'Could not update that session.');
     }
@@ -2213,11 +3406,17 @@ export default function KSCoach() {
                   goCalendar={() => pickTab('calendar')} />
               )}
               {tab === 'calendar' && (
-                <CalendarTab schedule={schedule} loading={!schedule}
-                  onShiftWeek={shiftWeek} onToday={goToday} onOpen={setSelectedEvent} />
+                <CalendarTab schedule={schedule} loading={!schedule} students={students}
+                  skills={skills} onToggle={toggleDone} afterMark={afterMark}
+                  onShiftWeek={shiftWeek} onGoWeek={goWeek} onToday={goToday}
+                  onViewStudent={goStudents}
+                  refresh={() => { load(week); loadRegister(); }} />
               )}
               {tab === 'route' && <RouteTab />}
-              {tab === 'students' && <StudentsTab attendance={attendance} />}
+              {tab === 'students' && (
+                <StudentsTab students={students} attendance={attendance}
+                  focus={studentFocus} onReload={loadStudents} />
+              )}
               {tab === 'leads' && <LeadsTab leads={leads} setLeads={setLeads} />}
               {tab === 'finance' && <FinanceTab />}
               {tab === 'settings' && (
@@ -2253,12 +3452,6 @@ export default function KSCoach() {
         </div>
       )}
 
-      {/* ── Session detail popup ────────────────────────────────────── */}
-      {selectedEvent && (
-        <EventModal ev={selectedEvent} skills={skills}
-          onClose={() => setSelectedEvent(null)}
-          onToggle={toggleDone} onSaved={afterMark} />
-      )}
     </KSShell>
   );
 }

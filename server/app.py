@@ -2310,6 +2310,18 @@ def h_partner_payments(req: Request):
     return partner.payments(_require_partner(req))
 
 
+def h_partner_job_reschedule(req: Request, job_id: int):
+    return partner.reschedule_job(_require_partner(req), job_id, req.body or {})
+
+
+def h_partner_job_assign(req: Request, job_id: int):
+    return partner.assign_job(_require_partner(req), job_id, req.body or {})
+
+
+def h_partner_job_cancel(req: Request, job_id: int):
+    return partner.cancel_job(_require_partner(req), job_id, req.body or {})
+
+
 # ── Max Gleam operations — route optimisation + scheduling ───────────
 # These accept EITHER an HQ token or a partner token. With a partner token the
 # query is scoped to that partner's own estate, so the isolation rule holds:
@@ -2825,7 +2837,9 @@ def h_ks_coach_me(req: Request):
 
 
 def h_ks_coach_schedule(req: Request):
-    return ks.coach_schedule(_ks_coach(req), req.query.get("week"))
+    span = req.query.get("span") or "7"
+    return ks.coach_schedule(_ks_coach(req), req.query.get("week"),
+                             int(span) if span.isdigit() else 7)
 
 
 def h_ks_coach_complete(req: Request):
@@ -2838,6 +2852,34 @@ def h_ks_coach_availability(req: Request):
 
 def h_ks_sms_inbound(req: Request):
     return ks.sms_inbound(req.body, req.form())
+
+
+def h_ks_students(req: Request):
+    return ks.students_list(_ks_coach(req))
+
+
+def h_ks_students_add(req: Request):
+    return ks.students_add(_ks_coach(req), req.body)
+
+
+def h_ks_coach_booking_create(req: Request):
+    return ks.coach_create_booking(_ks_coach(req), req.body)
+
+
+def h_ks_booking_update(req: Request, booking_id: str):
+    return ks.coach_update_booking(_ks_coach(req), int(booking_id), req.body)
+
+
+def h_ks_blockouts(req: Request):
+    return ks.blockouts_list(_ks_coach(req))
+
+
+def h_ks_blockout_add(req: Request):
+    return ks.blockout_add(_ks_coach(req), req.body)
+
+
+def h_ks_blockout_delete(req: Request, blockout_id: str):
+    return ks.blockout_delete(_ks_coach(req), int(blockout_id))
 
 
 # ── KS attendance, progress and subscriptions ────────────────────────
@@ -3031,6 +3073,20 @@ def h_mg_invoices_send_reminders(req: Request):
 def h_mg_reminder_history(req: Request):
     _mg_scope(req)
     return 200, {"reminders": maxgleam_invoicing.reminder_history()}
+
+
+def h_mg_invoices_reconcile(req: Request):
+    """POST /api/maxgleam/invoices/reconcile — settle SumUp-paid invoices.
+
+    Flips invoices to paid whose hosted checkout completed but that were never
+    reconciled because the customer never reopened the portal. Also runs
+    automatically at the head of every reminder sweep."""
+    company_id = _mg_scope(req)
+    result = maxgleam_invoicing.reconcile_payments(company_id=company_id)
+    log.info("maxgleam: reconcile checked=%s reconciled=%s errors=%s",
+             result[1]["checked"], result[1]["reconciled_count"],
+             len(result[1]["errors"]))
+    return result
 
 
 # ── Max Gleam digital sign-off + customer portal ─────────────────────
@@ -3301,6 +3357,9 @@ ROUTES = [
     ("GET",  re.compile(r"^/api/partner/work-request$"), h_partner_work_requests),
     ("POST", re.compile(r"^/api/partner/work-request$"), h_partner_work_requests),
     ("GET",  re.compile(r"^/api/partner/payments$"), h_partner_payments),
+    ("POST", re.compile(r"^/api/partner/jobs/(\d+)/reschedule$"), h_partner_job_reschedule),
+    ("POST", re.compile(r"^/api/partner/jobs/(\d+)/assign$"), h_partner_job_assign),
+    ("POST", re.compile(r"^/api/partner/jobs/(\d+)/cancel$"), h_partner_job_cancel),
 
     # ── Max Gleam operations (HQ or partner token; partner sees only theirs)
     ("GET",  re.compile(r"^/api/maxgleam/optimize-route$"), h_maxgleam_optimize_route),
@@ -3344,6 +3403,13 @@ ROUTES = [
     ("GET",  re.compile(r"^/api/ks/coach/availability$"), h_ks_coach_availability),
     ("POST", re.compile(r"^/api/ks/coach/availability$"), h_ks_coach_availability),
     ("POST", re.compile(r"^/api/ks/sms-inbound$"), h_ks_sms_inbound),
+    ("GET",  re.compile(r"^/api/ks/students$"), h_ks_students),
+    ("POST", re.compile(r"^/api/ks/students/add$"), h_ks_students_add),
+    ("POST", re.compile(r"^/api/ks/coach/bookings$"), h_ks_coach_booking_create),
+    ("PUT",  re.compile(r"^/api/ks/bookings/(\d+)$"), h_ks_booking_update),
+    ("GET",  re.compile(r"^/api/ks/coach/block-outs$"), h_ks_blockouts),
+    ("POST", re.compile(r"^/api/ks/coach/block-out$"), h_ks_blockout_add),
+    ("DELETE", re.compile(r"^/api/ks/coach/block-out/(\d+)$"), h_ks_blockout_delete),
     ("POST", re.compile(r"^/api/ks/attendance/mark$"), h_ks_attendance_mark),
     ("GET",  re.compile(r"^/api/ks/attendance/history$"), h_ks_attendance_history),
     ("GET",  re.compile(r"^/api/ks/attendance/summary$"), h_ks_attendance_summary),
@@ -3391,6 +3457,7 @@ ROUTES = [
     ("GET",  re.compile(r"^/api/maxgleam/invoices/recurring-status$"), h_mg_invoices_recurring_status),
     ("GET",  re.compile(r"^/api/maxgleam/invoices/overdue$"), h_mg_invoices_overdue),
     ("POST", re.compile(r"^/api/maxgleam/invoices/send-reminders$"), h_mg_invoices_send_reminders),
+    ("POST", re.compile(r"^/api/maxgleam/invoices/reconcile$"), h_mg_invoices_reconcile),
     ("GET",  re.compile(r"^/api/maxgleam/invoices/reminder-history$"), h_mg_reminder_history),
     ("GET",  re.compile(r"^/api/maxgleam/signoff-status$"), h_mg_signoff_status),
     ("GET",  re.compile(r"^/api/maxgleam/signoff/(\d+)$"), h_mg_signoff),
@@ -3664,6 +3731,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):    self._dispatch("GET")
     def do_POST(self):   self._dispatch("POST")
+    def do_PUT(self):    self._dispatch("PUT")
     def do_PATCH(self):  self._dispatch("PATCH")
     def do_DELETE(self): self._dispatch("DELETE")
 

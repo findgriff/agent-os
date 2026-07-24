@@ -120,6 +120,36 @@ CREATE TABLE IF NOT EXISTS availability (
 );
 CREATE INDEX IF NOT EXISTS idx_availability_coach ON availability(coach_id, date);
 
+-- Coach-entered student records (richer than the parent-entered children
+-- table: onboarding captures address, emergency contact and medical notes).
+CREATE TABLE IF NOT EXISTS students (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  parent_id       INTEGER NOT NULL REFERENCES parents(id),
+  name            TEXT NOT NULL,
+  dob             TEXT,
+  age             INTEGER,
+  address         TEXT,
+  postcode        TEXT,
+  emergency_name  TEXT,
+  emergency_phone TEXT,
+  medical_notes   TEXT,
+  source          TEXT,
+  created_at      INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_students_parent ON students(parent_id);
+
+-- Whole-day leave (holiday / sick / personal). Distinct from availability,
+-- which blocks time windows: a blockout removes the coach from every slot
+-- on the date and flags any bookings already sitting on it.
+CREATE TABLE IF NOT EXISTS coach_blockouts (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  coach_id   INTEGER NOT NULL REFERENCES coaches(id),
+  date       TEXT NOT NULL,
+  reason     TEXT,
+  created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_blockouts_once ON coach_blockouts(coach_id, date);
+
 CREATE TABLE IF NOT EXISTS ks_sessions (
   token      TEXT PRIMARY KEY,
   kind       TEXT NOT NULL,               -- parent|coach
@@ -255,6 +285,13 @@ def _ensure_schema(conn) -> None:
         if _initialised:
             return
         conn.executescript(SCHEMA)
+        # CREATE TABLE IF NOT EXISTS never adds columns to a live table, so
+        # new booking columns arrive as guarded ALTERs.
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(bookings)")}
+        if "series_ref" not in cols:
+            conn.execute("ALTER TABLE bookings ADD COLUMN series_ref TEXT")
+        if "paid_at" not in cols:
+            conn.execute("ALTER TABLE bookings ADD COLUMN paid_at INTEGER")
         conn.commit()
         _seed_coaches(conn)
         _initialised = True
@@ -481,7 +518,11 @@ def slots(service_key: str, date_str: str, coach_id: int | None = None) -> tuple
     minutes = spec["minutes"]
     now = int(time.time())
 
-    coach_list = [c for c in coaches() if coach_id is None or c["id"] == coach_id]
+    # A whole-day blockout removes the coach from every slot on that date.
+    blocked_out = {r["coach_id"] for r in _rows(
+        "SELECT coach_id FROM coach_blockouts WHERE date = ?", (date_str,))}
+    coach_list = [c for c in coaches()
+                  if (coach_id is None or c["id"] == coach_id) and c["id"] not in blocked_out]
     booked = _rows(
         "SELECT coach_id, start_time, end_time FROM bookings "
         " WHERE date = ? AND status != 'cancelled'", (date_str,))
@@ -523,6 +564,8 @@ def _booking_dto(b: dict) -> dict:
         "parent_phone": b["parent_phone"],
         "notes": b["notes"], "coach_notes": b.get("coach_notes"),
         "price_pence": b["price_pence"], "status": b["status"],
+        "series_ref": b.get("series_ref"),
+        "paid": bool(b.get("paid_at")), "paid_at": b.get("paid_at"),
         "created_at": b["created_at"],
         "is_upcoming": b["status"] == "confirmed" and b["starts_at"] > now,
         "can_cancel": (b["status"] == "confirmed"
@@ -685,14 +728,23 @@ def parent_register(body: dict) -> tuple[int, dict]:
         return 400, {"error": "a valid email address is required"}
     if len(password) < auth.MIN_PASSWORD_LEN:
         return 400, {"error": f"password must be at least {auth.MIN_PASSWORD_LEN} characters"}
-    if _one("SELECT id FROM parents WHERE email = ?", (email,)):
+    existing = _one("SELECT * FROM parents WHERE email = ?", (email,))
+    if existing and existing["password_hash"]:
         return 409, {"error": "an account already exists for that email — try signing in"}
 
     conn = _conn()
-    cur = conn.execute(
-        "INSERT INTO parents (name, email, phone, password_hash) VALUES (?,?,?,?)",
-        (name, email, phone, auth.hash_password(password)))
-    pid = cur.lastrowid
+    if existing:
+        # A coach onboarded this family (students tab) before the parent
+        # registered — let them claim the passwordless record.
+        pid = existing["id"]
+        conn.execute("UPDATE parents SET name = ?, phone = COALESCE(NULLIF(?,''), phone), "
+                     "password_hash = ? WHERE id = ?",
+                     (name, phone, auth.hash_password(password), pid))
+    else:
+        cur = conn.execute(
+            "INSERT INTO parents (name, email, phone, password_hash) VALUES (?,?,?,?)",
+            (name, email, phone, auth.hash_password(password)))
+        pid = cur.lastrowid
     child_name = (body.get("child_name") or "").strip()
     if child_name:
         age = body.get("child_age")
@@ -739,8 +791,14 @@ def coach_login(body: dict) -> tuple[int, dict]:
                  "coach": {"id": coach["id"], "slug": coach["slug"], "name": coach["name"]}}
 
 
-def coach_schedule(coach: dict, week_start: str | None = None) -> tuple[int, dict]:
-    """A coach's week: sessions grouped by day, plus their blocked windows."""
+def coach_schedule(coach: dict, week_start: str | None = None,
+                   span: int = 7) -> tuple[int, dict]:
+    """A coach's sessions grouped by day, plus blocked windows and day-offs.
+
+    span defaults to a week; the dashboard's month view asks for up to 42
+    days in one call rather than stitching six weekly fetches together.
+    """
+    span = max(1, min(42, span))
     today = datetime.now(UK).date()
     if week_start:
         try:
@@ -749,7 +807,7 @@ def coach_schedule(coach: dict, week_start: str | None = None) -> tuple[int, dic
             return 400, {"error": "invalid week"}
     else:
         start = today - timedelta(days=today.weekday())      # Monday
-    end = start + timedelta(days=6)
+    end = start + timedelta(days=span - 1)
     s_str, e_str = start.isoformat(), end.isoformat()
 
     rs = _rows("SELECT b.*, c.name AS coach_name FROM bookings b "
@@ -758,20 +816,26 @@ def coach_schedule(coach: dict, week_start: str | None = None) -> tuple[int, dic
                "ORDER BY b.date, b.start_time", (coach["id"], s_str, e_str))
     blocks = _rows("SELECT * FROM availability WHERE coach_id = ? AND date BETWEEN ? AND ? "
                    "ORDER BY date, start_time", (coach["id"], s_str, e_str))
+    blockouts = _rows("SELECT * FROM coach_blockouts WHERE coach_id = ? AND date BETWEEN ? AND ? "
+                      "ORDER BY date", (coach["id"], s_str, e_str))
 
     days = []
-    for i in range(7):
+    for i in range(span):
         d = (start + timedelta(days=i)).isoformat()
         days.append({
             "date": d,
             "is_today": d == today.isoformat(),
             "sessions": [_booking_dto(b) for b in rs if b["date"] == d],
             "blocks": [b for b in blocks if b["date"] == d],
+            "blockout": next((b for b in blockouts if b["date"] == d), None),
         })
 
     today_sessions = [_booking_dto(b) for b in rs if b["date"] == today.isoformat()]
     return 200, {
         "coach": {"id": coach["id"], "slug": coach["slug"], "name": coach["name"]},
+        # Every active coach, so the dashboard can offer a coach picker when
+        # rescheduling a session.
+        "coaches": [{"id": c["id"], "name": c["name"]} for c in coaches()],
         "week_start": s_str, "week_end": e_str,
         "days": days,
         "today": today.isoformat(),
@@ -845,6 +909,342 @@ def coach_availability(coach: dict, method: str, body: dict, query: dict) -> tup
         (coach["id"], date_str, start, end, (body.get("reason") or "").strip()))
     conn.commit()
     return 200, {"availability": _one("SELECT * FROM availability WHERE id = ?", (cur.lastrowid,))}
+
+
+# ---------------------------------------------------------------- students --
+
+STUDENT_SOURCES = ["word of mouth", "social media", "website", "other"]
+
+
+def _student_dto(s: dict) -> dict:
+    """Student + parent + their real booking/attendance footprint."""
+    history = _rows(
+        "SELECT ref, date, start_time, end_time, service_name, status FROM bookings "
+        "WHERE lower(child_name) = lower(?) AND lower(parent_email) = lower(?) "
+        "ORDER BY date DESC, start_time DESC LIMIT 25",
+        (s["name"], s["parent_email"]))
+    marks = _rows(
+        "SELECT a.status, COUNT(*) AS n FROM attendance a "
+        "JOIN bookings b ON b.id = a.booking_id "
+        "WHERE lower(a.child_name) = lower(?) AND lower(b.parent_email) = lower(?) "
+        "GROUP BY a.status", (s["name"], s["parent_email"]))
+    counts = {m["status"]: m["n"] for m in marks}
+    return {
+        "id": s["id"], "name": s["name"], "dob": s["dob"], "age": s["age"],
+        "address": s["address"], "postcode": s["postcode"],
+        "emergency_name": s["emergency_name"], "emergency_phone": s["emergency_phone"],
+        "medical_notes": s["medical_notes"], "source": s["source"],
+        "created_at": s["created_at"],
+        "parent": {"id": s["parent_id"], "name": s["parent_name"],
+                   "email": s["parent_email"], "phone": s["parent_phone"]},
+        "bookings": history,
+        "attendance": {"attended": counts.get("attended", 0),
+                       "absent": counts.get("absent", 0),
+                       "cancelled": counts.get("cancelled", 0)},
+    }
+
+
+def students_list(coach: dict) -> tuple[int, dict]:
+    rows = _rows(
+        "SELECT s.*, p.name AS parent_name, p.email AS parent_email, p.phone AS parent_phone "
+        "FROM students s JOIN parents p ON p.id = s.parent_id ORDER BY s.name")
+    return 200, {"students": [_student_dto(s) for s in rows]}
+
+
+def students_add(coach: dict, body: dict) -> tuple[int, dict]:
+    child = (body.get("child_name") or "").strip()
+    parent_name = (body.get("parent_name") or "").strip()
+    parent_email = (body.get("parent_email") or "").strip().lower()
+    parent_phone = (body.get("parent_phone") or "").strip()
+    address = (body.get("address") or "").strip()
+    postcode = (body.get("postcode") or "").strip().upper()
+    dob = (body.get("dob") or "").strip()
+
+    age = body.get("age")
+    try:
+        age = int(age) if age not in (None, "") else None
+    except (TypeError, ValueError):
+        return 400, {"error": "invalid age"}
+    if dob:
+        try:
+            born = datetime.strptime(dob, "%Y-%m-%d").date()
+            today = datetime.now(UK).date()
+            age = today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+        except ValueError:
+            return 400, {"error": "date of birth must be YYYY-MM-DD"}
+
+    if not child:
+        return 400, {"error": "the child's full name is required"}
+    if age is None:
+        return 400, {"error": "the child's age or date of birth is required"}
+    if not (3 <= age <= 18):
+        return 400, {"error": "we coach players aged 5-16 (3-18 accepted)"}
+    if not parent_name:
+        return 400, {"error": "the parent's name is required"}
+    if not auth.valid_email(parent_email):
+        return 400, {"error": "a valid parent email is required"}
+    if not parent_phone:
+        return 400, {"error": "the parent's phone number is required"}
+    if not address or not postcode:
+        return 400, {"error": "the parent's address and postcode are required"}
+
+    source = (body.get("source") or "").strip().lower()
+    if source not in STUDENT_SOURCES:
+        source = "other"
+
+    conn = _conn()
+    parent = _one("SELECT * FROM parents WHERE email = ?", (parent_email,))
+    if parent:
+        pid = parent["id"]
+        # Coach data fills blanks on an existing account, never overwrites
+        # what the parent typed themselves.
+        conn.execute("UPDATE parents SET phone = COALESCE(NULLIF(phone,''), ?) WHERE id = ?",
+                     (parent_phone, pid))
+    else:
+        pid = conn.execute(
+            "INSERT INTO parents (name, email, phone) VALUES (?,?,?)",
+            (parent_name, parent_email, parent_phone)).lastrowid
+
+    if _one("SELECT s.id FROM students s WHERE s.parent_id = ? AND lower(s.name) = lower(?)",
+            (pid, child)):
+        return 409, {"error": f"{child} is already on the books for this parent"}
+
+    sid = conn.execute(
+        "INSERT INTO students (parent_id, name, dob, age, address, postcode, "
+        " emergency_name, emergency_phone, medical_notes, source) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (pid, child, dob or None, age, address, postcode,
+         (body.get("emergency_name") or "").strip(),
+         (body.get("emergency_phone") or "").strip(),
+         (body.get("medical_notes") or "").strip(), source)).lastrowid
+    # Mirror into the legacy children table so parent accounts and the public
+    # booking flow see the child too.
+    if not _one("SELECT id FROM children WHERE parent_id = ? AND lower(name) = lower(?)",
+                (pid, child)):
+        conn.execute("INSERT INTO children (parent_id, name, age) VALUES (?,?,?)",
+                     (pid, child, age))
+    conn.commit()
+
+    s = _one("SELECT s.*, p.name AS parent_name, p.email AS parent_email, "
+             "p.phone AS parent_phone FROM students s "
+             "JOIN parents p ON p.id = s.parent_id WHERE s.id = ?", (sid,))
+    return 200, {"student": _student_dto(s)}
+
+
+# ------------------------------------------------------ coach booking CRUD --
+
+def _coach_day_conflicts(coach_id: int, date_str: str, start: str, end: str,
+                         ignore_booking_id: int | None = None) -> str | None:
+    """Why this window can't take a booking, or None when it's free."""
+    if _one("SELECT id FROM coach_blockouts WHERE coach_id = ? AND date = ?",
+            (coach_id, date_str)):
+        return "that day is blocked out"
+    booked = _rows("SELECT id, start_time, end_time FROM bookings "
+                   "WHERE coach_id = ? AND date = ? AND status != 'cancelled'",
+                   (coach_id, date_str))
+    for b in booked:
+        if b["id"] != ignore_booking_id and _overlaps(start, end, b["start_time"], b["end_time"]):
+            return f"clashes with a session at {b['start_time']}"
+    for bl in _rows("SELECT start_time, end_time FROM availability "
+                    "WHERE coach_id = ? AND date = ?", (coach_id, date_str)):
+        if _overlaps(start, end, bl["start_time"], bl["end_time"]):
+            return "that window is blocked in availability"
+    return None
+
+
+def coach_create_booking(coach: dict, body: dict) -> tuple[int, dict]:
+    """Coach adds a booking straight onto the calendar, optionally weekly.
+
+    SMS is live, so nothing is texted unless notify=true is set explicitly —
+    and then only for the first session of a series.
+    """
+    svc = _service((body.get("service_key") or "").strip())
+    if not svc or not svc["bookable"]:
+        return 400, {"error": "choose a bookable session type"}
+
+    date_str = (body.get("date") or "").strip()
+    start = (body.get("start_time") or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_str) or not re.match(r"^\d{2}:\d{2}$", start):
+        return 400, {"error": "choose a date and time"}
+
+    try:
+        duration = int(body.get("duration_minutes") or svc["minutes"] or 60)
+    except (TypeError, ValueError):
+        return 400, {"error": "invalid duration"}
+    duration = max(30, min(360, duration))
+
+    coach_id = body.get("coach_id") or coach["id"]
+    try:
+        coach_id = int(coach_id)
+    except (TypeError, ValueError):
+        return 400, {"error": "invalid coach"}
+    if not _one("SELECT id FROM coaches WHERE id = ? AND active = 1", (coach_id,)):
+        return 404, {"error": "coach not found"}
+
+    # The player either comes from the students book or is typed in.
+    child_name, parent_name, parent_email, parent_phone, child_age = "", "", "", "", None
+    if body.get("student_id"):
+        s = _one("SELECT s.*, p.name AS parent_name, p.email AS parent_email, "
+                 "p.phone AS parent_phone FROM students s "
+                 "JOIN parents p ON p.id = s.parent_id WHERE s.id = ?",
+                 (int(body["student_id"]),))
+        if not s:
+            return 404, {"error": "student not found"}
+        child_name, child_age = s["name"], s["age"]
+        parent_name, parent_email, parent_phone = s["parent_name"], s["parent_email"], s["parent_phone"]
+    else:
+        child_name = (body.get("child_name") or "").strip()
+        parent_name = (body.get("parent_name") or "").strip()
+        parent_email = (body.get("parent_email") or "").strip().lower()
+        parent_phone = (body.get("parent_phone") or "").strip()
+        if not child_name:
+            return 400, {"error": "pick a student or type the player's name"}
+        if not parent_name or not auth.valid_email(parent_email):
+            return 400, {"error": "a parent name and valid email are needed for a new player"}
+
+    try:
+        repeat = int(body.get("repeat_weeks") or 1)
+    except (TypeError, ValueError):
+        repeat = 1
+    repeat = max(1, min(12, repeat))
+    series_ref = ("SER-" + secrets.token_hex(3).upper()) if repeat > 1 else None
+    notify = bool(body.get("notify"))
+
+    end = _add_minutes(start, duration)
+    conn = _conn()
+    created, skipped = [], []
+    for w in range(repeat):
+        d = (datetime.strptime(date_str, "%Y-%m-%d").date() + timedelta(weeks=w)).isoformat()
+        conflict = _coach_day_conflicts(coach_id, d, start, end)
+        if conflict:
+            skipped.append({"date": d, "reason": conflict})
+            continue
+        ref = _new_ref()
+        cur = conn.execute(
+            "INSERT INTO bookings (ref, coach_id, service_key, service_name, date, "
+            " start_time, end_time, starts_at, child_name, child_age, parent_name, "
+            " parent_email, parent_phone, notes, price_pence, status, series_ref) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'confirmed', ?)",
+            (ref, coach_id, svc["key"], svc["name"], d, start, end,
+             _uk_epoch(d, start), child_name, child_age, parent_name, parent_email,
+             parent_phone, (body.get("notes") or "").strip(),
+             svc["price_from_pence"], series_ref))
+        conn.commit()
+        booking = _one("SELECT b.*, c.name AS coach_name FROM bookings b "
+                       "JOIN coaches c ON c.id = b.coach_id WHERE b.id = ?", (cur.lastrowid,))
+        created.append(_booking_dto(booking))
+        # One confirmation text at most, and never for a session in the past.
+        if notify and w == 0 and booking["starts_at"] > int(time.time()):
+            send_confirmation(booking)
+
+    if not created:
+        return 409, {"error": skipped[0]["reason"] if skipped else "nothing could be booked",
+                     "skipped": skipped}
+    return 200, {"bookings": created, "skipped": skipped, "series_ref": series_ref}
+
+
+def coach_update_booking(coach: dict, booking_id: int, body: dict) -> tuple[int, dict]:
+    """Reschedule / reassign / cancel a booking (or its whole series)."""
+    b = _one("SELECT * FROM bookings WHERE id = ?", (int(booking_id),))
+    if not b:
+        return 404, {"error": "booking not found"}
+    conn = _conn()
+
+    if (body.get("status") or "") == "cancelled":
+        if body.get("scope") == "series" and b["series_ref"]:
+            n = conn.execute(
+                "UPDATE bookings SET status = 'cancelled', cancelled_at = ? "
+                "WHERE series_ref = ? AND status = 'confirmed'",
+                (int(time.time()), b["series_ref"])).rowcount
+            conn.commit()
+            return 200, {"cancelled": n, "series_ref": b["series_ref"]}
+        if b["status"] == "cancelled":
+            return 200, {"booking": _booking_dto(b), "already": True}
+        conn.execute("UPDATE bookings SET status = 'cancelled', cancelled_at = ? WHERE id = ?",
+                     (int(time.time()), b["id"]))
+        conn.commit()
+        return 200, {"booking": _booking_dto(
+            _one("SELECT b.*, c.name AS coach_name FROM bookings b "
+                 "JOIN coaches c ON c.id = b.coach_id WHERE b.id = ?", (b["id"],)))}
+
+    if b["status"] == "cancelled":
+        return 400, {"error": "that session was cancelled — book a fresh one instead"}
+
+    new_date = (body.get("date") or b["date"]).strip()
+    new_start = (body.get("start_time") or b["start_time"]).strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", new_date) or not re.match(r"^\d{2}:\d{2}$", new_start):
+        return 400, {"error": "invalid date or time"}
+    duration = (datetime.strptime(b["end_time"], "%H:%M")
+                - datetime.strptime(b["start_time"], "%H:%M")).seconds // 60
+    if body.get("duration_minutes"):
+        try:
+            duration = max(30, min(360, int(body["duration_minutes"])))
+        except (TypeError, ValueError):
+            return 400, {"error": "invalid duration"}
+    new_end = _add_minutes(new_start, duration)
+
+    new_coach_id = b["coach_id"]
+    if body.get("coach_id"):
+        try:
+            new_coach_id = int(body["coach_id"])
+        except (TypeError, ValueError):
+            return 400, {"error": "invalid coach"}
+        if not _one("SELECT id FROM coaches WHERE id = ? AND active = 1", (new_coach_id,)):
+            return 404, {"error": "coach not found"}
+
+    conflict = _coach_day_conflicts(new_coach_id, new_date, new_start, new_end,
+                                    ignore_booking_id=b["id"])
+    if conflict:
+        return 409, {"error": conflict}
+
+    child_name = (body.get("child_name") or b["child_name"]).strip()
+    conn.execute(
+        "UPDATE bookings SET date = ?, start_time = ?, end_time = ?, starts_at = ?, "
+        " coach_id = ?, child_name = ? WHERE id = ?",
+        (new_date, new_start, new_end, _uk_epoch(new_date, new_start),
+         new_coach_id, child_name, b["id"]))
+    conn.commit()
+    return 200, {"booking": _booking_dto(
+        _one("SELECT b.*, c.name AS coach_name FROM bookings b "
+             "JOIN coaches c ON c.id = b.coach_id WHERE b.id = ?", (b["id"],)))}
+
+
+# --------------------------------------------------------------- blockouts --
+
+def blockouts_list(coach: dict) -> tuple[int, dict]:
+    frm = (datetime.now(UK).date() - timedelta(days=30)).isoformat()
+    return 200, {"blockouts": _rows(
+        "SELECT * FROM coach_blockouts WHERE coach_id = ? AND date >= ? ORDER BY date",
+        (coach["id"], frm))}
+
+
+def blockout_add(coach: dict, body: dict) -> tuple[int, dict]:
+    date_str = (body.get("date") or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
+        return 400, {"error": "choose a date to block"}
+    conn = _conn()
+    try:
+        cur = conn.execute(
+            "INSERT INTO coach_blockouts (coach_id, date, reason) VALUES (?,?,?)",
+            (coach["id"], date_str, (body.get("reason") or "").strip()))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        return 409, {"error": "that day is already blocked out"}
+    # Bookings already on the day are allowed to stand — the dashboard
+    # highlights them so the coach can rearrange or cancel deliberately.
+    clashing = _rows(
+        "SELECT id, ref, start_time, end_time, child_name, service_name FROM bookings "
+        "WHERE coach_id = ? AND date = ? AND status = 'confirmed' ORDER BY start_time",
+        (coach["id"], date_str))
+    return 200, {"blockout": _one("SELECT * FROM coach_blockouts WHERE id = ?", (cur.lastrowid,)),
+                 "clashing_bookings": clashing}
+
+
+def blockout_delete(coach: dict, blockout_id: int) -> tuple[int, dict]:
+    conn = _conn()
+    conn.execute("DELETE FROM coach_blockouts WHERE id = ? AND coach_id = ?",
+                 (int(blockout_id), coach["id"]))
+    conn.commit()
+    return 200, {"ok": True}
 
 
 # -------------------------------------------------------------------- SMS ---
