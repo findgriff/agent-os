@@ -21,6 +21,96 @@ import {
 const PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
 const PHOTO_MAX_BYTES = 5 * 1024 * 1024;
 
+// Location sharing is remembered per device, defaults off, and is only ever
+// consulted while a job is open (see useJobTracking).
+const TRACKING_KEY = 'maxgleam_crew_tracking';
+
+type TrackState = 'off' | 'starting' | 'live' | 'denied' | 'error';
+
+/**
+ * Report this phone's position while a job is open.
+ *
+ * Deliberately bounded: the watch starts when a job is started and stops the
+ * moment it completes or the crew switches sharing off, so the app cannot
+ * follow anyone home. The server also refuses points for a job that is not
+ * open, which is what makes that a guarantee rather than a promise.
+ */
+function useJobTracking(jobId: number | null, enabled: boolean) {
+  const [state, setState] = useState<TrackState>('off');
+  const [lastFix, setLastFix] = useState<number | null>(null);
+  const sending = useRef(false);
+
+  useEffect(() => {
+    if (!enabled || !jobId || !('geolocation' in navigator)) {
+      setState(enabled && !('geolocation' in navigator) ? 'error' : 'off');
+      return;
+    }
+    setState('starting');
+
+    const id = navigator.geolocation.watchPosition(
+      pos => {
+        setState('live');
+        // The browser fires far more often than the log needs; one request at
+        // a time keeps a poor connection from queueing a backlog of stale fixes.
+        if (sending.current) return;
+        sending.current = true;
+        crewApi.sendPosition(jobId, pos.coords.latitude, pos.coords.longitude,
+          pos.coords.accuracy)
+          .then(r => { if (r.stored) setLastFix(Date.now()); })
+          .catch(() => { /* a dropped fix is not worth interrupting the round */ })
+          .finally(() => { sending.current = false; });
+      },
+      err => setState(err.code === err.PERMISSION_DENIED ? 'denied' : 'error'),
+      { enableHighAccuracy: true, maximumAge: 15_000, timeout: 30_000 });
+
+    return () => {
+      navigator.geolocation.clearWatch(id);
+      setState('off');
+    };
+  }, [jobId, enabled]);
+
+  return { state, lastFix, tracking: state === 'live' || state === 'starting' };
+}
+
+function TrackingBar({ enabled, onToggle, state, lastFix, address }: {
+  enabled: boolean; onToggle: (on: boolean) => void;
+  state: TrackState; lastFix: number | null; address: string;
+}) {
+  const look = !enabled ? { tone: 'slate' as const, text: 'Location sharing off' }
+    : state === 'live' ? { tone: 'green' as const, text: 'Sharing your location' }
+    : state === 'starting' ? { tone: 'amber' as const, text: 'Finding your location…' }
+    : state === 'denied' ? { tone: 'red' as const, text: 'Location blocked in your browser' }
+    : state === 'error' ? { tone: 'red' as const, text: 'Location unavailable' }
+    : { tone: 'slate' as const, text: 'Location sharing off' };
+
+  return (
+    <MGCard className="mb-4 p-4">
+      <div className="flex items-center gap-3">
+        <span className="text-xl leading-none" aria-hidden>{enabled ? '📡' : '📴'}</span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <MGPill tone={look.tone}>{look.text}</MGPill>
+          </div>
+          <p className="mt-1 truncate text-xs text-slate-500">
+            While you&rsquo;re on {address}
+            {lastFix ? ` · last sent ${new Date(lastFix).toLocaleTimeString('en-GB',
+              { hour: '2-digit', minute: '2-digit' })}` : ''}
+          </p>
+        </div>
+        <MGButton tone={enabled ? 'secondary' : 'primary'} className="shrink-0"
+          onClick={() => onToggle(!enabled)}>
+          {enabled ? 'Stop' : 'Share'}
+        </MGButton>
+      </div>
+      {state === 'denied' && (
+        <p className="mt-2.5 text-xs text-slate-500">
+          Your browser is blocking location. Allow it in the site settings, then tap Share again.
+        </p>
+      )}
+    </MGCard>
+  );
+}
+
 export default function CrewApp() {
   const [crew, setCrew] = useState<Crew | null>(null);
   const [booting, setBooting] = useState(true);
@@ -162,6 +252,17 @@ function CrewRound({ crew, onSignOut }: { crew: Crew; onSignOut: () => void }) {
 
   useEffect(() => { load(date || undefined); }, [load, date]);
 
+  // The job the crew is stood on: started, not finished. Tracking follows it.
+  const activeJob = data?.jobs.find(j => j.started_at && !j.completed_at && j.status !== 'done')
+    ?? null;
+  const [shareLocation, setShareLocation] = useState(
+    () => localStorage.getItem(TRACKING_KEY) === '1');
+  const setShare = useCallback((on: boolean) => {
+    localStorage.setItem(TRACKING_KEY, on ? '1' : '0');
+    setShareLocation(on);
+  }, []);
+  const track = useJobTracking(activeJob?.job_id ?? null, shareLocation && !!activeJob);
+
   const summary = data?.summary;
   const progress = summary && summary.total
     ? Math.round((summary.done / summary.total) * 100) : 0;
@@ -199,6 +300,12 @@ function CrewRound({ crew, onSignOut }: { crew: Crew; onSignOut: () => void }) {
                 style={{ width: `${progress}%` }} />
             </div>
           </MGCard>
+        )}
+
+        {/* Location sharing — only ever offered while a job is actually open */}
+        {activeJob && (
+          <TrackingBar enabled={shareLocation} onToggle={setShare}
+            state={track.state} lastFix={track.lastFix} address={activeJob.address} />
         )}
 
         {/* Day picker — for catching up on yesterday, or looking ahead */}

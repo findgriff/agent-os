@@ -55,11 +55,16 @@ SERVICES = {
                        "blurb": "Your usual round clean, on a date you pick."},
 }
 
-# Per-IP throttle on the write endpoint.
+# Per-IP throttle on the write endpoint. Two limits, because they guard
+# different things: bookings placed (abuse) and requests attempted (hammering).
+# Counting failed attempts against the booking limit would lock out a customer
+# who simply mistypes their phone number a few times.
 BOOKING_WINDOW = 3600
 BOOKING_MAX_PER_WINDOW = 5
+ATTEMPT_MAX_PER_WINDOW = 40
 
 _ip_log: dict[str, list[float]] = {}
+_attempt_log: dict[str, list[float]] = {}
 _ip_lock = threading.Lock()
 _local = threading.local()
 
@@ -233,15 +238,29 @@ def _services_dto() -> list[dict]:
 # ── Booking ─────────────────────────────────────────────────────────
 
 def _throttled(ip: str) -> bool:
+    """Checked before any work. Records the attempt; bookings are recorded
+    separately by _record_booking once one actually succeeds."""
+    key = ip or "?"
     now = time.time()
     with _ip_lock:
-        hits = [t for t in _ip_log.get(ip or "?", []) if now - t < BOOKING_WINDOW]
-        if len(hits) >= BOOKING_MAX_PER_WINDOW:
-            _ip_log[ip or "?"] = hits
-            return True
+        attempts = [t for t in _attempt_log.get(key, []) if now - t < BOOKING_WINDOW]
+        attempts.append(now)
+        _attempt_log[key] = attempts
+
+        booked = [t for t in _ip_log.get(key, []) if now - t < BOOKING_WINDOW]
+        _ip_log[key] = booked
+
+        return (len(attempts) > ATTEMPT_MAX_PER_WINDOW
+                or len(booked) >= BOOKING_MAX_PER_WINDOW)
+
+
+def _record_booking(ip: str) -> None:
+    key = ip or "?"
+    now = time.time()
+    with _ip_lock:
+        hits = [t for t in _ip_log.get(key, []) if now - t < BOOKING_WINDOW]
         hits.append(now)
-        _ip_log[ip or "?"] = hits
-    return False
+        _ip_log[key] = hits
 
 
 def _valid_email(value: str) -> bool:
@@ -361,7 +380,9 @@ def create_booking(body: dict, ip: str = "",
     if not slot:
         return 400, {"error": f"we only book up to {BOOKING_DAYS} days ahead"}
     if not slot["available"]:
-        return 409, {"error": "that day just filled up — please pick another"}
+        return 409, {"error": "we're closed that day — please pick another"
+                     if slot["reason"] == "closed"
+                     else "that day just filled up — please pick another"}
 
     dupe = _one("SELECT id FROM jobs WHERE property_id = ? AND scheduled_date = ? "
                 "AND status IN ('requested','scheduled')", (property_id, date))
@@ -382,6 +403,7 @@ def create_booking(body: dict, ip: str = "",
          prop.get("partner_company_id")))
     conn.commit()
     job_id = cur.lastrowid
+    _record_booking(ip)
 
     contact = {"name": name, "email": email, "phone": phone, "notes": notes}
     conn.execute(

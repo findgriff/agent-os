@@ -253,6 +253,135 @@ export interface AlertRunResult {
   ran_at: number;
 }
 
+// ── Email marketing ─────────────────────────────────────────────────────
+export type AudienceKind =
+  'all' | 'cleaned_since' | 'not_cleaned_since' | 'unpaid_invoices' | 'never_cleaned';
+
+export interface AudienceSummary {
+  kind: AudienceKind;
+  since: string | null;
+  days: number | null;
+  matched: number;
+  emailable: number;
+  missing_email: number;
+  sample: { id: number; name: string; email: string | null; last_clean: string | null; emailable: boolean }[];
+}
+
+export interface CampaignStats {
+  recipients: number; sent: number; opened: number; clicked: number;
+  failed: number; open_rate: number; click_rate: number;
+}
+
+export interface Campaign {
+  id: number;
+  name: string;
+  subject: string;
+  body: string;
+  status: 'draft' | 'sent';
+  sent_at: number | null;
+  created_at: number;
+  dry_run: boolean;
+  audience: { kind?: AudienceKind; since?: string | null; days?: number | null };
+  stats: CampaignStats;
+}
+
+export interface CampaignList {
+  campaigns: Campaign[];
+  count: number;
+  dry_run_default: boolean;
+  mail_configured: boolean;
+  mail_from: string;
+  audiences: AudienceKind[];
+  placeholders: string[];
+}
+
+export interface CampaignPreview {
+  campaign: Campaign;
+  audience: { kind: AudienceKind; matched: number; emailable: number; missing_email: number };
+  samples: { customer_id: number; name: string; email: string | null; subject: string; body: string }[];
+  unknown_placeholders: string[];
+  mail_configured: boolean;
+  dry_run_default: boolean;
+}
+
+export interface CampaignSendResult {
+  campaign_id: number;
+  dry_run: boolean;
+  audience_matched: number;
+  targeted: number;
+  sent: number;
+  failed: number;
+  skipped_no_email: number;
+  results: { customer_id: number; name: string; email: string; error: string | null }[];
+}
+
+// ── Reviews ─────────────────────────────────────────────────────────────
+export interface Review {
+  job_id: number;
+  rating: number | null;
+  comment: string;
+  customer_name: string | null;
+  address: string;
+  postcode: string | null;
+  crew_name: string | null;
+  crew_id: number | null;
+  signoff_status: string | null;
+  signed_at: number | null;
+  scheduled_date: string;
+  price_pence: number;
+  is_testimonial: boolean;
+}
+
+export interface ReviewList {
+  reviews: Review[];
+  count: number;
+  average: number | null;
+  rated: number;
+  distribution: Record<string, number>;
+  testimonials: Review[];
+  testimonial_min: number;
+}
+
+export interface ReviewAverage {
+  average: number | null;
+  rated: number;
+  completed_jobs: number;
+  response_rate_pct: number;
+  distribution: Record<string, number>;
+  by_crew: { crew_id: number; name: string; rated: number; average: number }[];
+  window_days: number | null;
+}
+
+// ── Recurring invoicing ─────────────────────────────────────────────────
+export interface RecurringStatus {
+  last_run: {
+    id: number; created_count: number; emailed_count: number;
+    skipped_count: number; candidates: number; dry_run: boolean; ran_at: number;
+  } | null;
+  last_run_at: number | null;
+  pending_count: number;
+  pending_pence: number;
+  pending: { job_id: number; address: string; amount_pence: number; customer_email: string | null; completed_at: number | null }[];
+  awaiting_signoff_count: number;
+  recent_invoices: { id: number; number: string; amount_pence: number; status: string; issued_at: number; job_id: number | null }[];
+  number_prefix: string;
+  next_number: string;
+  dry_run: boolean;
+  mail_configured: boolean;
+}
+
+export interface AutoSendResult {
+  created: { invoice_id: number; number: string; job_id: number; amount_pence: number; address: string; customer_email: string | null; emailed: boolean }[];
+  skipped: { job_id: number; address: string; reason: string }[];
+  created_count: number;
+  emailed_count: number;
+  skipped_count: number;
+  candidates: number;
+  require_signoff: boolean;
+  dry_run: boolean;
+  ran_at: number;
+}
+
 // ── Calls ───────────────────────────────────────────────────────────────
 export const reportsApi = {
   reports: () => req<ReportsData>('GET', '/api/maxgleam/reports'),
@@ -423,6 +552,208 @@ export async function downloadTaxCsv(from: string, to: string): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
+// ── Accounting exports ──────────────────────────────────────────────────
+export interface TaxSummary {
+  from: string;
+  to: string;
+  generated_at: number;
+  overdue_days: number;
+  vat_registered: boolean;
+  vat_rate: number;
+  totals: {
+    revenue_gross_pence: number;
+    revenue_net_pence: number;
+    vat_collected_pence: number;
+    paid_pence: number;
+    unpaid_pence: number;
+    overdue_pence: number;
+    invoice_count: number;
+    paid_count: number;
+    unpaid_count: number;
+    overdue_count: number;
+    /** What VAT would be at 20% — only meaningful when not registered. */
+    notional_vat_at_20_pence: number;
+  };
+  by_month: { month: string; invoices: number; gross_pence: number;
+              net_pence: number; vat_pence: number; paid_pence: number }[];
+  by_method: { method: string; label: string; count: number; amount_pence: number }[];
+}
+
+export type ExportKind = 'invoices' | 'payments';
+
+export const exportsApi = {
+  taxSummary: (from = '', to = '') => {
+    const q = new URLSearchParams();
+    if (from) q.set('from', from);
+    if (to) q.set('to', to);
+    const qs = q.toString();
+    return req<TaxSummary>('GET', `/api/maxgleam/exports/tax-summary${qs ? `?${qs}` : ''}`);
+  },
+};
+
+/**
+ * Download an accounting export. Same fetch-not-<a href> reasoning as
+ * downloadCsv: the Authorization header has to travel with the request.
+ */
+export async function downloadExport(
+  kind: ExportKind, from = '', to = '', isoDates = false,
+): Promise<void> {
+  const q = new URLSearchParams();
+  if (from) q.set('from', from);
+  if (to) q.set('to', to);
+  if (isoDates) q.set('dates', 'iso');
+  const qs = q.toString();
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(
+    `/api/maxgleam/exports/${kind}-csv${qs ? `?${qs}` : ''}`, { headers });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = res.statusText;
+    try { msg = JSON.parse(text).error || msg; } catch { /* not JSON — keep statusText */ }
+    throw new ReportsApiError(res.status, msg);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const range = from || to ? `-${from || 'start'}-to-${to || 'today'}` : '';
+  a.download = `maxgleam-${kind}${range}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// ── Commissions ─────────────────────────────────────────────────────────
+export interface CommissionRow {
+  id: number;
+  job_id: number;
+  subcontractor_id: number;
+  amount_pence: number;
+  status: 'pending' | 'paid';
+  paid_at: number | null;
+  notes: string | null;
+  created_at: number;
+  crew_name: string;
+  crew_company: string | null;
+  rate_per_clean: number;
+  scheduled_date: string | null;
+  job_price_pence: number | null;
+  signoff_at: number | null;
+  address: string | null;
+  postcode: string | null;
+  customer_name: string | null;
+  /** Job price less the commission. Negative is a real, deliberate answer. */
+  margin_pence: number;
+  margin_pct: number | null;
+}
+
+export interface CommissionCrew {
+  crew_id: number;
+  name: string;
+  company_name: string | null;
+  rate_per_clean: number;
+  jobs: number;
+  pending_pence: number;
+  paid_pence: number;
+  total_pence: number;
+}
+
+export interface CommissionList {
+  commissions: CommissionRow[];
+  summary: {
+    count: number; pending_count: number; paid_count: number;
+    pending_pence: number; paid_pence: number; total_pence: number;
+    job_value_pence: number;
+  };
+  by_crew: CommissionCrew[];
+  crews: { id: number; name: string; company_name: string | null; rate_per_clean: number }[];
+  filter: { crew_id: number | null; status: string; from: string; to: string };
+  /** auto | percent | flat — how rate_per_clean is being interpreted. */
+  basis_mode: string;
+}
+
+export interface CommissionSummary {
+  generated_at: number;
+  month_start: string;
+  pending_count: number;
+  pending_pence: number;
+  paid_this_month_count: number;
+  paid_this_month_pence: number;
+  paid_all_time_pence: number;
+  oldest_pending_at: number | null;
+  oldest_pending_days: number | null;
+  pending_by_crew: { crew_id: number; name: string; jobs: number; pending_pence: number }[];
+  basis_mode: string;
+}
+
+export const commissionsApi = {
+  list: (params: { crew_id?: number | null; status?: string;
+                   from?: string; to?: string } = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== null && v !== undefined && v !== '') q.set(k, String(v));
+    });
+    const qs = q.toString();
+    return req<CommissionList>('GET', `/api/maxgleam/commissions${qs ? `?${qs}` : ''}`);
+  },
+
+  summary: () => req<CommissionSummary>('GET', '/api/maxgleam/commissions/summary'),
+
+  pay: (id: number, notes = '') =>
+    req<{ commission: CommissionRow; status: string }>(
+      'POST', `/api/maxgleam/commissions/${id}/pay`, { notes }),
+
+  accrue: () => req<{ created_count: number; skipped_count: number }>(
+    'POST', '/api/maxgleam/commissions/accrue', {}),
+};
+
+// ── Late payment reminders ──────────────────────────────────────────────
+export interface OverdueInvoice extends MgInvoiceRow {
+  days_overdue: number;
+  reminders_sent: number[];
+  stage_due: number | null;
+  reminder_due: boolean;
+  customer_phone: string;
+  can_text: boolean;
+}
+
+export interface OverdueList {
+  invoices: OverdueInvoice[];
+  summary: {
+    count: number; total_pence: number; due_now: number; due_now_pence: number;
+    at_30: number; at_60: number; no_phone: number;
+  };
+  stages: number[];
+  overdue_days: number;
+  dry_run: boolean;
+  dry_run_note: string;
+  checked_at: number;
+}
+
+export interface ReminderRun {
+  processed: number;
+  by_status: Record<string, number>;
+  sent: number;
+  failed: number;
+  results: { invoice_id: number; number: string; customer_name?: string;
+             stage: number; status: string; to?: string; body?: string;
+             error?: string | null }[];
+  candidates: number;
+  dry_run: boolean;
+  ran_at: number;
+}
+
+export const remindersApi = {
+  overdue: () => req<OverdueList>('GET', '/api/maxgleam/invoices/overdue'),
+
+  send: (invoiceId?: number) => req<ReminderRun>(
+    'POST', '/api/maxgleam/invoices/send-reminders',
+    invoiceId ? { invoice_id: invoiceId } : {}),
+};
+
 // ── Helpers ─────────────────────────────────────────────────────────────
 export const gbp = (pence: number) =>
   `£${((pence || 0) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -487,4 +818,50 @@ export const dayLabel = (iso: string) => {
   const d = new Date(`${iso}T00:00:00`);
   return Number.isNaN(d.getTime()) ? iso
     : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+};
+
+// ── Marketing / reviews / recurring invoicing ───────────────────────────
+export const marketingApi = {
+  audience: (kind: AudienceKind = 'all', opts: { since?: string; days?: number } = {}) => {
+    const q = new URLSearchParams({ kind });
+    if (opts.since) q.set('since', opts.since);
+    if (opts.days) q.set('days', String(opts.days));
+    return req<AudienceSummary>('GET', `/api/maxgleam/email/audience?${q}`);
+  },
+
+  campaigns: () => req<CampaignList>('GET', '/api/maxgleam/email/campaigns'),
+
+  createCampaign: (data: {
+    name: string; subject: string; body: string;
+    audience: { kind: AudienceKind; since?: string | null; days?: number | null };
+  }) => req<{ campaign: Campaign }>('POST', '/api/maxgleam/email/campaigns', data),
+
+  preview: (id: number) =>
+    req<CampaignPreview>('GET', `/api/maxgleam/email/campaigns/${id}/preview`),
+
+  // dry_run defaults to true server-side; pass false deliberately to send.
+  send: (id: number, dryRun: boolean) =>
+    req<CampaignSendResult>('POST', `/api/maxgleam/email/campaigns/${id}/send`,
+      { dry_run: dryRun }),
+
+  newsletter: (opts: { month?: string; dry_run?: boolean; send?: boolean } = {}) =>
+    req<{ month_label: string; created: boolean; campaign: Campaign; send?: CampaignSendResult }>(
+      'POST', '/api/maxgleam/email/newsletter', opts),
+};
+
+export const reviewsApi = {
+  list: (opts: { min_rating?: number; crew_id?: number; with_comment?: boolean; limit?: number } = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(opts).forEach(([k, v]) => { if (v) q.set(k, String(v)); });
+    const qs = q.toString();
+    return req<ReviewList>('GET', `/api/maxgleam/reviews${qs ? `?${qs}` : ''}`);
+  },
+  average: (days?: number) =>
+    req<ReviewAverage>('GET', `/api/maxgleam/reviews/average${days ? `?days=${days}` : ''}`),
+};
+
+export const recurringApi = {
+  status: () => req<RecurringStatus>('GET', '/api/maxgleam/invoices/recurring-status'),
+  autoSend: (dryRun: boolean) =>
+    req<AutoSendResult>('POST', '/api/maxgleam/invoices/auto-send', { dry_run: dryRun }),
 };

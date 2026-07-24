@@ -104,6 +104,14 @@ export const crewApi = {
     req<{ ok: boolean; work_request_id: number; photo_error: string | null }>(
       'POST', '/api/maxgleam/crew/report-issue',
       { job_id: jobId, description, priority, photo_data_url: photoDataUrl }),
+
+  // Position reporting while a job is open. The server drops points that
+  // arrive too fast or with a poor fix and says so in `stored`, so the phone
+  // can report as often as the browser offers without flooding the log.
+  sendPosition: (jobId: number, lat: number, lng: number, accuracy?: number) =>
+    req<{ ok: boolean; stored: boolean; reason?: string; timestamp?: number }>(
+      'POST', '/api/maxgleam/gps/update',
+      { job_id: jobId, lat, lng, accuracy }),
 };
 
 export const photoUrl = (id: number) => `/api/maxgleam/photo/${id}`;

@@ -11,17 +11,25 @@ import {
   reportsApi, downloadCsv, downloadActivityCsv, gbp, gbpShort, hoursMins,
   clockTime, dayLabel, timeAgo,
   invoicesApi, downloadTaxCsv, type TaxReport,
+  reviewsApi, type ReviewList, type ReviewAverage,
+  exportsApi, downloadExport, commissionsApi,
   type ReportsData, type ReportKind, type TimeHistory,
   type ActivityFeed, type ActorType, type AlertPreview, type AlertLogRow,
+  type TaxSummary, type ExportKind, type CommissionList, type CommissionSummary,
+  type CommissionRow,
 } from '../../lib/reportsApi';
 
-type Tab = 'overview' | 'crew' | 'time' | 'tax' | 'activity' | 'alerts';
+type Tab = 'overview' | 'crew' | 'time' | 'reviews' | 'tax' | 'exports' | 'commissions'
+  | 'activity' | 'alerts';
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'overview', label: 'Overview', icon: 'monitoring' },
   { id: 'crew', label: 'Crew', icon: 'groups' },
   { id: 'time', label: 'Time', icon: 'schedule' },
+  { id: 'reviews', label: 'Reviews', icon: 'reviews' },
   { id: 'tax', label: 'Tax', icon: 'account_balance' },
+  { id: 'exports', label: 'Exports', icon: 'download' },
+  { id: 'commissions', label: 'Commissions', icon: 'handshake' },
   { id: 'activity', label: 'Activity', icon: 'history' },
   { id: 'alerts', label: 'Alerts', icon: 'notifications_active' },
 ];
@@ -1002,6 +1010,611 @@ function TaxTab() {
   );
 }
 
+// ── Exports tab ─────────────────────────────────────────────────────────
+// Accounting hand-off: the two CSVs an accountant asks for, plus the tax
+// position they reconcile against, over one shared date range.
+
+function ExportsTab() {
+  const toast = useToast();
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [iso, setIso] = useState(false);
+  const [summary, setSummary] = useState<TaxSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<ExportKind | null>(null);
+
+  const load = useCallback(async (f: string, t: string) => {
+    setLoading(true);
+    try {
+      setSummary(await exportsApi.taxSummary(f, t));
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not load the tax summary', 'danger');
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => { load(from, to); }, [load, from, to]);
+
+  const download = async (kind: ExportKind) => {
+    setBusy(kind);
+    try {
+      await downloadExport(kind, from, to, iso);
+      toast(`${kind === 'invoices' ? 'Invoice' : 'Payment'} export downloaded`, 'ok');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Export failed', 'danger');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const t = summary?.totals;
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile label="Revenue (gross)" value={gbp(t?.revenue_gross_pence ?? 0)}
+          sub={`${t?.invoice_count ?? 0} invoices, voids excluded`} icon="payments"
+          accent={ACCENT} delay={0} />
+        <StatTile label="VAT collected" value={gbp(t?.vat_collected_pence ?? 0)}
+          sub={summary?.vat_registered ? `at ${summary.vat_rate}%` : 'not VAT registered'}
+          icon="receipt_long" accent={summary?.vat_registered ? '#A78BFA' : '#8B96A8'} delay={60} />
+        <StatTile label="Paid" value={gbp(t?.paid_pence ?? 0)}
+          sub={`${t?.paid_count ?? 0} settled`} icon="task_alt" accent="#22C55E" delay={120} />
+        <StatTile label="Unpaid" value={gbp(t?.unpaid_pence ?? 0)}
+          sub={`${t?.overdue_count ?? 0} overdue past ${summary?.overdue_days ?? 30}d`}
+          icon="schedule" accent={t?.overdue_count ? '#F59E0B' : '#8B96A8'} delay={180} />
+      </div>
+
+      <Card className="space-y-3 p-3.5">
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">From</label>
+            <Input type="date" value={from} onChange={e => setFrom(e.target.value)}
+              className="!w-auto" />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">To</label>
+            <Input type="date" value={to} onChange={e => setTo(e.target.value)}
+              className="!w-auto" />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">Date format</label>
+            <Select value={iso ? 'iso' : 'uk'} onChange={e => setIso(e.target.value === 'iso')}>
+              <option value="uk">DD/MM/YYYY (QuickBooks/Xero UK)</option>
+              <option value="iso">YYYY-MM-DD (ISO)</option>
+            </Select>
+          </div>
+          {(from || to) && (
+            <Button variant="ghost" icon="clear" onClick={() => { setFrom(''); setTo(''); }}>
+              Whole book
+            </Button>
+          )}
+        </div>
+        <div className="text-[12px] text-muted">
+          Leave the dates blank to export everything. Invoices are filtered by
+          issue date; payments by the date they settled, so an invoice raised in
+          one month and paid the next lands in the month the cash arrived.
+        </div>
+      </Card>
+
+      <div>
+        <SectionTitle accent="#22C55E">Downloads</SectionTitle>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Card className="flex items-center gap-3 p-3.5">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl"
+              style={{ background: `${ACCENT}1a`, color: ACCENT }}>
+              <Icon name="request_quote" size={20} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold text-ink">Invoices CSV</div>
+              <div className="text-[11px] text-muted">
+                Date, Invoice#, Customer, Amount, VAT, Total, Status
+              </div>
+            </div>
+            <Button variant="primary" icon="download" loading={busy === 'invoices'}
+              onClick={() => download('invoices')}>Export</Button>
+          </Card>
+
+          <Card className="flex items-center gap-3 p-3.5">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl"
+              style={{ background: '#22C55E1a', color: '#22C55E' }}>
+              <Icon name="account_balance" size={20} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold text-ink">Payments CSV</div>
+              <div className="text-[11px] text-muted">
+                Date, Invoice#, Customer, Amount, Method
+              </div>
+            </div>
+            <Button variant="primary" icon="download" loading={busy === 'payments'}
+              onClick={() => download('payments')}>Export</Button>
+          </Card>
+        </div>
+      </div>
+
+      {!summary?.vat_registered && (t?.notional_vat_at_20_pence ?? 0) > 0 && (
+        <Card className="flex items-start gap-3 p-3.5">
+          <Icon name="info" size={19} className="mt-0.5 shrink-0 text-muted" />
+          <div className="text-[12px] text-muted">
+            Not VAT registered, so no VAT has been charged and the VAT column
+            exports as 0.00. Had the standard 20% applied to this revenue it
+            would have been <span className="font-semibold text-ink">
+              {gbp(t?.notional_vat_at_20_pence ?? 0)}</span> — shown for planning
+            only, never as VAT collected.
+          </div>
+        </Card>
+      )}
+
+      <div>
+        <SectionTitle count={summary?.by_month.length} accent="#A78BFA">Tax summary by month</SectionTitle>
+        {loading ? <SkeletonList count={3} />
+          : !summary || summary.by_month.length === 0 ? (
+            <Card className="p-2">
+              <EmptyState icon="receipt_long" title="Nothing in this range"
+                hint="No invoices were raised between those dates." />
+            </Card>
+          ) : (
+            <Card className="overflow-x-auto p-0">
+              <table className="w-full min-w-[560px] text-sm">
+                <thead>
+                  <tr className="border-b border-white/6 text-[11px] uppercase tracking-wider text-muted">
+                    <th className="p-3 text-left font-semibold">Month</th>
+                    <th className="p-3 text-right font-semibold">Invoices</th>
+                    <th className="p-3 text-right font-semibold">Net</th>
+                    <th className="p-3 text-right font-semibold">VAT</th>
+                    <th className="p-3 text-right font-semibold">Gross</th>
+                    <th className="p-3 text-right font-semibold">Paid</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.by_month.map(m => (
+                    <tr key={m.month} className="border-b border-white/4 last:border-0">
+                      <td className="p-3 font-medium text-ink">{m.month}</td>
+                      <td className="p-3 text-right tabular-nums text-muted">{m.invoices}</td>
+                      <td className="p-3 text-right tabular-nums text-muted">{gbp(m.net_pence)}</td>
+                      <td className="p-3 text-right tabular-nums text-muted">{gbp(m.vat_pence)}</td>
+                      <td className="p-3 text-right font-semibold tabular-nums text-ink">{gbp(m.gross_pence)}</td>
+                      <td className="p-3 text-right tabular-nums"
+                        style={{ color: m.paid_pence >= m.gross_pence ? '#22C55E' : '#8B96A8' }}>
+                        {gbp(m.paid_pence)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          )}
+      </div>
+
+      {summary && summary.by_method.length > 0 && (
+        <div>
+          <SectionTitle count={summary.by_method.length}>How customers paid</SectionTitle>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {summary.by_method.map(m => (
+              <Card key={m.method} className="p-3">
+                <div className="text-[11px] uppercase tracking-wider text-muted">{m.label}</div>
+                <div className="mt-1 text-lg font-bold tabular-nums text-ink">{gbp(m.amount_pence)}</div>
+                <div className="text-[11px] text-muted/70">{m.count} payment{m.count === 1 ? '' : 's'}</div>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Commissions tab ─────────────────────────────────────────────────────
+
+function CommissionsTab() {
+  const toast = useToast();
+  const [list, setList] = useState<CommissionList | null>(null);
+  const [summary, setSummary] = useState<CommissionSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [paying, setPaying] = useState<number | null>(null);
+  const [crewId, setCrewId] = useState<number | null>(null);
+  const [status, setStatus] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const [l, s] = await Promise.all([
+        commissionsApi.list({ crew_id: crewId, status, from, to }),
+        commissionsApi.summary(),
+      ]);
+      setList(l);
+      setSummary(s);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not load commissions', 'danger');
+    } finally {
+      setLoading(false);
+    }
+  }, [toast, crewId, status, from, to]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const pay = async (row: CommissionRow) => {
+    setPaying(row.id);
+    try {
+      const r = await commissionsApi.pay(row.id);
+      toast(r.status === 'already paid'
+        ? `${row.crew_name} was already paid for this job`
+        : `${gbp(row.amount_pence)} marked paid to ${row.crew_name}`, 'ok');
+      await load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not mark it paid', 'danger');
+    } finally {
+      setPaying(null);
+    }
+  };
+
+  const rows = list?.commissions ?? [];
+  // A commission above the job's own price means the crew rate and the job
+  // price disagree. Worth surfacing rather than leaving in a margin column.
+  const underwater = rows.filter(r => r.margin_pence < 0).length;
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile label="Pending" value={gbp(summary?.pending_pence ?? 0)}
+          sub={`${summary?.pending_count ?? 0} awaiting payment`} icon="hourglass_top"
+          accent={summary?.pending_count ? '#F59E0B' : '#22C55E'} delay={0} />
+        <StatTile label="Paid this month" value={gbp(summary?.paid_this_month_pence ?? 0)}
+          sub={`since ${summary?.month_start ?? '—'}`} icon="paid" accent="#22C55E" delay={60} />
+        <StatTile label="Paid all time" value={gbp(summary?.paid_all_time_pence ?? 0)}
+          sub="settled commissions" icon="savings" accent={ACCENT} delay={120} />
+        <StatTile label="Oldest pending"
+          value={summary?.oldest_pending_days !== null && summary?.oldest_pending_days !== undefined
+            ? `${summary.oldest_pending_days}d` : '—'}
+          sub={summary?.pending_count ? 'since accrual' : 'nothing outstanding'}
+          icon="event_busy"
+          accent={(summary?.oldest_pending_days ?? 0) > 30 ? '#F43F5E' : '#8B96A8'} delay={180} />
+      </div>
+
+      {underwater > 0 && (
+        <Card className="flex items-start gap-3 p-3.5"
+          style={{ borderColor: '#F59E0B44' }}>
+          <Icon name="warning" size={19} className="mt-0.5 shrink-0" style={{ color: '#F59E0B' }} />
+          <div className="text-[12px] text-muted">
+            <span className="font-semibold text-ink">
+              {underwater} commission{underwater === 1 ? '' : 's'} exceed{underwater === 1 ? 's' : ''} the
+              job price.
+            </span>{' '}
+            Crew rates are stored as a flat amount per clean (
+            {list?.basis_mode === 'auto' ? 'read as pence per clean because the value is above 100'
+              : `basis forced to ${list?.basis_mode}`}
+            ), so a crew on a high rate doing a low-priced job costs more than the
+            job earns. Adjust the rate on the subcontractor or the price on the job.
+          </div>
+        </Card>
+      )}
+
+      <Card className="flex flex-wrap items-end gap-3 p-3.5">
+        <div>
+          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">Crew</label>
+          <Select value={crewId ?? ''}
+            onChange={e => setCrewId(e.target.value ? Number(e.target.value) : null)}>
+            <option value="">All crew</option>
+            {(list?.crews ?? []).map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </Select>
+        </div>
+        <div>
+          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">Status</label>
+          <Select value={status} onChange={e => setStatus(e.target.value)}>
+            <option value="">All</option>
+            <option value="pending">Pending</option>
+            <option value="paid">Paid</option>
+          </Select>
+        </div>
+        <div>
+          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">From</label>
+          <Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="!w-auto" />
+        </div>
+        <div>
+          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">To</label>
+          <Input type="date" value={to} onChange={e => setTo(e.target.value)} className="!w-auto" />
+        </div>
+        {(crewId || status || from || to) && (
+          <Button variant="ghost" icon="clear"
+            onClick={() => { setCrewId(null); setStatus(''); setFrom(''); setTo(''); }}>
+            Clear
+          </Button>
+        )}
+        <div className="ml-auto">
+          <Button variant="secondary" icon="refresh" onClick={() => load()}>Refresh</Button>
+        </div>
+      </Card>
+
+      {list && list.by_crew.length > 0 && (
+        <div>
+          <SectionTitle count={list.by_crew.length}>By crew</SectionTitle>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {list.by_crew.map(c => (
+              <Card key={c.crew_id} className="p-3.5">
+                <div className="flex items-center gap-2">
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg"
+                    style={{ background: `${ACCENT}1a`, color: ACCENT }}>
+                    <Icon name="person" size={17} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold text-ink">{c.name}</div>
+                    <div className="truncate text-[11px] text-muted">
+                      {c.jobs} job{c.jobs === 1 ? '' : 's'} · {gbp(c.rate_per_clean)} per clean
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-2.5 flex items-center gap-3 text-[12px]">
+                  <span className="text-muted">Pending</span>
+                  <span className="font-semibold tabular-nums"
+                    style={{ color: c.pending_pence ? '#F59E0B' : '#8B96A8' }}>
+                    {gbp(c.pending_pence)}
+                  </span>
+                  <span className="ml-auto text-muted">Paid</span>
+                  <span className="font-semibold tabular-nums text-ink">{gbp(c.paid_pence)}</span>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <SectionTitle count={rows.length} accent="#F59E0B"
+          action={list && (
+            <span className="text-[11px] text-muted">
+              {gbp(list.summary.pending_pence)} pending of {gbp(list.summary.total_pence)} total
+            </span>
+          )}>
+          Commissions
+        </SectionTitle>
+        {loading ? <SkeletonList count={4} />
+          : rows.length === 0 ? (
+            <Card className="p-2">
+              <EmptyState icon="handshake" title="No commissions yet"
+                hint="A commission is accrued once a job is done and the customer has signed off." />
+            </Card>
+          ) : (
+            <div className="space-y-2">
+              {rows.map(r => (
+                <Card key={r.id} className="flex flex-wrap items-center gap-3 p-3.5">
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl"
+                    style={{
+                      background: r.status === 'paid' ? '#22C55E1a' : '#F59E0B1a',
+                      color: r.status === 'paid' ? '#22C55E' : '#F59E0B',
+                    }}>
+                    <Icon name={r.status === 'paid' ? 'paid' : 'hourglass_top'} size={19} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold text-ink">
+                      {r.crew_name}
+                      <span className="ml-2 font-normal text-muted">
+                        {r.address || `job ${r.job_id}`}
+                      </span>
+                    </div>
+                    <div className="truncate text-[11px] text-muted">
+                      {r.scheduled_date ? dayLabel(r.scheduled_date) : '—'}
+                      {r.customer_name && ` · ${r.customer_name}`}
+                      {r.notes && ` · ${r.notes}`}
+                      {r.paid_at && ` · paid ${timeAgo(r.paid_at)}`}
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <div className="text-sm font-bold tabular-nums text-ink">{gbp(r.amount_pence)}</div>
+                    <div className="text-[11px] tabular-nums"
+                      style={{ color: r.margin_pence < 0 ? '#F43F5E' : '#8B96A8' }}>
+                      job {gbp(r.job_price_pence ?? 0)} · margin {gbp(r.margin_pence)}
+                    </div>
+                  </div>
+                  {r.status === 'paid'
+                    ? <Badge tone="ok">paid</Badge>
+                    : (
+                      <Button variant="primary" icon="check" loading={paying === r.id}
+                        className="!px-2.5 !py-1.5 !text-[12px]"
+                        onClick={() => pay(r)}>
+                        Mark paid
+                      </Button>
+                    )}
+                </Card>
+              ))}
+            </div>
+          )}
+      </div>
+    </div>
+  );
+}
+
+// ── Reviews tab ─────────────────────────────────────────────────────────
+
+/** Read-only star row. Half stars are not modelled — ratings are whole 1–5. */
+function Stars({ value, size = 16 }: { value: number | null; size?: number }) {
+  return (
+    <span className="inline-flex items-center gap-0.5" aria-label={`${value ?? 0} out of 5`}>
+      {[1, 2, 3, 4, 5].map(n => (
+        <Icon key={n} name="star" size={size} fill={!!value && n <= value}
+          className={value && n <= value ? 'text-amber' : 'text-white/15'} />
+      ))}
+    </span>
+  );
+}
+
+function ReviewsTab() {
+  const toast = useToast();
+  const [list, setList] = useState<ReviewList | null>(null);
+  const [avg, setAvg] = useState<ReviewAverage | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [minRating, setMinRating] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [l, a] = await Promise.all([
+        reviewsApi.list({ min_rating: minRating ? Number(minRating) : undefined, limit: 200 }),
+        reviewsApi.average(),
+      ]);
+      setList(l);
+      setAvg(a);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not load reviews', 'danger');
+    } finally {
+      setLoading(false);
+    }
+  }, [minRating, toast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const total = avg?.rated || 0;
+  const maxBucket = Math.max(1, ...Object.values(avg?.distribution || { 1: 0 }));
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile label="Average rating"
+          value={avg?.average !== null && avg?.average !== undefined ? `${avg.average} / 5` : '—'}
+          sub={`${total} rated job${total === 1 ? '' : 's'}`} icon="star" accent="#F59E0B" delay={0} />
+        <StatTile label="Response rate" value={`${avg?.response_rate_pct ?? 0}%`}
+          sub={`of ${avg?.completed_jobs ?? 0} completed jobs`} icon="rate_review"
+          accent={ACCENT} delay={60} />
+        <StatTile label="Testimonials" value={String(list?.testimonials.length ?? 0)}
+          sub={`${list?.testimonial_min ?? 4}★ and above, with a comment`}
+          icon="format_quote" accent="#22C55E" delay={120} />
+        <StatTile label="Best crew"
+          value={avg?.by_crew[0] ? `${avg.by_crew[0].average}` : '—'}
+          sub={avg?.by_crew[0]?.name || 'no rated crew yet'}
+          icon="workspace_premium" accent="#A78BFA" delay={180} />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div>
+          <SectionTitle accent="#F59E0B">Rating spread</SectionTitle>
+          <Card className="space-y-2 p-4 sm:p-5">
+            {[5, 4, 3, 2, 1].map(n => {
+              const count = avg?.distribution?.[String(n)] ?? 0;
+              return (
+                <div key={n} className="flex items-center gap-3">
+                  <span className="flex w-12 shrink-0 items-center gap-1 text-[12px] tabular-nums text-muted">
+                    {n}<Icon name="star" size={12} fill className="text-amber" />
+                  </span>
+                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/6">
+                    <div className="h-full rounded-full transition-all duration-500"
+                      style={{
+                        width: `${(count / maxBucket) * 100}%`,
+                        background: n >= 4 ? 'linear-gradient(90deg,#22C55E,#F59E0B)'
+                          : n === 3 ? '#F59E0B' : '#F43F5E',
+                      }} />
+                  </div>
+                  <span className="w-8 shrink-0 text-right text-[12px] tabular-nums text-muted">
+                    {count}
+                  </span>
+                </div>
+              );
+            })}
+            {!total && (
+              <p className="pt-2 text-[11px] leading-relaxed text-muted/70">
+                No ratings yet. Customers are asked for 1–5 stars on the sign-off
+                page after each clean.
+              </p>
+            )}
+          </Card>
+        </div>
+
+        <div>
+          <SectionTitle accent="#A78BFA" count={avg?.by_crew.length}>Rating by crew</SectionTitle>
+          <Card className="p-2">
+            {!avg?.by_crew.length ? (
+              <EmptyState icon="groups" title="No rated crew yet"
+                hint="Ratings attach to whoever was assigned the job." />
+            ) : (
+              <div className="space-y-2 p-1">
+                {avg.by_crew.map(c => (
+                  <div key={c.crew_id}
+                    className="flex items-center gap-3 rounded-xl border border-white/6 bg-white/[0.02] p-2.5">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-ink">{c.name}</div>
+                      <div className="text-[11px] text-muted">{c.rated} rated</div>
+                    </div>
+                    <Stars value={Math.round(c.average)} size={14} />
+                    <span className="w-10 text-right text-sm font-semibold tabular-nums text-ink">
+                      {c.average}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+      </div>
+
+      {list && list.testimonials.length > 0 && (
+        <div>
+          <SectionTitle accent="#22C55E" count={list.testimonials.length}>Testimonials</SectionTitle>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {list.testimonials.map(t => (
+              <Card key={t.job_id} className="relative overflow-hidden p-4">
+                <Icon name="format_quote" size={40}
+                  className="pointer-events-none absolute -right-1 -top-1 text-white/5" />
+                <Stars value={t.rating} />
+                <p className="mt-2 text-sm leading-relaxed text-ink">&ldquo;{t.comment}&rdquo;</p>
+                <div className="mt-3 flex items-center gap-2 text-[11px] text-muted">
+                  <span className="font-medium text-ink/80">{t.customer_name || 'Customer'}</span>
+                  <span>·</span>
+                  <span className="truncate">{t.postcode || t.address}</span>
+                  {t.signed_at && <><span>·</span><span>{timeAgo(t.signed_at)}</span></>}
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <SectionTitle count={list?.count}
+          action={
+            <Select value={minRating} onChange={e => setMinRating(e.target.value)}
+              className="!py-1 !text-[12px]">
+              <option value="">All ratings</option>
+              <option value="5">5 stars only</option>
+              <option value="4">4 stars and up</option>
+              <option value="3">3 stars and up</option>
+            </Select>
+          }>All reviews</SectionTitle>
+        <Card className="p-2">
+          {loading ? <SkeletonList count={4} className="p-1" />
+            : !list?.reviews.length ? (
+              <EmptyState icon="reviews" title="No reviews yet"
+                hint="Ratings arrive from the customer sign-off page — a 1–5 star pick and an optional comment." />
+            ) : (
+              <div className="space-y-2 p-1">
+                {list.reviews.map(r => (
+                  <div key={r.job_id}
+                    className="flex flex-col gap-2 rounded-xl border border-white/6 bg-white/[0.02] p-3
+                      sm:flex-row sm:items-center sm:gap-4">
+                    <div className="shrink-0 sm:w-28"><Stars value={r.rating} /></div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm text-ink">
+                        {r.comment || <span className="text-muted/60">no comment left</span>}
+                      </div>
+                      <div className="truncate text-[11px] text-muted">
+                        {r.customer_name || 'Customer'} · {r.address}
+                        {r.crew_name && ` · ${r.crew_name}`}
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right text-[11px] text-muted">
+                      {r.signed_at ? timeAgo(r.signed_at) : dayLabel(r.scheduled_date)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 // ── Page ────────────────────────────────────────────────────────────────
 
 export default function Reports() {
@@ -1063,9 +1676,11 @@ export default function Reports() {
         </div>
       </div>
 
-      {/* Tax fetches its own data, so it stays available even if the main
-          reports payload fails to load. */}
+      {/* Tax, exports and commissions each fetch their own data, so they stay
+          available even if the main reports payload fails to load. */}
       {tab === 'tax' ? <TaxTab />
+        : tab === 'exports' ? <ExportsTab />
+        : tab === 'commissions' ? <CommissionsTab />
         : loading ? <SkeletonList count={5} />
         : error ? (
           <EmptyState icon="error" accent="#F43F5E" title="Could not load reports" hint={error}
@@ -1074,6 +1689,7 @@ export default function Reports() {
           tab === 'overview' ? <Overview data={data} />
             : tab === 'crew' ? <CrewTab data={data} />
             : tab === 'time' ? <TimeTab data={data} />
+            : tab === 'reviews' ? <ReviewsTab />
             : tab === 'activity' ? <ActivityTab />
             : <AlertsTab />
         ) : null}

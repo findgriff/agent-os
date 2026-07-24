@@ -255,6 +255,15 @@ def submit_signoff(job_id: int, token: str, body: dict) -> tuple[int, dict]:
                  "WHERE id = ?", (now, stored_note or None, job_id))
     conn.commit()
 
+    # Mirror the star rating into jobs.rating for the reviews surface. The
+    # [n/5] tag above stays the wire format the other maxgleam application
+    # parses, so this is a dual write, not a migration.
+    try:
+        from server import maxgleam_reviews
+        maxgleam_reviews.set_rating(job_id, rating)
+    except Exception:                                   # noqa: BLE001
+        log.exception("maxgleam: could not mirror rating for job %s", job_id)
+
     try:
         conn.execute(
             "INSERT INTO comms_log (tenant_id, customer_id, kind, content) VALUES (?,?,?,?)",
@@ -264,6 +273,12 @@ def submit_signoff(job_id: int, token: str, body: dict) -> tuple[int, dict]:
         conn.commit()
     except Exception:                                   # noqa: BLE001
         log.exception("maxgleam: could not write comms_log for %s", job_id)
+
+    # Sign-off is what makes the crew's commission earnable, so accrue it now
+    # rather than waiting for someone to open the commissions tab. Best-effort:
+    # the sweep behind that tab picks up anything missed here.
+    from server import maxgleam_commissions
+    maxgleam_commissions.accrue_quietly(job["tenant_id"])
 
     fresh = _one(_JOB_SELECT + " WHERE j.id = ?", (job_id,))
     return 200, {"job": _signoff_dto(fresh), "photo_error": photo_error}
@@ -418,6 +433,11 @@ def auto_approve(now: int | None = None) -> dict:
         [(now, i) for i in ids])
     conn.commit()
     log.info("maxgleam: auto-approved %d job(s)", len(ids))
+
+    # Auto-approval earns commission exactly as a customer signature does.
+    from server import maxgleam_commissions
+    maxgleam_commissions.accrue_quietly()
+
     return {"auto_approved": len(ids), "ids": ids}
 
 

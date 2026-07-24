@@ -20,7 +20,7 @@ DB_PATH = "/var/lib/agent-os/data.db"
 
 SERVICES = [
     "agent-os", "ks-bot", "maxgleam", "deepseek-proxy",
-    "caddy", "postgrest", "opspocket-inference"
+    "caddy", "opspocket-inference"
 ]
 
 def get_db():

@@ -10,16 +10,17 @@ from __future__ import annotations
 import json
 import logging
 import hmac
+import html as html_module
 import os
 import re
 import sqlite3
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit, parse_qs
+from urllib.parse import urlsplit, parse_qs, unquote
 
 from server import db as db_module
-from server import auth, agents, vault, bridges, metrics, inference, studio, omi, features, oracle_search, apollo, video_editor, auto_caption, transitions, speed_change, clip_split, audio_track, overlay, video_effects, export_presets, suno_bridge, investments_api, partner, ks, maxgleam_portal, maxgleam_invoicing, maxgleam_ops, maxgleam_crew, maxgleam_inventory, maxgleam_reports, maxgleam_activity, maxgleam_alerts, maxgleam_referrals, maxgleam_notify
+from server import auth, agents, vault, bridges, metrics, inference, studio, omi, features, oracle_search, apollo, video_editor, auto_caption, transitions, speed_change, clip_split, audio_track, overlay, video_effects, export_presets, suno_bridge, investments_api, partner, ks, ks_attendance, ks_progress, ks_billing, maxgleam_portal, maxgleam_invoicing, maxgleam_ops, maxgleam_crew, maxgleam_inventory, maxgleam_reports, maxgleam_activity, maxgleam_alerts, maxgleam_referrals, maxgleam_notify, maxgleam_accounting, maxgleam_commissions, maxgleam_booking, maxgleam_gps, maxgleam_marketing, maxgleam_reviews
 
 log = logging.getLogger("agentos")
 
@@ -2614,6 +2615,140 @@ def h_mg_alerts_run(req: Request):
     return 200, result
 
 
+# ── Max Gleam email marketing, reviews and recurring invoicing ───────
+# Campaigns mail real customers, so every send path defaults to a dry run and
+# the live send has to be asked for explicitly.
+
+def h_mg_campaigns(req: Request):
+    """GET list / POST create — /api/maxgleam/email/campaigns"""
+    _company_id, tenant_id = _maxgleam_scope(req)
+    if req.method == "POST":
+        return maxgleam_marketing.create_campaign(req.body or {}, tenant_id)
+    try:
+        limit = int(req.query.get("limit") or 100)
+    except (TypeError, ValueError):
+        limit = 100
+    return maxgleam_marketing.list_campaigns(tenant_id, limit)
+
+
+def h_mg_campaign(req: Request, campaign_id: int):
+    """GET /api/maxgleam/email/campaigns/:id — campaign + its recipients."""
+    _company_id, tenant_id = _maxgleam_scope(req)
+    return maxgleam_marketing.get_campaign(campaign_id, tenant_id)
+
+
+def h_mg_campaign_preview(req: Request, campaign_id: int):
+    """GET /api/maxgleam/email/campaigns/:id/preview — rendered samples."""
+    _company_id, tenant_id = _maxgleam_scope(req)
+    return maxgleam_marketing.preview(campaign_id, tenant_id)
+
+
+def h_mg_campaign_send(req: Request, campaign_id: int):
+    """POST /api/maxgleam/email/campaigns/:id/send — body {dry_run}.
+
+    dry_run defaults to TRUE: this mails the customer list, and a stray click
+    should cost nothing. Pass {"dry_run": false} to actually send.
+    """
+    _require(req)
+    _company_id, tenant_id = _maxgleam_scope(req)
+    body = req.body or {}
+    dry = body.get("dry_run")
+    return maxgleam_marketing.send_campaign(
+        campaign_id, tenant_id, dry_run=True if dry is None else bool(dry))
+
+
+def h_mg_email_audience(req: Request):
+    """GET /api/maxgleam/email/audience?kind=&since=&days= — who would get it."""
+    _company_id, tenant_id = _maxgleam_scope(req)
+    try:
+        days = int(req.query["days"]) if req.query.get("days") else None
+    except (TypeError, ValueError):
+        return 400, {"error": "days must be a number"}
+    return 200, maxgleam_marketing.audience_summary(
+        req.query.get("kind") or "all", tenant_id=tenant_id,
+        since=req.query.get("since"), days=days)
+
+
+def h_mg_newsletter(req: Request):
+    """POST /api/maxgleam/email/newsletter — body {month, dry_run, send}."""
+    _require(req)
+    _company_id, tenant_id = _maxgleam_scope(req)
+    body = req.body or {}
+    dry = body.get("dry_run")
+    return maxgleam_marketing.monthly_newsletter(
+        tenant_id, month=body.get("month"),
+        dry_run=True if dry is None else bool(dry),
+        send=body.get("send", True) is not False)
+
+
+def h_mg_email_open(req: Request):
+    """GET /api/maxgleam/email/open?r=ID — 1x1 tracking pixel. Public."""
+    try:
+        maxgleam_marketing.mark_opened(int(req.query.get("r") or 0))
+    except (TypeError, ValueError):
+        pass
+    return 200, maxgleam_marketing.PIXEL, "image/gif"
+
+
+def h_mg_email_click(req: Request):
+    """GET /api/maxgleam/email/click?r=ID&u=URL — record, then redirect. Public."""
+    try:
+        maxgleam_marketing.mark_clicked(int(req.query.get("r") or 0))
+    except (TypeError, ValueError):
+        pass
+    target = req.query.get("u") or "/"
+    # Only ever bounce to http(s); a javascript: or data: target here would be
+    # an open redirect handed straight to a customer's mail client.
+    if not target.startswith(("http://", "https://")):
+        target = "/"
+    return 200, (f'<!doctype html><meta http-equiv="refresh" '
+                 f'content="0;url={html_module.escape(target, quote=True)}">'
+                 f'<a href="{html_module.escape(target, quote=True)}">Continue</a>'),\
+           "text/html"
+
+
+def h_mg_reviews(req: Request):
+    """GET /api/maxgleam/reviews — rated jobs, distribution, testimonials."""
+    company_id, tenant_id = _maxgleam_scope(req)
+    try:
+        min_rating = int(req.query["min_rating"]) if req.query.get("min_rating") else None
+        crew_id = int(req.query["crew_id"]) if req.query.get("crew_id") else None
+        limit = int(req.query.get("limit") or 100)
+    except (TypeError, ValueError):
+        return 400, {"error": "min_rating, crew_id and limit must be numbers"}
+    return maxgleam_reviews.reviews(
+        tenant_id, company_id, min_rating=min_rating, crew_id=crew_id,
+        with_comment=req.query.get("with_comment") in ("1", "true"), limit=limit)
+
+
+def h_mg_reviews_average(req: Request):
+    """GET /api/maxgleam/reviews/average — average, spread and per-crew."""
+    company_id, tenant_id = _maxgleam_scope(req)
+    try:
+        days = int(req.query["days"]) if req.query.get("days") else None
+    except (TypeError, ValueError):
+        return 400, {"error": "days must be a number"}
+    return maxgleam_reviews.average(tenant_id, company_id, days)
+
+
+def h_mg_invoices_auto_send(req: Request):
+    """POST /api/maxgleam/invoices/auto-send — bill completed, signed-off jobs."""
+    _require(req)
+    company_id = _mg_scope(req)
+    body = req.body or {}
+    dry = body.get("dry_run")
+    return maxgleam_invoicing.auto_send(
+        company_id=company_id,
+        dry_run=None if dry is None else bool(dry),
+        require_signoff=body.get("require_signoff", True) is not False)
+
+
+def h_mg_invoices_recurring_status(req: Request):
+    """GET /api/maxgleam/invoices/recurring-status — last run + what's queued."""
+    company_id = _mg_scope(req)
+    return maxgleam_invoicing.recurring_status(company_id=company_id)
+
+
 # ── KS Sports Coaching — public booking system ───────────────────────
 # Public site: /ks, /ks/book, /ks/login, /ks/coach. Parents and coaches
 # authenticate against the KS database (/var/lib/ks-bot/bookings.db) with
@@ -2705,6 +2840,77 @@ def h_ks_sms_inbound(req: Request):
     return ks.sms_inbound(req.body, req.form())
 
 
+# ── KS attendance, progress and subscriptions ────────────────────────
+# Coaches write, parents read. Every read is scoped by the caller's own
+# identity inside the module, so a parent can never name another family's
+# child and read their record back.
+
+def h_ks_attendance_mark(req: Request):
+    return ks_attendance.mark(_ks_coach(req), req.body)
+
+
+def h_ks_attendance_history(req: Request):
+    coach = ks.session_subject(req.token, "coach")
+    parent = None if coach else _ks_parent(req)
+    return ks_attendance.history(req.query.get("child") or "", parent=parent, coach=coach)
+
+
+def h_ks_attendance_summary(req: Request):
+    coach = ks.session_subject(req.token, "coach")
+    parent = None if coach else _ks_parent(req)
+    return ks_attendance.summary(parent=parent, coach=coach)
+
+
+def h_ks_attendance_unmarked(req: Request):
+    return ks_attendance.unmarked(_ks_coach(req))
+
+
+def h_ks_progress_save(req: Request):
+    return ks_progress.save(_ks_coach(req), req.body)
+
+
+def h_ks_progress_skills(req: Request):
+    return ks_progress.skills_catalogue()
+
+
+def h_ks_progress_children(req: Request):
+    return 200, {"children": ks_progress.children_for_parent(_ks_parent(req))}
+
+
+def h_ks_progress_history(req: Request, child: str):
+    coach = ks.session_subject(req.token, "coach")
+    parent = None if coach else _ks_parent(req)
+    return ks_progress.history(unquote(str(child)), parent=parent, coach=coach)
+
+
+def h_ks_subscription_create(req: Request):
+    return ks_billing.create(_ks_parent(req), req.body)
+
+
+def h_ks_subscription_cancel(req: Request):
+    return ks_billing.cancel(_ks_parent(req), req.body)
+
+
+def h_ks_subscription_status(req: Request):
+    return ks_billing.status(_ks_parent(req))
+
+
+def h_ks_subscription_plans(req: Request):
+    return 200, {"plans": ks_billing.plans()}
+
+
+def h_ks_subscription_bill(req: Request):
+    # The billing sweep moves money and texts parents, so it is an operator
+    # action: an HQ token or the cron runner, never a parent session.
+    _require(req)
+    return 200, ks_billing.run_billing(req.body.get("date") or None)
+
+
+def h_ks_subscription_reconcile(req: Request):
+    _require(req)
+    return 200, ks_billing.reconcile()
+
+
 # ── Max Gleam auto-invoicing + tax reporting ─────────────────────────
 # Scoped like the sign-off routes: a partner token limits every result to
 # that company's own properties; an HQ operator sees the whole book.
@@ -2744,6 +2950,87 @@ def h_mg_tax_csv(req: Request):
     return maxgleam_invoicing.tax_csv(
         req.query.get("from") or "", req.query.get("to") or "",
         company_id=_mg_scope(req))
+
+
+# ── Max Gleam accounting exports (QuickBooks / Xero) ─────────────────
+# Scoped exactly like the invoice list: a partner token exports only that
+# company's book, an HQ operator exports everything.
+
+def h_mg_export_invoices_csv(req: Request):
+    return maxgleam_accounting.invoices_csv(
+        req.query.get("from") or "", req.query.get("to") or "",
+        company_id=_mg_scope(req),
+        iso_dates=(req.query.get("dates") or "").lower() == "iso")
+
+
+def h_mg_export_payments_csv(req: Request):
+    return maxgleam_accounting.payments_csv(
+        req.query.get("from") or "", req.query.get("to") or "",
+        company_id=_mg_scope(req),
+        iso_dates=(req.query.get("dates") or "").lower() == "iso")
+
+
+def h_mg_export_tax_summary(req: Request):
+    return maxgleam_accounting.tax_summary(
+        req.query.get("from") or "", req.query.get("to") or "",
+        company_id=_mg_scope(req))
+
+
+# ── Max Gleam staff commissions ──────────────────────────────────────
+
+def h_mg_commissions(req: Request):
+    company_id = _mg_scope(req)
+    crew = req.query.get("crew_id") or req.query.get("crew")
+    try:
+        crew_id = int(crew) if crew else None
+    except ValueError:
+        return 400, {"error": "crew_id must be a number"}
+    return maxgleam_commissions.list_commissions(
+        company_id=company_id, crew_id=crew_id,
+        status=req.query.get("status") or "",
+        frm=req.query.get("from") or "", to=req.query.get("to") or "")
+
+
+def h_mg_commissions_summary(req: Request):
+    return maxgleam_commissions.summary(company_id=_mg_scope(req))
+
+
+def h_mg_commission_pay(req: Request, commission_id: int):
+    company_id = _mg_scope(req)
+    return maxgleam_commissions.mark_paid(
+        int(commission_id), req.body or {}, company_id=company_id)
+
+
+def h_mg_commissions_accrue(req: Request):
+    """Force the accrual sweep. Reads already accrue, so this is for cron."""
+    _mg_scope(req)
+    result = maxgleam_commissions.accrue()
+    log.info("maxgleam: commission accrual created=%s skipped=%s",
+             result["created_count"], result["skipped_count"])
+    return 200, result
+
+
+# ── Max Gleam late payment chasing ───────────────────────────────────
+
+def h_mg_invoices_overdue(req: Request):
+    return maxgleam_invoicing.overdue_invoices(company_id=_mg_scope(req))
+
+
+def h_mg_invoices_send_reminders(req: Request):
+    company_id = _mg_scope(req)
+    body = req.body or {}
+    invoice_id = body.get("invoice_id")
+    result = maxgleam_invoicing.send_reminders(
+        company_id=company_id,
+        invoice_id=int(invoice_id) if invoice_id else None)
+    log.info("maxgleam: payment reminders processed=%s by_status=%s dry_run=%s",
+             result[1]["processed"], result[1]["by_status"], result[1]["dry_run"])
+    return result
+
+
+def h_mg_reminder_history(req: Request):
+    _mg_scope(req)
+    return 200, {"reminders": maxgleam_invoicing.reminder_history()}
 
 
 # ── Max Gleam digital sign-off + customer portal ─────────────────────
@@ -2844,6 +3131,56 @@ def h_mg_crew_complete(req: Request):
 
 def h_mg_crew_issue(req: Request):
     return maxgleam_crew.report_issue(_mg_crew(req), req.body)
+
+
+# ── Max Gleam self-serve booking ─────────────────────────────────────
+# The first two are public: they are the /book page, opened by a customer
+# who has no account and no token. Everything after needs the office.
+
+def h_mg_book_slots(req: Request):
+    return maxgleam_booking.available_slots(req.query.get("postcode") or "")
+
+
+def h_mg_book_create(req: Request):
+    return maxgleam_booking.create_booking(req.body, ip=req.ip)
+
+
+def h_mg_book_requests(req: Request):
+    _company_id, tenant_id = _maxgleam_scope(req)
+    return maxgleam_booking.pending_bookings(tenant_id)
+
+
+def h_mg_book_confirm(req: Request):
+    _company_id, tenant_id = _maxgleam_scope(req)
+    return maxgleam_booking.confirm_booking(req.body, tenant_id)
+
+
+def h_mg_book_decline(req: Request):
+    _company_id, tenant_id = _maxgleam_scope(req)
+    return maxgleam_booking.decline_booking(req.body, tenant_id)
+
+
+# ── Max Gleam GPS crew tracking ──────────────────────────────────────
+# Writes carry a crew token and are checked against that crew's own round;
+# reads are the office map and take an HQ or partner token.
+
+def h_mg_gps_update(req: Request):
+    return maxgleam_gps.update(_mg_crew(req), req.body)
+
+
+def h_mg_gps_crew(req: Request, crew_id: int):
+    _company_id, tenant_id = _maxgleam_scope(req)
+    return maxgleam_gps.crew_position(crew_id, tenant_id)
+
+
+def h_mg_gps_history(req: Request, crew_id: int):
+    _company_id, tenant_id = _maxgleam_scope(req)
+    return maxgleam_gps.crew_history(crew_id, req.query.get("date"), tenant_id)
+
+
+def h_mg_gps_active(req: Request):
+    _company_id, tenant_id = _maxgleam_scope(req)
+    return maxgleam_gps.active_crews(tenant_id)
 
 
 # ── Max Gleam stock + comms log (HQ or partner token) ────────────────
@@ -3007,6 +3344,22 @@ ROUTES = [
     ("GET",  re.compile(r"^/api/ks/coach/availability$"), h_ks_coach_availability),
     ("POST", re.compile(r"^/api/ks/coach/availability$"), h_ks_coach_availability),
     ("POST", re.compile(r"^/api/ks/sms-inbound$"), h_ks_sms_inbound),
+    ("POST", re.compile(r"^/api/ks/attendance/mark$"), h_ks_attendance_mark),
+    ("GET",  re.compile(r"^/api/ks/attendance/history$"), h_ks_attendance_history),
+    ("GET",  re.compile(r"^/api/ks/attendance/summary$"), h_ks_attendance_summary),
+    ("GET",  re.compile(r"^/api/ks/attendance/unmarked$"), h_ks_attendance_unmarked),
+    ("POST", re.compile(r"^/api/ks/progress/save$"), h_ks_progress_save),
+    ("GET",  re.compile(r"^/api/ks/progress/skills$"), h_ks_progress_skills),
+    ("GET",  re.compile(r"^/api/ks/progress/children$"), h_ks_progress_children),
+    # Keep this last of the /progress/ routes: its capture would otherwise
+    # swallow /progress/save and /progress/skills.
+    ("GET",  re.compile(r"^/api/ks/progress/([^/]+)$"), h_ks_progress_history),
+    ("POST", re.compile(r"^/api/ks/subscriptions/create$"), h_ks_subscription_create),
+    ("POST", re.compile(r"^/api/ks/subscriptions/cancel$"), h_ks_subscription_cancel),
+    ("GET",  re.compile(r"^/api/ks/subscriptions/status$"), h_ks_subscription_status),
+    ("GET",  re.compile(r"^/api/ks/subscriptions/plans$"), h_ks_subscription_plans),
+    ("POST", re.compile(r"^/api/ks/subscriptions/bill$"), h_ks_subscription_bill),
+    ("POST", re.compile(r"^/api/ks/subscriptions/reconcile$"), h_ks_subscription_reconcile),
 
     # ── Max Gleam sign-off + customer portal (public, capability tokens) ─
     ("GET",  re.compile(r"^/api/maxgleam/invoices$"), h_mg_invoices),
@@ -3014,6 +3367,31 @@ ROUTES = [
     ("POST", re.compile(r"^/api/maxgleam/invoices/(\d+)/send$"), h_mg_invoice_send),
     ("GET",  re.compile(r"^/api/maxgleam/reports/tax$"), h_mg_tax_report),
     ("GET",  re.compile(r"^/api/maxgleam/reports/tax.csv$"), h_mg_tax_csv),
+
+    # ── Max Gleam accounting exports + commissions + payment chasing ────
+    ("GET",  re.compile(r"^/api/maxgleam/exports/invoices-csv$"), h_mg_export_invoices_csv),
+    ("GET",  re.compile(r"^/api/maxgleam/exports/payments-csv$"), h_mg_export_payments_csv),
+    ("GET",  re.compile(r"^/api/maxgleam/exports/tax-summary$"), h_mg_export_tax_summary),
+    ("GET",  re.compile(r"^/api/maxgleam/commissions$"), h_mg_commissions),
+    ("GET",  re.compile(r"^/api/maxgleam/commissions/summary$"), h_mg_commissions_summary),
+    ("POST", re.compile(r"^/api/maxgleam/commissions/accrue$"), h_mg_commissions_accrue),
+    ("POST", re.compile(r"^/api/maxgleam/commissions/(\d+)/pay$"), h_mg_commission_pay),
+    ("GET",  re.compile(r"^/api/maxgleam/email/campaigns$"), h_mg_campaigns),
+    ("POST", re.compile(r"^/api/maxgleam/email/campaigns$"), h_mg_campaigns),
+    ("GET",  re.compile(r"^/api/maxgleam/email/campaigns/(\d+)$"), h_mg_campaign),
+    ("GET",  re.compile(r"^/api/maxgleam/email/campaigns/(\d+)/preview$"), h_mg_campaign_preview),
+    ("POST", re.compile(r"^/api/maxgleam/email/campaigns/(\d+)/send$"), h_mg_campaign_send),
+    ("GET",  re.compile(r"^/api/maxgleam/email/audience$"), h_mg_email_audience),
+    ("POST", re.compile(r"^/api/maxgleam/email/newsletter$"), h_mg_newsletter),
+    ("GET",  re.compile(r"^/api/maxgleam/email/open$"), h_mg_email_open),
+    ("GET",  re.compile(r"^/api/maxgleam/email/click$"), h_mg_email_click),
+    ("GET",  re.compile(r"^/api/maxgleam/reviews$"), h_mg_reviews),
+    ("GET",  re.compile(r"^/api/maxgleam/reviews/average$"), h_mg_reviews_average),
+    ("POST", re.compile(r"^/api/maxgleam/invoices/auto-send$"), h_mg_invoices_auto_send),
+    ("GET",  re.compile(r"^/api/maxgleam/invoices/recurring-status$"), h_mg_invoices_recurring_status),
+    ("GET",  re.compile(r"^/api/maxgleam/invoices/overdue$"), h_mg_invoices_overdue),
+    ("POST", re.compile(r"^/api/maxgleam/invoices/send-reminders$"), h_mg_invoices_send_reminders),
+    ("GET",  re.compile(r"^/api/maxgleam/invoices/reminder-history$"), h_mg_reminder_history),
     ("GET",  re.compile(r"^/api/maxgleam/signoff-status$"), h_mg_signoff_status),
     ("GET",  re.compile(r"^/api/maxgleam/signoff/(\d+)$"), h_mg_signoff),
     ("POST", re.compile(r"^/api/maxgleam/signoff/(\d+)$"), h_mg_signoff),
@@ -3031,6 +3409,19 @@ ROUTES = [
     ("POST", re.compile(r"^/api/maxgleam/crew/start-job$"), h_mg_crew_start),
     ("POST", re.compile(r"^/api/maxgleam/crew/complete-job$"), h_mg_crew_complete),
     ("POST", re.compile(r"^/api/maxgleam/crew/report-issue$"), h_mg_crew_issue),
+
+    # Self-serve booking — the first two are public (the /book page).
+    ("GET",  re.compile(r"^/api/maxgleam/book/available-slots$"), h_mg_book_slots),
+    ("GET",  re.compile(r"^/api/maxgleam/book/requests$"), h_mg_book_requests),
+    ("POST", re.compile(r"^/api/maxgleam/book/confirm$"), h_mg_book_confirm),
+    ("POST", re.compile(r"^/api/maxgleam/book/decline$"), h_mg_book_decline),
+    ("POST", re.compile(r"^/api/maxgleam/book$"), h_mg_book_create),
+
+    # GPS crew tracking
+    ("POST", re.compile(r"^/api/maxgleam/gps/update$"), h_mg_gps_update),
+    ("GET",  re.compile(r"^/api/maxgleam/gps/active$"), h_mg_gps_active),
+    ("GET",  re.compile(r"^/api/maxgleam/gps/crew/(\d+)$"), h_mg_gps_crew),
+    ("GET",  re.compile(r"^/api/maxgleam/gps/history/(\d+)$"), h_mg_gps_history),
 
     # ── Max Gleam stock control + communications log ────────────────────
     ("GET",  re.compile(r"^/api/maxgleam/inventory$"), h_mg_inventory),

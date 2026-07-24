@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import sqlite3
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -103,7 +104,9 @@ def _next_number(tenant_id: int, year: int | None = None) -> str:
     that already exists.
     """
     year = year or dt.date.today().year
-    prefix = f"INV-{year}-"
+    # NUMBER_PREFIX defaults to INV, continuing the live series. Setting
+    # MAXGLEAM_INVOICE_PREFIX=MG mints MG-<year>-<seq> from that point on.
+    prefix = f"{globals().get('NUMBER_PREFIX', 'INV')}-{year}-"
     rows = _rows("SELECT number FROM invoices WHERE tenant_id = ? AND number LIKE ?",
                  (tenant_id, prefix + "%"))
     highest = 0
@@ -573,3 +576,441 @@ def tax_csv(frm: str = "", to: str = "", tenant_id: int = DEFAULT_TENANT_ID,
             dt.datetime.fromtimestamp(i["paid_at"]).strftime("%Y-%m-%d") if i["paid_at"] else "",
         ])
     return 200, buf.getvalue(), "text/csv"
+
+
+# ------------------------------------------------------- late payment chasing --
+# Two nudges, at 30 and 60 days. Both by SMS, because an unpaid invoice has
+# already had the email that raised it and been ignored.
+#
+# Three guards sit in front of every send, mirroring maxgleam_notify:
+#   1. MAXGLEAM_REMINDER_DRY_RUN (default "1") — log, don't send. Deploying
+#      this therefore texts nobody until someone decides otherwise.
+#   2. invoice_reminders has a UNIQUE (invoice_id, stage) index, so a cron
+#      re-run can never chase the same person twice for the same stage.
+#   3. Customers tagged sms_opt_out / no_sms are skipped and recorded.
+
+REMINDER_DRY_RUN = os.environ.get("MAXGLEAM_REMINDER_DRY_RUN", "1") != "0"
+
+# Days overdue at which each nudge is due, gentlest first.
+REMINDER_STAGES = (30, 60)
+
+REMINDER_TEMPLATE = ("Hi {name}, invoice #{number} for {amount} is now overdue. "
+                     "Pay here: {link}")
+
+_reminder_local = threading.local()
+
+
+def _reminder_conn() -> sqlite3.Connection:
+    conn = _conn()
+    if not getattr(_reminder_local, "ready", False):
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS invoice_reminders (
+              id         INTEGER PRIMARY KEY AUTOINCREMENT,
+              tenant_id  INTEGER NOT NULL,
+              invoice_id INTEGER NOT NULL REFERENCES invoices(id),
+              customer_id INTEGER REFERENCES customers(id),
+              stage      INTEGER NOT NULL,      -- days overdue: 30 | 60
+              channel    TEXT NOT NULL DEFAULT 'sms',
+              to_addr    TEXT,
+              body       TEXT,
+              status     TEXT NOT NULL,         -- sent|dry_run|failed|skipped_opt_out|no_contact
+              error      TEXT,
+              sent_at    INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+            )""")
+        # The guarantee that a re-run cannot chase the same stage twice.
+        conn.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_invoice_reminder_once
+                        ON invoice_reminders(invoice_id, stage)""")
+        conn.commit()
+        _reminder_local.ready = True
+    return conn
+
+
+def _days_overdue(invoice: dict, now: int) -> int:
+    if not invoice.get("issued_at"):
+        return 0
+    return max(0, int((now - invoice["issued_at"]) / 86400))
+
+
+def _stage_due(days: int) -> int | None:
+    """The highest reminder stage this invoice has reached, or None.
+
+    Highest rather than lowest so an invoice that is already 65 days old when
+    the feature is switched on gets the 60-day message, not a 30-day one that
+    understates how late it is. The 30-day stage is then recorded as skipped
+    so it never fires afterwards.
+    """
+    reached = [s for s in REMINDER_STAGES if days >= s]
+    return max(reached) if reached else None
+
+
+def _sent_stages(invoice_id: int) -> set[int]:
+    return {r["stage"] for r in
+            [dict(x) for x in _reminder_conn().execute(
+                "SELECT stage FROM invoice_reminders WHERE invoice_id = ?",
+                (invoice_id,)).fetchall()]}
+
+
+_OVERDUE_SELECT = _INVOICE_SELECT + """
+   WHERE i.tenant_id = ? AND i.status = 'unpaid'
+     AND i.issued_at IS NOT NULL AND i.issued_at < ?
+"""
+
+
+def overdue_invoices(tenant_id: int = DEFAULT_TENANT_ID,
+                     company_id: int | None = None) -> tuple[int, dict]:
+    """Unpaid invoices past the overdue threshold, with chase history."""
+    _reminder_conn()          # create the log table up front, not per-row
+    now = int(time.time())
+    cutoff = now - REMINDER_STAGES[0] * 86400
+
+    sql = _OVERDUE_SELECT
+    args: list = [tenant_id, cutoff]
+    if company_id is not None:
+        sql += " AND p.partner_company_id = ?"
+        args.append(company_id)
+    sql += " ORDER BY i.issued_at ASC"
+
+    rows = []
+    for r in _rows(sql, tuple(args)):
+        dto = _invoice_dto(r, now)
+        days = _days_overdue(r, now)
+        sent = _sent_stages(r["id"])
+        stage = _stage_due(days)
+        phone = _customer_phone(r["customer_id"])
+        rows.append({
+            **dto,
+            "days_overdue": days,
+            "reminders_sent": sorted(sent),
+            "stage_due": stage,
+            # What a sweep would do with this invoice right now.
+            "reminder_due": bool(stage and stage not in sent),
+            "customer_phone": phone,
+            "can_text": bool(phone),
+        })
+
+    due = [r for r in rows if r["reminder_due"]]
+    return 200, {
+        "invoices": rows,
+        "summary": {
+            "count": len(rows),
+            "total_pence": sum(r["amount_pence"] for r in rows),
+            "due_now": len(due),
+            "due_now_pence": sum(r["amount_pence"] for r in due),
+            "at_30": sum(1 for r in rows if r["stage_due"] == 30),
+            "at_60": sum(1 for r in rows if r["stage_due"] == 60),
+            "no_phone": sum(1 for r in rows if not r["can_text"]),
+        },
+        "stages": list(REMINDER_STAGES),
+        "overdue_days": OVERDUE_DAYS,
+        "dry_run": REMINDER_DRY_RUN,
+        "dry_run_note": ("Reminders are logged, not sent. Set "
+                         "MAXGLEAM_REMINDER_DRY_RUN=0 in /etc/agent-os.env and "
+                         "restart agent-os to text customers for real."
+                         if REMINDER_DRY_RUN else "Live — reminders are texted to customers."),
+        "checked_at": now,
+    }
+
+
+def _opted_out(tags_json: str | None) -> bool:
+    """Reuses maxgleam_notify's opt-out tag list so a customer who has said
+    "no texts" is honoured here too. Imported lazily to keep the two modules
+    independent at import time."""
+    from server.maxgleam_notify import _opted_out as notify_opted_out
+    return notify_opted_out(tags_json)
+
+
+def _customer_phone(customer_id: int | None) -> str:
+    if not customer_id:
+        return ""
+    row = _one("SELECT phone FROM customers WHERE id = ?", (customer_id,))
+    return ((row or {}).get("phone") or "").strip()
+
+
+def _customer_tags(customer_id: int | None) -> str:
+    if not customer_id:
+        return "[]"
+    row = _one("SELECT tags FROM customers WHERE id = ?", (customer_id,))
+    return (row or {}).get("tags") or "[]"
+
+
+def _pay_link(invoice: dict) -> str:
+    """Best available way for the customer to settle: their SumUp checkout,
+    else the portal. A reminder with no link is a reminder that gets ignored."""
+    url = (invoice.get("sumup_checkout_url") or "").strip()
+    if url:
+        return url
+    tenant = _tenant(invoice.get("tenant_id") or DEFAULT_TENANT_ID)
+    if tenant:
+        url = ensure_checkout(tenant, dict(invoice))
+        if url:
+            return url
+    return f"{PUBLIC_BASE}/customer/login" if PUBLIC_BASE else ""
+
+
+def _reminder_body(invoice: dict, link: str) -> str:
+    name = (invoice.get("customer_name") or "there").split(" ")[0] or "there"
+    return REMINDER_TEMPLATE.format(
+        name=name, number=invoice.get("number") or "",
+        amount=f"£{(invoice.get('amount_pence') or 0) / 100:.2f}", link=link)
+
+
+def _send_reminder_sms(to_number: str, body: str) -> tuple[str, str | None]:
+    if not to_number:
+        return "no_contact", "no phone number"
+    if REMINDER_DRY_RUN:
+        log.info("maxgleam-reminder DRY-RUN sms to=%s body=%r", to_number, body[:140])
+        return "dry_run", None
+    from server import ks
+    return ks._send_sms(to_number, body)
+
+
+def _log_reminder(invoice: dict, stage: int, to_addr: str, body: str,
+                  status: str, error: str | None) -> bool:
+    """Record one reminder. False means another sweep beat us to it."""
+    conn = _reminder_conn()
+    try:
+        conn.execute(
+            "INSERT INTO invoice_reminders (tenant_id, invoice_id, customer_id, stage, "
+            " channel, to_addr, body, status, error) VALUES (?,?,?,?, 'sms', ?,?,?,?)",
+            (invoice.get("tenant_id") or DEFAULT_TENANT_ID, invoice["id"],
+             invoice.get("customer_id"), stage, to_addr, body, status, error))
+    except sqlite3.IntegrityError:
+        return False
+    if status in ("sent", "dry_run"):
+        conn.execute(
+            "INSERT INTO comms_log (tenant_id, customer_id, kind, content) VALUES (?,?,?,?)",
+            (invoice.get("tenant_id") or DEFAULT_TENANT_ID, invoice.get("customer_id"),
+             "payment_reminder",
+             f"{stage}-day reminder for {invoice.get('number')} {status} to {to_addr}"))
+    conn.commit()
+    return True
+
+
+def send_reminders(tenant_id: int = DEFAULT_TENANT_ID, company_id: int | None = None,
+                   invoice_id: int | None = None, limit: int = 100) -> tuple[int, dict]:
+    """Text everyone whose invoice has hit a reminder stage. Cron-safe.
+
+    Skipped stages are still written to invoice_reminders — an invoice that
+    was already 65 days old when this first ran has its 30-day stage recorded
+    as superseded, so it can never fire a stale message later.
+    """
+    _code, overdue = overdue_invoices(tenant_id, company_id)
+    candidates = [i for i in overdue["invoices"] if i["reminder_due"]]
+    if invoice_id is not None:
+        candidates = [i for i in candidates if i["id"] == invoice_id]
+    candidates = candidates[:limit]
+
+    results = []
+    for inv_row in candidates:
+        stage = inv_row["stage_due"]
+
+        # Record any earlier stage this invoice sailed past, so it is closed
+        # off rather than left waiting to fire.
+        for earlier in REMINDER_STAGES:
+            if earlier < stage and earlier not in inv_row["reminders_sent"]:
+                _log_reminder(inv_row, earlier, "", "", "superseded",
+                              f"invoice was already {inv_row['days_overdue']} days overdue")
+
+        if _opted_out(_customer_tags(inv_row["customer_id"])):
+            _log_reminder(inv_row, stage, inv_row["customer_phone"], "",
+                          "skipped_opt_out", None)
+            results.append({"invoice_id": inv_row["id"], "number": inv_row["number"],
+                            "stage": stage, "status": "skipped_opt_out"})
+            continue
+
+        link = _pay_link(inv_row)
+        body = _reminder_body(inv_row, link)
+        to = inv_row["customer_phone"]
+        status, error = _send_reminder_sms(to, body)
+
+        if not _log_reminder(inv_row, stage, to, body, status, error):
+            results.append({"invoice_id": inv_row["id"], "number": inv_row["number"],
+                            "stage": stage, "status": "duplicate"})
+            continue
+
+        results.append({"invoice_id": inv_row["id"], "number": inv_row["number"],
+                        "customer_name": inv_row.get("customer_name"),
+                        "stage": stage, "status": status, "to": to,
+                        "body": body, "error": error})
+
+    counts: dict[str, int] = {}
+    for r in results:
+        counts[r["status"]] = counts.get(r["status"], 0) + 1
+
+    return 200, {
+        "processed": len(results),
+        "by_status": counts,
+        "sent": counts.get("sent", 0) + counts.get("dry_run", 0),
+        "failed": counts.get("failed", 0),
+        "results": results,
+        "candidates": len(candidates),
+        "dry_run": REMINDER_DRY_RUN,
+        "ran_at": int(time.time()),
+    }
+
+
+def reminder_history(tenant_id: int = DEFAULT_TENANT_ID, limit: int = 100) -> list[dict]:
+    return [dict(r) for r in _reminder_conn().execute(
+        "SELECT r.*, i.number, c.name AS customer_name "
+        "  FROM invoice_reminders r "
+        "  LEFT JOIN invoices i ON i.id = r.invoice_id "
+        "  LEFT JOIN customers c ON c.id = r.customer_id "
+        " WHERE r.tenant_id = ? ORDER BY r.sent_at DESC LIMIT ?",
+        (tenant_id, limit)).fetchall()]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Recurring auto-send
+#
+# auto_generate() above invoices every completed-but-uninvoiced job. The
+# recurring path adds two things on top:
+#
+#   * sign-off gating — an invoice raised before the customer has signed off
+#     is a chargeback waiting to happen, so the recurring sweep only bills
+#     jobs the customer (or the auto-approve timer) has accepted;
+#   * a run log, so "when did this last fire and what did it do" is answerable
+#     without reading the invoice table and inferring.
+# ─────────────────────────────────────────────────────────────────────────
+
+SIGNED_OFF = ("signed", "auto-approved")
+
+# Invoice numbering. The live series is INV-<year>-<seq> and continues
+# maxgleam's own numbering; set MAXGLEAM_INVOICE_PREFIX=MG to mint MG-<year>-<seq>
+# instead. Changing it forks the series, so it is deliberately opt-in.
+NUMBER_PREFIX = os.environ.get("MAXGLEAM_INVOICE_PREFIX", "INV").strip() or "INV"
+
+
+def _ensure_autosend_schema(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS invoice_autosend_runs (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          tenant_id     INTEGER NOT NULL,
+          created_count INTEGER NOT NULL DEFAULT 0,
+          emailed_count INTEGER NOT NULL DEFAULT 0,
+          skipped_count INTEGER NOT NULL DEFAULT 0,
+          candidates    INTEGER NOT NULL DEFAULT 0,
+          dry_run       INTEGER NOT NULL DEFAULT 0,
+          detail_json   TEXT NOT NULL DEFAULT '{}',
+          ran_at        INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+        )""")
+    conn.execute("""CREATE INDEX IF NOT EXISTS idx_autosend_runs_tenant
+                    ON invoice_autosend_runs(tenant_id, ran_at)""")
+    conn.commit()
+
+
+def signed_off_uninvoiced(tenant_id: int = DEFAULT_TENANT_ID,
+                          company_id: int | None = None) -> list[dict]:
+    """Completed AND signed-off jobs that have no invoice yet."""
+    placeholders = ",".join("?" for _ in SIGNED_OFF)
+    sql = _JOB_FOR_INVOICE + (
+        " WHERE j.status = 'done' AND j.tenant_id = ?"
+        f"   AND j.signoff_status IN ({placeholders})"
+        "   AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.job_id = j.id)")
+    args: list = [tenant_id, *SIGNED_OFF]
+    if company_id is not None:
+        sql += " AND (j.partner_company_id = ? OR p.partner_company_id = ?)"
+        args += [company_id, company_id]
+    sql += " ORDER BY j.completed_at ASC, j.id ASC"
+    return _rows(sql, tuple(args))
+
+
+def auto_send(tenant_id: int = DEFAULT_TENANT_ID, company_id: int | None = None,
+              *, dry_run: bool | None = None, limit: int = 200,
+              require_signoff: bool = True) -> tuple[int, dict]:
+    """Raise and email invoices for completed, signed-off jobs.
+
+    Idempotent by construction: a job with an invoice against it is no longer
+    a candidate, so re-running bills nobody twice.
+    """
+    conn = _conn()
+    _ensure_autosend_schema(conn)
+    if dry_run is None:
+        dry_run = DRY_RUN
+
+    jobs = (signed_off_uninvoiced(tenant_id, company_id) if require_signoff
+            else uninvoiced_jobs(tenant_id, company_id))[:limit]
+
+    created, skipped = [], []
+    emailed = 0
+    for job in jobs:
+        if dry_run:
+            skipped.append({"job_id": job["id"], "address": job["address"],
+                            "amount_pence": _invoice_amount(job),
+                            "customer_email": job.get("customer_email"),
+                            "reason": "dry_run"})
+            continue
+        invoice, outcome = invoice_job(job["id"], tenant_id, send=True)
+        if outcome == "created" and invoice:
+            sent_ok = bool(job.get("customer_email"))
+            emailed += 1 if sent_ok else 0
+            created.append({"invoice_id": invoice["id"], "number": invoice["number"],
+                            "job_id": job["id"], "amount_pence": invoice["amount_pence"],
+                            "address": job["address"],
+                            "customer_email": job.get("customer_email"),
+                            "emailed": sent_ok})
+        else:
+            skipped.append({"job_id": job["id"], "address": job["address"],
+                            "reason": outcome})
+
+    result = {"created": created, "skipped": skipped,
+              "created_count": len(created), "emailed_count": emailed,
+              "skipped_count": len(skipped), "candidates": len(jobs),
+              "require_signoff": require_signoff, "dry_run": dry_run,
+              "ran_at": int(time.time())}
+
+    conn.execute(
+        """INSERT INTO invoice_autosend_runs
+             (tenant_id, created_count, emailed_count, skipped_count, candidates,
+              dry_run, detail_json, ran_at)
+           VALUES (?,?,?,?,?,?,?,?)""",
+        (tenant_id, len(created), emailed, len(skipped), len(jobs),
+         1 if dry_run else 0,
+         json.dumps({"created": created[:50], "skipped": skipped[:50]}),
+         result["ran_at"]))
+    conn.commit()
+    return 200, result
+
+
+def recurring_status(tenant_id: int = DEFAULT_TENANT_ID,
+                     company_id: int | None = None) -> tuple[int, dict]:
+    """Last auto-send run, plus what is queued for the next one."""
+    conn = _conn()
+    _ensure_autosend_schema(conn)
+
+    last = _one("""SELECT id, created_count, emailed_count, skipped_count,
+                          candidates, dry_run, ran_at
+                     FROM invoice_autosend_runs
+                    WHERE tenant_id = ? ORDER BY ran_at DESC, id DESC LIMIT 1""",
+                (tenant_id,))
+    if last:
+        last["dry_run"] = bool(last["dry_run"])
+
+    pending = signed_off_uninvoiced(tenant_id, company_id)
+    # Uninvoiced minus billable = still waiting on the customer's sign-off.
+    # Derived by difference rather than reading signoff_status, because the
+    # shared _JOB_FOR_INVOICE projection does not carry that column.
+    billable = {j["id"] for j in pending}
+    awaiting = [j for j in uninvoiced_jobs(tenant_id, company_id)
+                if j["id"] not in billable]
+
+    recent = _rows("""SELECT id, number, amount_pence, status, issued_at, job_id
+                        FROM invoices WHERE tenant_id = ?
+                    ORDER BY issued_at DESC, id DESC LIMIT 10""", (tenant_id,))
+
+    return 200, {
+        "last_run": last,
+        "last_run_at": last["ran_at"] if last else None,
+        "pending_count": len(pending),
+        "pending_pence": sum(_invoice_amount(j) for j in pending),
+        "pending": [{"job_id": j["id"], "address": j["address"],
+                     "amount_pence": _invoice_amount(j),
+                     "customer_email": j.get("customer_email"),
+                     "completed_at": j.get("completed_at")}
+                    for j in pending[:50]],
+        "awaiting_signoff_count": len(awaiting),
+        "recent_invoices": recent,
+        "number_prefix": NUMBER_PREFIX,
+        "next_number": _next_number(tenant_id),
+        "dry_run": DRY_RUN,
+        "mail_configured": bool(_read_secret(RESEND_KEY_PATH)),
+    }

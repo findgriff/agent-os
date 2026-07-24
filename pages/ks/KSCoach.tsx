@@ -1,24 +1,566 @@
 // KS Sports Coaching — coach dashboard.
-// Weekly schedule, today's parent contact details, mark sessions complete,
-// and block out dates so the booking form stops offering them.
-import { useCallback, useEffect, useState } from 'react';
+// Full back-office for Saul & Kellie: sidebar navigation, a Teams-style week
+// calendar, student profiles, a lead tracker and a finance overview.
+//
+// Live vs sample data: the calendar, register and availability run on the real
+// KS API (attendance marks send REAL texts to parents). Students, Leads and
+// Finance are seeded with sample data — badged "Sample data" in the UI — so
+// the coaches can see the finished shape before the real records build up.
+// Demo calendar sessions carry `demo: true` and expose no actions, so a
+// mis-click can never charge or text a real parent.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  KSShell, KSButton, KSCard, KSInput, KSLabel, KSAlert, KSPill, Spinner, STATUS_PILL, KSMark,
+  KSShell, KSButton, KSCard, KSInput, KSLabel, KSAlert, KSPill, KSSelect, KSTextarea, Spinner,
+  STATUS_PILL, KSMark,
 } from './KSKit';
+import { Icon } from '../../components/ui';
 import {
-  ksApi, getCoachToken, setCoachToken, clearCoachToken, dayName, shortDay, isoDate,
-  type KsBlock, type KsBooking, type KsSchedule,
+  ksApi, getCoachToken, setCoachToken, clearCoachToken, dayName, shortDay, isoDate, money,
+  type KsAttendanceStatus, type KsBlock, type KsBooking, type KsChildAttendance,
+  type KsSchedule, type KsSkill,
 } from '../../lib/ksApi';
 
-function SessionRow({ b, onToggle, showContact }:
-  { b: KsBooking; onToggle: (b: KsBooking) => void; showContact?: boolean }) {
+const ORANGE = '#FF6B00';
+
+// ── Navigation ──────────────────────────────────────────────────────────
+type CoachTab = 'dashboard' | 'calendar' | 'route' | 'students' | 'leads' | 'finance' | 'settings';
+
+const NAV: { id: CoachTab; label: string; icon: string }[] = [
+  { id: 'dashboard', label: 'Dashboard', icon: 'space_dashboard' },
+  { id: 'calendar', label: 'Calendar', icon: 'calendar_month' },
+  { id: 'route', label: 'Route', icon: 'route' },
+  { id: 'students', label: 'Students', icon: 'groups' },
+  { id: 'leads', label: 'Leads', icon: 'person_add' },
+  { id: 'finance', label: 'Finance', icon: 'payments' },
+  { id: 'settings', label: 'Settings', icon: 'settings' },
+];
+
+// ── Session-type colour coding (calendar + legend) ──────────────────────
+type SessionType = 'oneone' | 'group' | 'camp' | 'block';
+
+const TYPE_STYLE: Record<SessionType, {
+  chip: string; border: string; text: string; label: string; dot: string;
+}> = {
+  oneone: { chip: 'bg-orange-100', border: 'border-[#FF6B00]', text: 'text-orange-950', label: '1-to-1', dot: '#FF6B00' },
+  group: { chip: 'bg-blue-100', border: 'border-blue-600', text: 'text-blue-950', label: 'Group', dot: '#2563EB' },
+  camp: { chip: 'bg-green-100', border: 'border-green-600', text: 'text-green-950', label: 'Camp / club', dot: '#16A34A' },
+  block: { chip: 'bg-slate-100', border: 'border-slate-400', text: 'text-slate-500', label: 'Blocked', dot: '#94A3B8' },
+};
+
+const typeOfService = (key: string, name: string): SessionType => {
+  const s = `${key} ${name}`.toLowerCase();
+  if (s.includes('camp') || s.includes('holiday') || s.includes('club')) return 'camp';
+  if (s.includes('group') || s.includes('team')) return 'group';
+  return 'oneone';
+};
+
+// ── Sample data ─────────────────────────────────────────────────────────
+// Hardcoded so the Students / Leads / Finance tabs demonstrate the finished
+// product immediately. Everything below is fictional.
+interface MockStudent {
+  id: number; child: string; age: number; sport: string; sessionType: string;
+  parent: string; phone: string; email: string; address: string; emergency: string;
+  history: { date: string; service: string; time: string }[];
+  attendance: { date: string; present: boolean }[];
+  notes: { date: string; text: string }[];
+}
+
+const MOCK_STUDENTS: MockStudent[] = [
+  {
+    id: 1, child: 'Alfie Thompson', age: 9, sport: 'Football', sessionType: '1-to-1 Coaching',
+    parent: 'Sarah Thompson', phone: '07811 234 567', email: 'sarah.thompson84@gmail.com',
+    address: '14 Birch Grove, Warrington WA4 6QT', emergency: 'Mark Thompson (dad) · 07811 765 432',
+    history: [
+      { date: '13 Jul 2026', service: '1-to-1 Coaching', time: '16:00' },
+      { date: '6 Jul 2026', service: '1-to-1 Coaching', time: '16:00' },
+      { date: '29 Jun 2026', service: '1-to-1 Coaching', time: '16:00' },
+      { date: '22 Jun 2026', service: 'Small Group Coaching', time: '17:30' },
+    ],
+    attendance: [
+      { date: '13 Jul', present: true }, { date: '6 Jul', present: true },
+      { date: '29 Jun', present: true }, { date: '22 Jun', present: false },
+      { date: '15 Jun', present: true },
+    ],
+    notes: [
+      { date: '13 Jul 2026', text: 'Weak-foot passing much sharper — two-touch drills paying off.' },
+      { date: '29 Jun 2026', text: 'Great session. Needs to keep his head up when dribbling at pace.' },
+    ],
+  },
+  {
+    id: 2, child: 'Freya Collins', age: 11, sport: 'Tennis', sessionType: '1-to-1 Coaching',
+    parent: 'Emma Collins', phone: '07922 118 903', email: 'emma.collins@outlook.com',
+    address: '3 Sandy Lane, Lymm WA13 0AF', emergency: 'Gran (Pat Collins) · 01925 754 221',
+    history: [
+      { date: '16 Jul 2026', service: '1-to-1 Tennis', time: '17:00' },
+      { date: '9 Jul 2026', service: '1-to-1 Tennis', time: '17:00' },
+      { date: '2 Jul 2026', service: '1-to-1 Tennis', time: '17:00' },
+    ],
+    attendance: [
+      { date: '16 Jul', present: true }, { date: '9 Jul', present: true }, { date: '2 Jul', present: true },
+    ],
+    notes: [
+      { date: '16 Jul 2026', text: 'Serve toss consistent at last. Started slice backhand.' },
+    ],
+  },
+  {
+    id: 3, child: 'Oliver Bennett', age: 7, sport: 'Football', sessionType: 'Small Group Coaching',
+    parent: 'James Bennett', phone: '07733 445 210', email: 'jbennett.home@gmail.com',
+    address: '27 Cherry Tree Close, Stockton Heath WA4 2PL', emergency: 'Lucy Bennett (mum) · 07733 445 211',
+    history: [
+      { date: '15 Jul 2026', service: 'Small Group Coaching', time: '16:30' },
+      { date: '8 Jul 2026', service: 'Small Group Coaching', time: '16:30' },
+      { date: '1 Jul 2026', service: 'Small Group Coaching', time: '16:30' },
+    ],
+    attendance: [
+      { date: '15 Jul', present: true }, { date: '8 Jul', present: false }, { date: '1 Jul', present: true },
+    ],
+    notes: [
+      { date: '15 Jul 2026', text: 'Much more confident in 1v1s. Celebrated his first nutmeg all session.' },
+    ],
+  },
+  {
+    id: 4, child: 'Maya Patel', age: 12, sport: 'Basketball', sessionType: '1-to-1 Coaching',
+    parent: 'Anita Patel', phone: '07480 992 314', email: 'anita.patel@yahoo.co.uk',
+    address: '9 Kingsway, Altrincham WA14 1PF', emergency: 'Raj Patel (dad) · 07480 992 315',
+    history: [
+      { date: '14 Jul 2026', service: '1-to-1 Basketball', time: '17:00' },
+      { date: '7 Jul 2026', service: '1-to-1 Basketball', time: '17:00' },
+      { date: '30 Jun 2026', service: '1-to-1 Basketball', time: '17:00' },
+      { date: '23 Jun 2026', service: '1-to-1 Basketball', time: '17:00' },
+    ],
+    attendance: [
+      { date: '14 Jul', present: true }, { date: '7 Jul', present: true },
+      { date: '30 Jun', present: true }, { date: '23 Jun', present: true },
+    ],
+    notes: [
+      { date: '14 Jul 2026', text: 'Left-hand lay-ups now automatic. Free throws 7/10 — new best.' },
+      { date: '30 Jun 2026', text: 'Trials for county squad next month; building a shooting plan.' },
+    ],
+  },
+  {
+    id: 5, child: 'Charlie Whitfield', age: 8, sport: 'Football', sessionType: '1-to-1 Coaching',
+    parent: 'Danielle Whitfield', phone: '07555 660 218', email: 'dani.whitfield@gmail.com',
+    address: '41 Moss Road, Northwich CW8 4BY', emergency: 'Pete Whitfield · 07555 660 219',
+    history: [
+      { date: '17 Jul 2026', service: '1-to-1 Coaching', time: '16:00' },
+      { date: '10 Jul 2026', service: '1-to-1 Coaching', time: '16:00' },
+    ],
+    attendance: [
+      { date: '17 Jul', present: true }, { date: '10 Jul', present: false },
+    ],
+    notes: [
+      { date: '17 Jul 2026', text: 'First session back after holiday — energy levels great.' },
+    ],
+  },
+  {
+    id: 6, child: 'Isla McGregor', age: 10, sport: 'Tennis', sessionType: 'Small Group Coaching',
+    parent: 'Fiona McGregor', phone: '07891 227 405', email: 'fiona.mcgregor@icloud.com',
+    address: '5 The Paddock, Knutsford WA16 8DX', emergency: 'Angus McGregor · 07891 227 406',
+    history: [
+      { date: '12 Jul 2026', service: 'Small Group Tennis', time: '13:30' },
+      { date: '5 Jul 2026', service: 'Small Group Tennis', time: '13:30' },
+      { date: '28 Jun 2026', service: 'Small Group Tennis', time: '13:30' },
+    ],
+    attendance: [
+      { date: '12 Jul', present: true }, { date: '5 Jul', present: true }, { date: '28 Jun', present: false },
+    ],
+    notes: [],
+  },
+  {
+    id: 7, child: 'Noah Barker', age: 14, sport: 'Basketball', sessionType: '1-to-1 Coaching',
+    parent: 'Steve Barker', phone: '07700 900 412', email: 'steve.barker@btinternet.com',
+    address: '18 Greenfield Avenue, Sale M33 4PJ', emergency: 'Claire Barker · 07700 900 413',
+    history: [
+      { date: '19 Jul 2026', service: '1-to-1 Basketball', time: '10:00' },
+      { date: '12 Jul 2026', service: '1-to-1 Basketball', time: '10:00' },
+      { date: '5 Jul 2026', service: '1-to-1 Basketball', time: '10:00' },
+    ],
+    attendance: [
+      { date: '19 Jul', present: true }, { date: '12 Jul', present: false }, { date: '5 Jul', present: true },
+    ],
+    notes: [
+      { date: '19 Jul 2026', text: 'Working on explosive first step. Missed last week — chased payment.' },
+    ],
+  },
+  {
+    id: 8, child: 'Poppy Sanders', age: 6, sport: 'Football', sessionType: 'Holiday Camp',
+    parent: 'Becky Sanders', phone: '07344 518 227', email: 'becky.sanders@gmail.com',
+    address: '2 Orchard Way, Frodsham WA6 6SN', emergency: 'Nan (Sue) · 01928 733 190',
+    history: [
+      { date: '11 Jul 2026', service: 'Holiday Camp', time: '09:00' },
+      { date: '4 Jul 2026', service: 'Holiday Camp', time: '09:00' },
+    ],
+    attendance: [
+      { date: '11 Jul', present: true }, { date: '4 Jul', present: true },
+    ],
+    notes: [
+      { date: '11 Jul 2026', text: 'Youngest in the group but joins in everything. Loves the parachute games.' },
+    ],
+  },
+  {
+    id: 9, child: 'Ethan Hughes', age: 15, sport: 'Football', sessionType: '1-to-1 Coaching',
+    parent: 'Rachel Hughes', phone: '07811 349 902', email: 'rachel.hughes@hotmail.co.uk',
+    address: '66 Station Road, Widnes WA8 6QA', emergency: 'Dave Hughes · 07811 349 903',
+    history: [
+      { date: '15 Jul 2026', service: '1-to-1 Coaching', time: '18:00' },
+      { date: '8 Jul 2026', service: '1-to-1 Coaching', time: '18:00' },
+      { date: '1 Jul 2026', service: '1-to-1 Coaching', time: '18:00' },
+      { date: '24 Jun 2026', service: '1-to-1 Coaching', time: '18:00' },
+    ],
+    attendance: [
+      { date: '15 Jul', present: true }, { date: '8 Jul', present: true },
+      { date: '1 Jul', present: true }, { date: '24 Jun', present: true },
+    ],
+    notes: [
+      { date: '15 Jul 2026', text: 'Preparing for academy trial. Set-piece delivery outstanding.' },
+    ],
+  },
+  {
+    id: 10, child: 'Grace Ashworth', age: 13, sport: 'Tennis', sessionType: '1-to-1 Coaching',
+    parent: 'Karen Ashworth', phone: '07956 002 761', email: 'karen.ashworth@gmail.com',
+    address: '12 Beechwood Drive, Chester CH2 1HU', emergency: 'Ian Ashworth · 07956 002 762',
+    history: [
+      { date: '16 Jul 2026', service: '1-to-1 Tennis', time: '15:30' },
+      { date: '9 Jul 2026', service: '1-to-1 Tennis', time: '15:30' },
+    ],
+    attendance: [
+      { date: '16 Jul', present: true }, { date: '9 Jul', present: true },
+    ],
+    notes: [],
+  },
+];
+
+interface Lead {
+  id: number; parent: string; phone: string; email: string; childAge: number;
+  interest: string; source: string; status: 'new' | 'contacted' | 'warm' | 'cold';
+  added: string;
+}
+
+const MOCK_LEADS: Lead[] = [
+  { id: 1, parent: 'Jade Robinson', phone: '07700 118 552', email: 'jade.rob@gmail.com',
+    childAge: 8, interest: 'Football', source: 'Website', status: 'new', added: '2026-07-21' },
+  { id: 2, parent: 'Tom Fletcher', phone: '07811 990 145', email: 'tom.fletcher@outlook.com',
+    childAge: 10, interest: 'Tennis', source: 'Word of mouth', status: 'contacted', added: '2026-07-18' },
+  { id: 3, parent: 'Priya Sharma', phone: '07480 776 320', email: 'priya.sharma@yahoo.co.uk',
+    childAge: 6, interest: 'Football', source: 'Website', status: 'warm', added: '2026-07-15' },
+  { id: 4, parent: 'Danny Mercer', phone: '07922 445 018', email: 'd.mercer@gmail.com',
+    childAge: 13, interest: 'Basketball', source: 'Word of mouth', status: 'new', added: '2026-07-20' },
+  { id: 5, parent: 'Laura Kennedy', phone: '07555 213 907', email: 'laura.kennedy@icloud.com',
+    childAge: 9, interest: 'Football', source: 'Website', status: 'warm', added: '2026-07-10' },
+  { id: 6, parent: 'Gareth Owen', phone: '07733 808 264', email: 'gareth.owen@btinternet.com',
+    childAge: 11, interest: 'Tennis', source: 'Referral', status: 'cold', added: '2026-06-28' },
+];
+
+const LEAD_STATUS: Record<Lead['status'], { label: string; tone: 'orange' | 'blue' | 'green' | 'slate' | 'red' }> = {
+  new: { label: 'New', tone: 'orange' },
+  contacted: { label: 'Contacted', tone: 'blue' },
+  warm: { label: 'Warm', tone: 'green' },
+  cold: { label: 'Cold', tone: 'slate' },
+};
+
+// Six months of sample finances (pounds). Labels are computed from today so
+// the chart always ends on the current month.
+const FIN_REVENUE = [820, 1040, 960, 1280, 1520, 1730];
+const FIN_SIGNUPS = [2, 3, 2, 4, 3, 5];
+const monthLabels = () => {
+  const now = new Date();
+  return Array.from({ length: 6 }, (_, i) => {
+    const m = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+    return m.toLocaleDateString('en-GB', { month: 'short' });
+  });
+};
+
+const MOCK_OUTSTANDING = [
+  { student: 'Noah Barker', amount_pence: 3500, due: 'Overdue by 6 days', reason: 'No-show charge — 12 Jul' },
+  { student: 'Charlie Whitfield', amount_pence: 2800, due: 'Due Friday', reason: '1-to-1 session — 10 Jul' },
+  { student: 'Poppy Sanders', amount_pence: 9000, due: 'Due 1 Aug', reason: 'Summer holiday camp week' },
+  { student: 'Maya Patel', amount_pence: 5600, due: 'Due 5 Aug', reason: 'Block of 4 sessions' },
+];
+
+// ── Calendar plumbing ───────────────────────────────────────────────────
+const DAY_START = 8 * 60;   // 08:00
+const DAY_END = 20 * 60;    // 20:00
+const HOUR_H = 52;          // px per hour
+const GRID_H = ((DAY_END - DAY_START) / 60) * HOUR_H;
+
+const toMins = (t: string) => {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + (m || 0);
+};
+const minsToTime = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+
+interface CalEvent {
+  key: string;
+  date: string;
+  start: string;
+  end: string;
+  title: string;
+  service: string;
+  type: SessionType;
+  demo?: boolean;
+  booking?: KsBooking;
+  block?: KsBlock;
+}
+
+// Deterministic demo sessions by weekday, only within ±2 weeks of today so
+// far-future weeks show honest emptiness. Demo events expose no actions.
+const DEMO_WEEK: Record<number, { start: string; mins: number; type: SessionType; title: string; service: string }[]> = {
+  1: [
+    { start: '16:00', mins: 60, type: 'oneone', title: 'Alfie Thompson', service: '1-to-1 Coaching' },
+    { start: '17:30', mins: 60, type: 'group', title: 'Small group · 4 players', service: 'Small Group Coaching' },
+  ],
+  2: [{ start: '17:00', mins: 60, type: 'oneone', title: 'Maya Patel', service: '1-to-1 Basketball' }],
+  3: [
+    { start: '16:30', mins: 60, type: 'group', title: 'Small group · 5 players', service: 'Small Group Coaching' },
+    { start: '18:00', mins: 60, type: 'oneone', title: 'Ethan Hughes', service: '1-to-1 Coaching' },
+  ],
+  4: [{ start: '17:00', mins: 60, type: 'oneone', title: 'Freya Collins', service: '1-to-1 Tennis' }],
+  5: [{ start: '16:00', mins: 60, type: 'oneone', title: 'Charlie Whitfield', service: '1-to-1 Coaching' }],
+  6: [
+    { start: '09:00', mins: 180, type: 'camp', title: 'Holiday camp · 12 players', service: 'Holiday Camp' },
+    { start: '13:30', mins: 90, type: 'group', title: 'Small group tennis', service: 'Small Group Tennis' },
+  ],
+  0: [{ start: '10:00', mins: 60, type: 'oneone', title: 'Noah Barker', service: '1-to-1 Basketball' }],
+};
+
+function demoEventsFor(dateISO: string): CalEvent[] {
+  const d = new Date(`${dateISO}T12:00:00`);
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  const diffDays = Math.round((d.getTime() - today.getTime()) / 86400000);
+  if (diffDays < -7 || diffDays > 14) return [];
+  return (DEMO_WEEK[d.getDay()] || []).map((p, i) => ({
+    key: `demo-${dateISO}-${i}`,
+    date: dateISO,
+    start: p.start,
+    end: minsToTime(toMins(p.start) + p.mins),
+    title: p.title,
+    service: p.service,
+    type: p.type,
+    demo: true,
+  }));
+}
+
+/** Assign overlapping events to side-by-side lanes (Teams-style). */
+function withLanes(events: CalEvent[]) {
+  const sorted = [...events].sort((a, b) => toMins(a.start) - toMins(b.start));
+  const laneEnds: number[] = [];
+  const placed = sorted.map(ev => {
+    const s = toMins(ev.start), e = Math.max(toMins(ev.end), s + 20);
+    let lane = laneEnds.findIndex(end => end <= s);
+    if (lane === -1) { lane = laneEnds.length; laneEnds.push(e); }
+    else laneEnds[lane] = e;
+    return { ev, lane };
+  });
+  return { placed, laneCount: Math.max(1, laneEnds.length) };
+}
+
+// ── Small shared pieces ─────────────────────────────────────────────────
+function StatCard({ icon, label, value, sub, accent = ORANGE, delay = 0 }:
+  { icon: string; label: string; value: React.ReactNode; sub?: string; accent?: string; delay?: number }) {
+  return (
+    <div className="animate-fadeInUp rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.06)] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md"
+      style={{ animationDelay: `${delay}ms` }}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{label}</div>
+          <div className="mt-1 truncate text-2xl font-extrabold tabular-nums text-slate-900">{value}</div>
+          {sub && <div className="mt-0.5 truncate text-[11px] text-slate-400">{sub}</div>}
+        </div>
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl"
+          style={{ background: `${accent}14`, color: accent }}>
+          <Icon name={icon} size={19} />
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function SectionHead({ children, sample, action }:
+  { children: React.ReactNode; sample?: boolean; action?: React.ReactNode }) {
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-2.5">
+      <h2 className="text-lg font-extrabold tracking-tight text-slate-900">{children}</h2>
+      {sample && <KSPill tone="slate">Sample data</KSPill>}
+      {action && <div className="ml-auto">{action}</div>}
+    </div>
+  );
+}
+
+function Skeleton({ className = '' }: { className?: string }) {
+  return <div className={`animate-pulse rounded-2xl bg-slate-200/70 ${className}`} />;
+}
+
+function KSModal({ onClose, children, wide }:
+  { onClose: () => void; children: React.ReactNode; wide?: boolean }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" />
+      <div onClick={e => e.stopPropagation()}
+        className={`relative max-h-[88vh] w-full overflow-y-auto rounded-t-2xl bg-white p-5 shadow-2xl animate-scaleIn sm:rounded-2xl ${wide ? 'sm:max-w-2xl' : 'sm:max-w-lg'}`}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function EmptyNote({ icon, title, hint }: { icon: string; title: string; hint?: string }) {
+  return (
+    <div className="flex flex-col items-center gap-2.5 rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center">
+      <span className="grid h-12 w-12 place-items-center rounded-2xl bg-orange-50 text-[#FF6B00]">
+        <Icon name={icon} size={24} />
+      </span>
+      <div className="font-bold text-slate-800">{title}</div>
+      {hint && <div className="max-w-xs text-sm text-slate-500">{hint}</div>}
+    </div>
+  );
+}
+
+// ── Attendance register (unchanged behaviour — the SMS side is LIVE) ────
+const ATTENDANCE_OPTIONS: { id: KsAttendanceStatus; label: string; hint: string; cls: string }[] = [
+  { id: 'attended', label: 'Attended', hint: 'Turned up and trained',
+    cls: 'border-green-300 bg-green-50 text-green-800 hover:bg-green-100' },
+  { id: 'absent', label: 'No-show', hint: 'Charged in full, parent texted',
+    cls: 'border-red-300 bg-red-50 text-red-800 hover:bg-red-100' },
+  { id: 'cancelled', label: 'Called off', hint: 'Gave notice, not charged',
+    cls: 'border-slate-300 bg-slate-50 text-slate-700 hover:bg-slate-100' },
+];
+
+const RATINGS = [1, 2, 3, 4, 5];
+
+function SessionRegister({ b, skills, onSaved }:
+  { b: KsBooking; skills: KsSkill[]; onSaved: () => void }) {
+  const [status, setStatus] = useState<KsAttendanceStatus | ''>('');
+  const [attNotes, setAttNotes] = useState('');
+  const [picked, setPicked] = useState<string[]>([]);
+  const [rating, setRating] = useState<number | null>(null);
+  const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState('');
+
+  const toggleSkill = (key: string) =>
+    setPicked(p => (p.includes(key) ? p.filter(k => k !== key) : [...p, key]));
+
+  const save = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const done: string[] = [];
+      if (status) {
+        const res = await ksApi.markAttendance({
+          ref: b.ref, status, child_name: b.child_name, notes: attNotes.trim(),
+        });
+        done.push(status === 'absent'
+          ? `Marked absent — ${money(res.charged_pence)} still payable${
+            res.sms === 'sent' || res.sms === 'dry_run' ? ', parent texted' : ''}`
+          : `Marked ${status}`);
+      }
+      // A note with nothing in it is not worth sending to the parent.
+      if (picked.length || rating !== null || notes.trim()) {
+        await ksApi.saveProgress({
+          ref: b.ref, child_name: b.child_name,
+          skills: picked, rating, notes: notes.trim(),
+        });
+        done.push('progress note shared with the parent');
+      }
+      if (!done.length) { setError('Pick an attendance mark or write a note.'); return; }
+      setSaved(done.join(' · '));
+      onSaved();
+    } catch (e: any) {
+      setError(e?.message || 'Could not save that.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (saved) {
+    return (
+      <div className="mt-3 rounded-xl border border-green-200 bg-green-50 px-3.5 py-3 text-sm font-semibold text-green-800">
+        {saved}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 space-y-4 rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
+      <div>
+        <KSLabel>Attendance</KSLabel>
+        <div className="grid gap-2 sm:grid-cols-3">
+          {ATTENDANCE_OPTIONS.map(o => (
+            <button key={o.id} type="button" onClick={() => setStatus(s => (s === o.id ? '' : o.id))}
+              className={`rounded-xl border px-3 py-2 text-left transition-colors
+                ${status === o.id ? `${o.cls} ring-2 ring-offset-1 ring-current`
+                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>
+              <div className="text-sm font-bold">{o.label}</div>
+              <div className="mt-0.5 text-[11px] leading-tight opacity-80">{o.hint}</div>
+            </button>
+          ))}
+        </div>
+        {status === 'absent' && (
+          <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            {b.parent_name} will be texted that {money(b.price_pence)} is still payable.
+            Use <span className="font-bold">Called off</span> instead if they gave notice.
+          </p>
+        )}
+        {status && (
+          <KSInput className="mt-2" value={attNotes} onChange={e => setAttNotes(e.target.value)}
+            placeholder="Register note (optional) — e.g. arrived 15 mins late" />
+        )}
+      </div>
+
+      <div className="border-t border-slate-200 pt-3">
+        <KSLabel hint="shared with the parent">Progress note</KSLabel>
+        <div className="flex flex-wrap gap-1.5">
+          {skills.map(s => (
+            <button key={s.key} type="button" onClick={() => toggleSkill(s.key)}
+              className={`rounded-full border px-3 py-1 text-xs font-bold transition-colors
+                ${picked.includes(s.key)
+                  ? 'border-[#FF6B00] bg-[#FF6B00] text-white'
+                  : 'border-slate-300 bg-white text-slate-600 hover:border-slate-400'}`}>
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-3 flex items-center gap-2">
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Session</span>
+          {RATINGS.map(r => (
+            <button key={r} type="button" onClick={() => setRating(v => (v === r ? null : r))}
+              aria-label={`${r} out of 5`}
+              className={`h-8 w-8 rounded-lg border text-sm font-extrabold transition-colors
+                ${rating !== null && r <= rating
+                  ? 'border-[#FF6B00] bg-[#FF6B00] text-white'
+                  : 'border-slate-300 bg-white text-slate-400 hover:border-slate-400'}`}>
+              {r}
+            </button>
+          ))}
+        </div>
+
+        <KSTextarea className="mt-3" rows={3} value={notes}
+          onChange={e => setNotes(e.target.value)}
+          placeholder={`How did ${b.child_name.split(' ')[0]} get on? The parent reads this.`} />
+      </div>
+
+      {error && <KSAlert>{error}</KSAlert>}
+      <KSButton loading={busy} onClick={save} className="w-full">Save register</KSButton>
+    </div>
+  );
+}
+
+function SessionRow({ b, onToggle, showContact, skills, onSaved }:
+  { b: KsBooking; onToggle: (b: KsBooking) => void; showContact?: boolean;
+    skills?: KsSkill[]; onSaved?: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [register, setRegister] = useState(false);
   const done = b.status === 'completed';
   const cancelled = b.status === 'cancelled';
+  // Only a session that has actually kicked off can be marked — registering
+  // a no-show before the whistle would charge for a session still to come.
+  const started = b.starts_at * 1000 <= Date.now();
   return (
-    <div className={`rounded-xl border p-3.5 transition-colors
+    <div className={`rounded-xl border p-3.5 transition-all duration-200
       ${cancelled ? 'border-slate-200 bg-slate-50 opacity-70'
-        : done ? 'border-blue-200 bg-blue-50/50' : 'border-slate-200 bg-white'}`}>
+        : done ? 'border-blue-200 bg-blue-50/50' : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -41,12 +583,24 @@ function SessionRow({ b, onToggle, showContact }:
           )}
         </div>
         {!cancelled && (
-          <KSButton tone={done ? 'secondary' : 'primary'} loading={busy}
-            onClick={async () => { setBusy(true); await onToggle(b); setBusy(false); }}>
-            {done ? 'Undo' : 'Mark done'}
-          </KSButton>
+          <div className="flex gap-2">
+            {started && skills && (
+              <KSButton tone={register ? 'ghost' : 'secondary'}
+                onClick={() => setRegister(r => !r)}>
+                {register ? 'Close' : 'Mark attendance'}
+              </KSButton>
+            )}
+            <KSButton tone={done ? 'secondary' : 'primary'} loading={busy}
+              onClick={async () => { setBusy(true); await onToggle(b); setBusy(false); }}>
+              {done ? 'Undo' : 'Mark done'}
+            </KSButton>
+          </div>
         )}
       </div>
+
+      {register && skills && (
+        <SessionRegister b={b} skills={skills} onSaved={() => onSaved?.()} />
+      )}
 
       {b.notes && (
         <p className="mt-2.5 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -71,6 +625,1192 @@ function SessionRow({ b, onToggle, showContact }:
   );
 }
 
+// ── Calendar ────────────────────────────────────────────────────────────
+function EventBlock({ ev, lane, laneCount, onOpen }:
+  { ev: CalEvent; lane: number; laneCount: number; onOpen: (ev: CalEvent) => void }) {
+  const st = TYPE_STYLE[ev.type];
+  const s = Math.max(toMins(ev.start), DAY_START);
+  const e = Math.min(Math.max(toMins(ev.end), s + 25), DAY_END);
+  if (e <= DAY_START || s >= DAY_END) return null;
+  const top = ((s - DAY_START) / 60) * HOUR_H;
+  const height = Math.max(((e - s) / 60) * HOUR_H - 2, 22);
+  const durMins = toMins(ev.end) - toMins(ev.start);
+  const done = ev.booking?.status === 'completed';
+  const cancelled = ev.booking?.status === 'cancelled';
+  return (
+    <button onClick={() => onOpen(ev)}
+      className={`absolute overflow-hidden rounded-lg border-l-[3px] px-1.5 py-1 text-left shadow-sm
+        transition-all duration-200 ease-out hover:z-10 hover:-translate-y-px hover:shadow-md
+        ${st.chip} ${st.border} ${st.text} ${cancelled ? 'opacity-45' : done ? 'opacity-75' : ''}`}
+      style={{
+        top, height,
+        left: `calc(${(lane * 100) / laneCount}% + 2px)`,
+        width: `calc(${100 / laneCount}% - 5px)`,
+      }}
+      title={`${ev.start}–${ev.end} · ${ev.title}`}>
+      <div className="truncate text-[10px] font-semibold opacity-75">
+        {ev.start}{height > 34 ? `–${ev.end}` : ''}{done ? ' ✓' : ''}
+      </div>
+      <div className="truncate text-[11px] font-bold leading-tight">
+        {cancelled ? <s>{ev.title}</s> : ev.title}
+      </div>
+      {height > 48 && (
+        <div className="truncate text-[10px] leading-tight opacity-75">
+          {ev.type === 'block' ? (ev.service || 'Unavailable') : `${ev.service} · ${durMins}m`}
+        </div>
+      )}
+    </button>
+  );
+}
+
+function CalendarTab({ schedule, loading, onShiftWeek, onToday, onOpen }: {
+  schedule: KsSchedule | null;
+  loading: boolean;
+  onShiftWeek: (days: number) => void;
+  onToday: () => void;
+  onOpen: (ev: CalEvent) => void;
+}) {
+  const hours = Array.from({ length: (DAY_END - DAY_START) / 60 + 1 }, (_, i) => DAY_START / 60 + i);
+  const now = new Date();
+  const nowMins = now.getHours() * 60 + now.getMinutes();
+
+  const days = useMemo(() => {
+    if (!schedule) return [];
+    return schedule.days.map(d => {
+      const real: CalEvent[] = d.sessions.map(b => ({
+        key: `b-${b.id}`,
+        date: d.date,
+        start: b.start_time,
+        end: b.end_time,
+        title: b.child_name,
+        service: b.service_name,
+        type: typeOfService(b.service_key, b.service_name),
+        booking: b,
+      }));
+      const blocks: CalEvent[] = d.blocks.map(bl => ({
+        key: `bl-${bl.id}`,
+        date: d.date,
+        start: bl.start_time === '00:00' ? '08:00' : bl.start_time,
+        end: bl.end_time === '23:59' ? '20:00' : bl.end_time,
+        title: 'Blocked out',
+        service: bl.reason || '',
+        type: 'block' as const,
+        block: bl,
+      }));
+      return { ...d, layout: withLanes([...real, ...blocks, ...demoEventsFor(d.date)]) };
+    });
+  }, [schedule]);
+
+  if (loading || !schedule) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-10 w-40" />
+          <Skeleton className="h-10 w-64" />
+        </div>
+        <Skeleton className="h-[560px] w-full" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1">
+          <button onClick={() => onShiftWeek(-7)} aria-label="Previous week"
+            className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-colors hover:border-[#FF6B00] hover:text-[#FF6B00]">
+            <Icon name="chevron_left" size={20} />
+          </button>
+          <button onClick={() => onShiftWeek(7)} aria-label="Next week"
+            className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-colors hover:border-[#FF6B00] hover:text-[#FF6B00]">
+            <Icon name="chevron_right" size={20} />
+          </button>
+          <KSButton tone="secondary" className="ml-1 py-2" onClick={onToday}>Today</KSButton>
+        </div>
+        <div className="text-sm font-extrabold text-slate-800">
+          {shortDay(schedule.week_start)} – {shortDay(schedule.week_end)}
+        </div>
+        {/* Legend */}
+        <div className="ml-auto flex flex-wrap items-center gap-3 text-[11px] font-semibold text-slate-500">
+          {(['oneone', 'group', 'camp', 'block'] as SessionType[]).map(t => (
+            <span key={t} className="flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-full" style={{ background: TYPE_STYLE[t].dot }} />
+              {TYPE_STYLE[t].label}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Week grid */}
+      <KSCard className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <div className="min-w-[860px]">
+            {/* Day headers */}
+            <div className="grid border-b border-slate-200"
+              style={{ gridTemplateColumns: '56px repeat(7, minmax(0, 1fr))' }}>
+              <div />
+              {days.map(d => {
+                const dt = new Date(`${d.date}T12:00:00`);
+                return (
+                  <div key={d.date}
+                    className={`border-l border-slate-100 px-2 py-2.5 text-center ${d.is_today ? 'bg-orange-50' : ''}`}>
+                    <div className={`text-[11px] font-bold uppercase tracking-wider
+                      ${d.is_today ? 'text-[#FF6B00]' : 'text-slate-400'}`}>
+                      {dt.toLocaleDateString('en-GB', { weekday: 'short' })}
+                    </div>
+                    <div className={`mx-auto mt-0.5 grid h-7 w-7 place-items-center rounded-full text-sm font-extrabold
+                      ${d.is_today ? 'bg-[#FF6B00] text-white' : 'text-slate-800'}`}>
+                      {dt.getDate()}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Time grid */}
+            <div className="grid" style={{ gridTemplateColumns: '56px repeat(7, minmax(0, 1fr))' }}>
+              {/* Hour labels */}
+              <div className="relative" style={{ height: GRID_H }}>
+                {hours.map(h => (
+                  <div key={h} className="absolute right-2 -translate-y-1/2 text-[11px] font-semibold tabular-nums text-slate-400"
+                    style={{ top: (h - DAY_START / 60) * HOUR_H }}>
+                    {String(h).padStart(2, '0')}:00
+                  </div>
+                ))}
+              </div>
+
+              {days.map(d => (
+                <div key={d.date}
+                  className={`relative border-l border-slate-100 ${d.is_today ? 'bg-orange-50/40' : ''}`}
+                  style={{ height: GRID_H }}>
+                  {/* Empty slots as subtle dashed hour lines */}
+                  {hours.slice(0, -1).map(h => (
+                    <div key={h} className="absolute inset-x-0 border-t border-dashed border-slate-200/80"
+                      style={{ top: (h - DAY_START / 60) * HOUR_H }} />
+                  ))}
+                  {/* Current-time line */}
+                  {d.is_today && nowMins > DAY_START && nowMins < DAY_END && (
+                    <div className="pointer-events-none absolute inset-x-0 z-10 flex items-center"
+                      style={{ top: ((nowMins - DAY_START) / 60) * HOUR_H }}>
+                      <span className="-ml-1 h-2 w-2 rounded-full bg-[#FF6B00]" />
+                      <span className="h-px flex-1 bg-[#FF6B00]" />
+                    </div>
+                  )}
+                  {d.layout.placed.map(({ ev, lane }) => (
+                    <EventBlock key={ev.key} ev={ev} lane={lane}
+                      laneCount={d.layout.laneCount} onOpen={onOpen} />
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </KSCard>
+
+      <p className="text-xs text-slate-400">
+        Sessions in soft colours are seeded examples while real bookings build up — they open
+        read-only. Click any real session to see details, mark it done or take the register.
+      </p>
+    </div>
+  );
+}
+
+function EventModal({ ev, skills, onClose, onToggle, onSaved }: {
+  ev: CalEvent;
+  skills: KsSkill[];
+  onClose: () => void;
+  onToggle: (b: KsBooking) => Promise<void>;
+  onSaved: () => void;
+}) {
+  const st = TYPE_STYLE[ev.type];
+  return (
+    <KSModal onClose={onClose} wide={!!ev.booking}>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="h-3 w-3 rounded-full" style={{ background: st.dot }} />
+            <h3 className="text-lg font-extrabold tracking-tight text-slate-900">{ev.title}</h3>
+            {ev.demo && <KSPill tone="slate">Demo session</KSPill>}
+          </div>
+          <div className="mt-1 text-sm text-slate-600">
+            {dayName(ev.date)} · <span className="font-mono font-bold">{ev.start}–{ev.end}</span>
+            {ev.service ? ` · ${ev.service}` : ''}
+          </div>
+        </div>
+        <button onClick={onClose} aria-label="Close"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700">
+          <Icon name="close" size={20} />
+        </button>
+      </div>
+
+      {ev.booking ? (
+        <SessionRow b={ev.booking} onToggle={onToggle} showContact skills={skills} onSaved={onSaved} />
+      ) : ev.type === 'block' ? (
+        <p className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          This time is blocked out{ev.service ? ` — ${ev.service}` : ''}. Parents aren't offered
+          these slots. Manage blocks under <span className="font-bold">Settings</span>.
+        </p>
+      ) : (
+        <p className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          This is a seeded example session showing how the calendar will look as bookings come in.
+          Real bookings open with parent contact details, the attendance register and progress notes.
+        </p>
+      )}
+    </KSModal>
+  );
+}
+
+// ── Route map ───────────────────────────────────────────────────────────
+// Leaflet comes from the unpkg CDN (no npm dep, no API key) and is only
+// fetched the first time the Route tab opens. The bookings table stores no
+// addresses yet, so the route runs on seeded Chester-area sample data.
+let leafletLoader: Promise<any> | null = null;
+function loadLeaflet(): Promise<any> {
+  const w = window as any;
+  if (w.L?.map) return Promise.resolve(w.L);
+  if (leafletLoader) return leafletLoader;
+  leafletLoader = new Promise((resolve, reject) => {
+    const css = document.createElement('link');
+    css.rel = 'stylesheet';
+    css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(css);
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    s.onload = () => resolve((window as any).L);
+    s.onerror = () => { leafletLoader = null; reject(new Error('Leaflet failed to load')); };
+    document.head.appendChild(s);
+  });
+  return leafletLoader;
+}
+
+interface RouteVenue { venue: string; postcode: string; coords: [number, number] }
+
+const ROUTE_HOME: RouteVenue = {
+  venue: 'Home base', postcode: 'CH2 1BX', coords: [53.2040, -2.8850],
+};
+
+// Approximate coordinates for the sample postcodes — close enough to draw an
+// honest-looking Chester route, not for navigation (that's the Maps link).
+const VENUES: Record<string, RouteVenue> = {
+  'CH1 4LF': { venue: 'King George V Sports Hub', postcode: 'CH1 4LF', coords: [53.2005, -2.9060] },
+  'CH1 2HT': { venue: 'Northgate Arena', postcode: 'CH1 2HT', coords: [53.1955, -2.8890] },
+  'CH2 3NY': { venue: 'Upton Pavilion, Wealstone Lane', postcode: 'CH2 3NY', coords: [53.2090, -2.8700] },
+  'CH3 5UH': { venue: 'Boughton Heath Astro', postcode: 'CH3 5UH', coords: [53.1780, -2.8560] },
+  'CH4 8AB': { venue: 'Westminster Park Courts', postcode: 'CH4 8AB', coords: [53.1690, -2.9170] },
+};
+
+interface RouteStopSeed { start: string; mins: number; type: SessionType; child: string; pc: keyof typeof VENUES }
+
+// One believable coaching day per weekday, reusing the sample students.
+const ROUTE_WEEK: Record<number, RouteStopSeed[]> = {
+  1: [
+    { start: '15:30', mins: 60, type: 'oneone', child: 'Alfie Thompson', pc: 'CH2 3NY' },
+    { start: '16:45', mins: 45, type: 'oneone', child: 'Charlie Whitfield', pc: 'CH1 2HT' },
+    { start: '17:45', mins: 60, type: 'group', child: 'Small group · 4 players', pc: 'CH3 5UH' },
+    { start: '19:00', mins: 60, type: 'oneone', child: 'Ethan Hughes', pc: 'CH4 8AB' },
+  ],
+  2: [
+    { start: '16:00', mins: 60, type: 'oneone', child: 'Maya Patel', pc: 'CH1 4LF' },
+    { start: '17:15', mins: 45, type: 'oneone', child: 'Oliver Bennett', pc: 'CH1 2HT' },
+    { start: '18:15', mins: 90, type: 'group', child: 'Small group · 5 players', pc: 'CH2 3NY' },
+  ],
+  3: [
+    { start: '15:45', mins: 45, type: 'oneone', child: 'Poppy Sanders', pc: 'CH4 8AB' },
+    { start: '16:45', mins: 60, type: 'group', child: 'Small group · 5 players', pc: 'CH3 5UH' },
+    { start: '18:00', mins: 60, type: 'oneone', child: 'Ethan Hughes', pc: 'CH1 2HT' },
+    { start: '19:15', mins: 45, type: 'oneone', child: 'Grace Ashworth', pc: 'CH1 4LF' },
+  ],
+  4: [
+    { start: '16:00', mins: 60, type: 'oneone', child: 'Freya Collins', pc: 'CH3 5UH' },
+    { start: '17:15', mins: 60, type: 'oneone', child: 'Isla McGregor', pc: 'CH2 3NY' },
+    { start: '18:30', mins: 60, type: 'group', child: 'Junior team · 8 players', pc: 'CH1 4LF' },
+  ],
+  5: [
+    { start: '15:30', mins: 45, type: 'oneone', child: 'Charlie Whitfield', pc: 'CH1 2HT' },
+    { start: '16:30', mins: 60, type: 'oneone', child: 'Alfie Thompson', pc: 'CH2 3NY' },
+    { start: '17:45', mins: 60, type: 'oneone', child: 'Noah Barker', pc: 'CH1 4LF' },
+    { start: '19:00', mins: 45, type: 'oneone', child: 'Grace Ashworth', pc: 'CH4 8AB' },
+  ],
+  6: [
+    { start: '09:00', mins: 180, type: 'camp', child: 'Holiday camp · 12 players', pc: 'CH1 4LF' },
+    { start: '13:00', mins: 90, type: 'group', child: 'Small group tennis', pc: 'CH4 8AB' },
+    { start: '15:00', mins: 60, type: 'oneone', child: 'Freya Collins', pc: 'CH3 5UH' },
+    { start: '16:30', mins: 45, type: 'oneone', child: 'Grace Ashworth', pc: 'CH2 3NY' },
+    { start: '17:30', mins: 60, type: 'oneone', child: 'Noah Barker', pc: 'CH1 2HT' },
+  ],
+  0: [
+    { start: '10:00', mins: 60, type: 'oneone', child: 'Noah Barker', pc: 'CH1 2HT' },
+    { start: '11:30', mins: 60, type: 'oneone', child: 'Maya Patel', pc: 'CH1 4LF' },
+  ],
+};
+
+interface RouteStop {
+  n: number; child: string; type: SessionType; start: string; end: string; mins: number;
+  venue: string; postcode: string; coords: [number, number];
+  driveMins: number; driveKm: number; // from the previous point (home for stop 1)
+}
+
+const kmBetween = (a: [number, number], b: [number, number]) => {
+  const R = 6371, rad = Math.PI / 180;
+  const dLat = (b[0] - a[0]) * rad, dLng = (b[1] - a[1]) * rad;
+  const h = Math.sin(dLat / 2) ** 2 +
+    Math.cos(a[0] * rad) * Math.cos(b[0] * rad) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+};
+
+// Urban driving guess: ~26 km/h door to door, plus a parking buffer.
+const driveMins = (km: number) => Math.max(4, Math.round((km / 26) * 60) + 3);
+
+function routeForDate(dateISO: string): RouteStop[] {
+  const weekday = new Date(`${dateISO}T12:00:00`).getDay();
+  const seeds = [...(ROUTE_WEEK[weekday] || [])].sort((a, b) => toMins(a.start) - toMins(b.start));
+  let prev = ROUTE_HOME.coords;
+  return seeds.map((s, i) => {
+    const v = VENUES[s.pc];
+    const km = kmBetween(prev, v.coords);
+    prev = v.coords;
+    return {
+      n: i + 1, child: s.child, type: s.type, start: s.start,
+      end: minsToTime(toMins(s.start) + s.mins), mins: s.mins,
+      venue: v.venue, postcode: v.postcode, coords: v.coords,
+      driveMins: driveMins(km), driveKm: Math.round(km * 10) / 10,
+    };
+  });
+}
+
+const gmapsDir = (postcode: string) =>
+  `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(postcode)}`;
+
+function RouteTab() {
+  const [dateISO, setDateISO] = useState(isoDate(0));
+  const [mapReady, setMapReady] = useState(false);
+  const [mapFailed, setMapFailed] = useState(false);
+  const mapDiv = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<any>(null);
+  const layerRef = useRef<any>(null);
+
+  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => isoDate(i)), []);
+  const stops = useMemo(() => routeForDate(dateISO), [dateISO]);
+
+  const isToday = dateISO === isoDate(0);
+  const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
+  const nextStop = isToday ? stops.find(s => toMins(s.end) > nowMins) : stops[0];
+  const totalDrive = stops.reduce((a, s) => a + s.driveMins, 0);
+  const locations = new Set(stops.map(s => s.postcode)).size;
+  const finish = stops.length ? stops[stops.length - 1].end : null;
+
+  // Fetch the library once; tear the map down when the tab unmounts.
+  const [lib, setLib] = useState<any>(null);
+  useEffect(() => {
+    let dead = false;
+    loadLeaflet()
+      .then(L => { if (!dead) setLib(L); })
+      .catch(() => { if (!dead) setMapFailed(true); });
+    return () => {
+      dead = true;
+      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+    };
+  }, []);
+
+  // Create the map lazily (the container only renders on days with stops)
+  // and redraw pins + polyline whenever the selected day changes.
+  useEffect(() => {
+    const L = lib;
+    if (stops.length === 0) {
+      // The container unmounts on empty days — drop the map so it can be
+      // recreated cleanly against the fresh node when stops return.
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+        layerRef.current = null;
+        setMapReady(false);
+      }
+      return;
+    }
+    if (!L || !mapDiv.current) return;
+    if (!mapRef.current) {
+      const map = L.map(mapDiv.current, { scrollWheelZoom: false, zoomControl: true });
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        maxZoom: 19,
+      }).addTo(map);
+      layerRef.current = L.layerGroup().addTo(map);
+      mapRef.current = map;
+      setMapReady(true);
+    }
+    const lg = layerRef.current;
+    lg.clearLayers();
+
+    const pin = (html: string, colour: string, size = 30) => L.divIcon({
+      className: '',
+      html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${colour};
+        color:#fff;display:flex;align-items:center;justify-content:center;font:800 13px/1 Inter,sans-serif;
+        border:3px solid #fff;box-shadow:0 2px 8px rgba(15,23,42,0.4)">${html}</div>`,
+      iconSize: [size, size], iconAnchor: [size / 2, size / 2], popupAnchor: [0, -size / 2 - 2],
+    });
+
+    L.marker(ROUTE_HOME.coords, { icon: pin('⌂', '#16A34A', 32) })
+      .bindPopup(`<b>Start / finish</b><br>${ROUTE_HOME.venue} · ${ROUTE_HOME.postcode}`)
+      .addTo(lg);
+
+    stops.forEach(s => {
+      L.marker(s.coords, { icon: pin(String(s.n), TYPE_STYLE[s.type].dot) })
+        .bindPopup(
+          `<b>${s.child}</b><br>${s.start}–${s.end} · ${TYPE_STYLE[s.type].label}<br>` +
+          `${s.venue}<br>${s.postcode}<br>` +
+          `<a href="${gmapsDir(s.postcode)}" target="_blank" rel="noreferrer">Directions ↗</a>`)
+        .addTo(lg);
+    });
+
+    const pts = [ROUTE_HOME.coords, ...stops.map(s => s.coords)];
+    if (pts.length > 1) {
+      L.polyline(pts, { color: ORANGE, weight: 3, opacity: 0.75, dashArray: '7 9' }).addTo(lg);
+    }
+    mapRef.current.fitBounds(L.latLngBounds(pts).pad(0.25));
+    // The container can settle a frame after the tab animates in.
+    setTimeout(() => mapRef.current?.invalidateSize(), 150);
+  }, [lib, stops]);
+
+  const dayLabel = (iso: string, i: number) => {
+    if (i === 0) return 'Today';
+    if (i === 1) return 'Tomorrow';
+    return new Date(`${iso}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short' });
+  };
+
+  return (
+    <div className="space-y-5">
+      <SectionHead sample>Route</SectionHead>
+
+      {/* Day selector */}
+      <div className="flex gap-1.5 overflow-x-auto pb-1">
+        {days.map((d, i) => {
+          const active = d === dateISO;
+          const dt = new Date(`${d}T12:00:00`);
+          return (
+            <button key={d} onClick={() => setDateISO(d)}
+              className={`shrink-0 rounded-xl border px-3.5 py-2 text-center transition-all duration-200
+                ${active
+                  ? 'border-[#FF6B00] bg-[#FF6B00] text-white shadow-md shadow-orange-200'
+                  : 'border-slate-200 bg-white text-slate-600 hover:border-[#FF6B00]/50 hover:text-slate-900'}`}>
+              <div className={`text-[11px] font-bold uppercase tracking-wider ${active ? 'text-white/80' : 'text-slate-400'}`}>
+                {dayLabel(d, i)}
+              </div>
+              <div className="text-sm font-extrabold tabular-nums">
+                {dt.getDate()} {dt.toLocaleDateString('en-GB', { month: 'short' })}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="space-y-5">
+        {/* At a glance — keyed on the day so the tiles animate on every
+            switch; the map card stays un-keyed so Leaflet's DOM survives. */}
+        <div key={`stats-${dateISO}`} className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <StatCard icon="sports" label="Sessions" value={stops.length}
+            sub={`covering ${locations} location${locations === 1 ? '' : 's'}`} />
+          <StatCard icon="directions_car" label="Driving" value={`${totalDrive} min`}
+            accent="#2563EB" delay={60} sub="between all stops" />
+          <StatCard icon="pin_drop" label="Next stop" accent="#16A34A" delay={120}
+            value={nextStop ? nextStop.postcode : '—'}
+            sub={nextStop ? `${nextStop.driveMins} min drive · ${nextStop.start}` : 'day complete'} />
+          <StatCard icon="sports_score" label="Finish" value={finish || '—'}
+            accent="#A78BFA" delay={180} sub={finish ? 'last session ends' : 'no sessions'} />
+        </div>
+
+        {stops.length === 0 ? (
+          <EmptyNote icon="route" title="No sessions this day"
+            hint="Pick another day, or enjoy the day off — you've earned it." />
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-5">
+            {/* Map — ~60% on desktop */}
+            <KSCard className="overflow-hidden lg:col-span-3">
+              {mapFailed ? (
+                <div className="flex h-[340px] flex-col items-center justify-center gap-2 p-6 text-center lg:h-[520px]">
+                  <Icon name="wifi_off" size={28} className="text-slate-300" />
+                  <div className="font-bold text-slate-700">Map couldn't load</div>
+                  <p className="max-w-xs text-sm text-slate-500">
+                    The map tiles need an internet connection. The route list still works —
+                    tap a postcode to open directions.
+                  </p>
+                </div>
+              ) : (
+                <div className="relative">
+                  <div ref={mapDiv} className="z-0 h-[340px] w-full lg:h-[520px]" />
+                  {!mapReady && (
+                    <div className="absolute inset-0 grid place-items-center bg-slate-50">
+                      <div className="flex items-center gap-2 text-slate-400"><Spinner /> Loading map…</div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </KSCard>
+
+            {/* Route list — ~40% on desktop, animated per day switch */}
+            <KSCard key={`list-${dateISO}`} className="animate-fadeInUp p-4 lg:col-span-2">
+              <div className="mb-3 flex items-center gap-2">
+                <span className="grid h-8 w-8 place-items-center rounded-full bg-green-100 text-green-700">
+                  <Icon name="home" size={17} />
+                </span>
+                <div>
+                  <div className="text-sm font-extrabold text-slate-900">Start from home</div>
+                  <div className="text-xs text-slate-500">{ROUTE_HOME.postcode}</div>
+                </div>
+              </div>
+
+              <div className="space-y-0">
+                {stops.map((s, i) => (
+                  <div key={s.n}>
+                    {/* Drive leg */}
+                    <div className="ml-4 flex items-center gap-2 border-l-2 border-dashed border-slate-200 py-1.5 pl-4 text-[11px] font-semibold text-slate-400">
+                      <Icon name="directions_car" size={13} />
+                      {s.driveMins} min drive · {s.driveKm} km
+                    </div>
+                    {/* Stop */}
+                    <div className="flex gap-3 rounded-xl border border-slate-200 bg-white p-3 transition-all duration-200 hover:border-slate-300 hover:shadow-sm">
+                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm font-extrabold text-white"
+                        style={{ background: TYPE_STYLE[s.type].dot }}>
+                        {s.n}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-baseline gap-x-2">
+                          <span className="font-mono text-sm font-bold text-slate-900">{s.start}–{s.end}</span>
+                          <span className="text-[11px] font-bold" style={{ color: TYPE_STYLE[s.type].dot }}>
+                            {TYPE_STYLE[s.type].label} · {s.mins}m
+                          </span>
+                        </div>
+                        <div className="truncate font-bold text-slate-800">{s.child}</div>
+                        <div className="truncate text-xs text-slate-500">{s.venue}</div>
+                        <a href={gmapsDir(s.postcode)} target="_blank" rel="noreferrer"
+                          className="mt-1 inline-flex items-center gap-1 text-xs font-bold text-[#FF6B00] hover:underline">
+                          <Icon name="near_me" size={13} />{s.postcode}
+                        </a>
+                      </div>
+                    </div>
+                    {i === stops.length - 1 && (
+                      <div className="ml-4 flex items-center gap-2 border-l-2 border-dashed border-slate-200 py-1.5 pl-4 text-[11px] font-semibold text-slate-400">
+                        <Icon name="home" size={13} />
+                        head home · {driveMins(kmBetween(s.coords, ROUTE_HOME.coords))} min
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <p className="mt-3 border-t border-slate-100 pt-3 text-[11px] leading-relaxed text-slate-400">
+                Stops run in session-time order. Drive times are straight-line estimates —
+                tap a postcode for turn-by-turn directions in Google Maps.
+              </p>
+            </KSCard>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Dashboard ───────────────────────────────────────────────────────────
+function DashboardTab({ coachName, schedule, unmarked, skills, onToggle, afterMark, goCalendar }: {
+  coachName: string;
+  schedule: KsSchedule | null;
+  unmarked: KsBooking[];
+  skills: KsSkill[];
+  onToggle: (b: KsBooking) => Promise<void>;
+  afterMark: () => void;
+  goCalendar: () => void;
+}) {
+  const hour = new Date().getHours();
+  const daypart = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
+  const today = schedule?.today_sessions || [];
+
+  if (!schedule) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-8 w-64" />
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {[0, 1, 2, 3].map(i => <Skeleton key={i} className="h-24" />)}
+        </div>
+        <Skeleton className="h-48" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-7">
+      <div>
+        <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">
+          Good {daypart}, {coachName.split(' ')[0]} 👋
+        </h1>
+        <p className="mt-1 text-sm text-slate-500">{dayName(schedule.today)}</p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatCard icon="event" label="This week" value={schedule.totals.sessions}
+          sub={`${shortDay(schedule.week_start)} – ${shortDay(schedule.week_end)}`} />
+        <StatCard icon="task_alt" label="Completed" value={schedule.totals.completed}
+          accent="#2563EB" delay={60} sub="marked done this week" />
+        <StatCard icon="today" label="Today" value={today.length} accent="#16A34A" delay={120}
+          sub={today.length ? `first at ${today[0].start_time}` : 'nothing scheduled'} />
+        <StatCard icon="fact_check" label="To mark" value={unmarked.length}
+          accent={unmarked.length ? '#DC2626' : '#94A3B8'} delay={180}
+          sub={unmarked.length ? 'registers outstanding' : 'all caught up'} />
+      </div>
+
+      <section>
+        <SectionHead action={
+          <KSButton tone="ghost" onClick={goCalendar}>Open calendar →</KSButton>
+        }>Today's sessions</SectionHead>
+        {today.length === 0 ? (
+          <EmptyNote icon="sports" title="Nothing on today"
+            hint="Enjoy the rest — tomorrow's sessions are on the calendar." />
+        ) : (
+          <div className="space-y-2.5">
+            {today.map(b => (
+              <SessionRow key={b.id} b={b} onToggle={onToggle} showContact
+                skills={skills} onSaved={afterMark} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section>
+        <SectionHead>Still to mark</SectionHead>
+        <p className="-mt-2 mb-4 text-sm text-slate-500">
+          Sessions that have run without a register. Marking a no-show texts the parent that
+          the session is still payable.
+        </p>
+        {unmarked.length === 0 ? (
+          <EmptyNote icon="verified" title="All caught up"
+            hint="Every session that's run has a register mark." />
+        ) : (
+          <div className="space-y-2.5">
+            {unmarked.map(b => (
+              <SessionRow key={b.id} b={b} onToggle={onToggle} showContact
+                skills={skills} onSaved={afterMark} />
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+// ── Students ────────────────────────────────────────────────────────────
+const SPORT_TINT: Record<string, string> = {
+  Football: '#FF6B00', Tennis: '#16A34A', Basketball: '#2563EB',
+};
+
+function StudentCard({ s, open, onToggle, delay }:
+  { s: MockStudent; open: boolean; onToggle: () => void; delay: number }) {
+  const tint = SPORT_TINT[s.sport] || ORANGE;
+  const attended = s.attendance.filter(a => a.present).length;
+  return (
+    <div className="animate-fadeInUp overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md"
+      style={{ animationDelay: `${delay}ms` }}>
+      <button onClick={onToggle} className="flex w-full items-center gap-3.5 p-4 text-left">
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-sm font-extrabold text-white"
+          style={{ background: `linear-gradient(135deg, ${tint}, ${tint}CC)` }}>
+          {s.child.split(' ').map(w => w[0]).join('').slice(0, 2)}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="font-extrabold text-slate-900">{s.child}</span>
+            <KSPill tone="slate">Age {s.age}</KSPill>
+            <span className="rounded-full px-2.5 py-0.5 text-xs font-bold"
+              style={{ background: `${tint}14`, color: tint }}>{s.sport}</span>
+          </span>
+          <span className="mt-0.5 block truncate text-sm text-slate-500">
+            {s.parent} · {s.phone} · {s.sessionType}
+          </span>
+        </span>
+        <Icon name="expand_more" size={22}
+          className={`shrink-0 text-slate-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="animate-[fadeInUp_0.25s_ease-out_both] border-t border-slate-100 bg-slate-50/50 p-4">
+          {/* Contact row */}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl bg-white p-3.5 shadow-sm">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Parent</div>
+              <div className="mt-1 font-bold text-slate-900">{s.parent}</div>
+              <div className="mt-1 space-y-0.5 text-sm">
+                <a href={`tel:${s.phone.replace(/\s/g, '')}`}
+                  className="block font-semibold text-[#FF6B00] hover:underline">{s.phone}</a>
+                <a href={`mailto:${s.email}`}
+                  className="block break-words text-slate-500 hover:text-slate-800">{s.email}</a>
+              </div>
+              <div className="mt-2 flex items-start gap-1.5 text-xs text-slate-500">
+                <Icon name="home" size={14} className="mt-px shrink-0" />{s.address}
+              </div>
+            </div>
+            <div className="rounded-xl bg-white p-3.5 shadow-sm">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Emergency contact</div>
+              <div className="mt-1 text-sm font-semibold text-slate-800">{s.emergency}</div>
+              <div className="mt-3 text-[11px] font-bold uppercase tracking-wider text-slate-400">Attendance</div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                {s.attendance.map((a, i) => (
+                  <span key={i} title={`${a.date} — ${a.present ? 'present' : 'absent'}`}
+                    className={`grid h-6 w-6 place-items-center rounded-full text-[10px] font-extrabold
+                      ${a.present ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                    {a.present ? 'P' : 'A'}
+                  </span>
+                ))}
+                <span className="ml-1 text-xs font-bold text-slate-500">
+                  {attended}/{s.attendance.length} attended
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Booking history */}
+          <div className="mt-3 rounded-xl bg-white p-3.5 shadow-sm">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Booking history</div>
+            <div className="mt-2 space-y-1.5">
+              {s.history.map((h, i) => (
+                <div key={i} className="flex items-center gap-3 rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-slate-50">
+                  <Icon name="event_available" size={16} className="shrink-0 text-slate-300" />
+                  <span className="w-28 shrink-0 font-semibold text-slate-800">{h.date}</span>
+                  <span className="min-w-0 flex-1 truncate text-slate-600">{h.service}</span>
+                  <span className="shrink-0 font-mono text-xs text-slate-400">{h.time}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Progress notes */}
+          {s.notes.length > 0 && (
+            <div className="mt-3 rounded-xl bg-white p-3.5 shadow-sm">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Progress notes</div>
+              <div className="mt-2 space-y-2.5">
+                {s.notes.map((n, i) => (
+                  <div key={i} className="border-l-2 border-orange-200 pl-3">
+                    <div className="text-xs font-bold text-slate-400">{n.date}</div>
+                    <p className="mt-0.5 text-sm leading-relaxed text-slate-700">{n.text}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StudentsTab({ attendance }: { attendance: KsChildAttendance[] }) {
+  const [query, setQuery] = useState('');
+  const [openId, setOpenId] = useState<number | null>(null);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return MOCK_STUDENTS;
+    return MOCK_STUDENTS.filter(s =>
+      s.child.toLowerCase().includes(q) || s.parent.toLowerCase().includes(q) ||
+      s.sport.toLowerCase().includes(q) || s.email.toLowerCase().includes(q));
+  }, [query]);
+
+  return (
+    <div className="space-y-7">
+      <section>
+        <SectionHead sample>Students</SectionHead>
+        <div className="relative mb-4">
+          <Icon name="search" size={19}
+            className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <KSInput value={query} onChange={e => setQuery(e.target.value)}
+            placeholder="Search by child, parent, sport or email…" className="pl-10" />
+        </div>
+
+        {filtered.length === 0 ? (
+          <EmptyNote icon="person_search" title="No students match"
+            hint={`Nothing found for "${query}". Try a different name or sport.`} />
+        ) : (
+          <div className="space-y-2.5">
+            {filtered.map((s, i) => (
+              <StudentCard key={s.id} s={s} open={openId === s.id}
+                onToggle={() => setOpenId(v => (v === s.id ? null : s.id))}
+                delay={Math.min(i * 50, 400)} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Real attendance pulled from actual bookings, when it exists */}
+      {attendance.length > 0 && (
+        <section>
+          <SectionHead>Live attendance — from real bookings</SectionHead>
+          <p className="-mt-2 mb-4 text-sm text-slate-500">
+            Lowest attendance first. Sessions called off with notice don't count against a player.
+          </p>
+          <div className="space-y-2">
+            {attendance.map(c => (
+              <KSCard key={c.child_name} className="flex flex-wrap items-center gap-3 p-4 transition-colors hover:border-slate-300">
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-slate-900">{c.child_name}</div>
+                  <div className="text-xs text-slate-500">
+                    {c.attended} attended · {c.absent} missed · {c.cancelled} called off
+                    {c.last_seen ? ` · last seen ${shortDay(c.last_seen)}` : ''}
+                  </div>
+                </div>
+                {c.rate !== null && (
+                  <div className="w-28">
+                    <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
+                      <div className={`h-full rounded-full ${
+                        c.rate >= 90 ? 'bg-green-500' : c.rate >= 70 ? 'bg-amber-500' : 'bg-red-500'}`}
+                        style={{ width: `${c.rate}%` }} />
+                    </div>
+                  </div>
+                )}
+                <KSPill tone={c.rate === null ? 'slate'
+                  : c.rate >= 90 ? 'green' : c.rate >= 70 ? 'orange' : 'red'}>
+                  {c.rate === null ? '—' : `${c.rate}%`}
+                </KSPill>
+              </KSCard>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// ── Leads ───────────────────────────────────────────────────────────────
+function AddLeadModal({ onAdd, onClose }:
+  { onAdd: (l: Omit<Lead, 'id' | 'status' | 'added'>) => void; onClose: () => void }) {
+  const [parent, setParent] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [childAge, setChildAge] = useState('');
+  const [interest, setInterest] = useState('Football');
+  const [source, setSource] = useState('Website');
+  const [error, setError] = useState('');
+
+  const save = () => {
+    if (!parent.trim()) { setError("The parent's name is the one thing we need."); return; }
+    onAdd({
+      parent: parent.trim(), phone: phone.trim(), email: email.trim(),
+      childAge: Number(childAge) || 0, interest, source,
+    });
+    onClose();
+  };
+
+  return (
+    <KSModal onClose={onClose}>
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="text-lg font-extrabold tracking-tight text-slate-900">Add a lead</h3>
+        <button onClick={onClose} aria-label="Close"
+          className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700">
+          <Icon name="close" size={20} />
+        </button>
+      </div>
+      <div className="space-y-3.5">
+        <div>
+          <KSLabel>Parent name</KSLabel>
+          <KSInput value={parent} onChange={e => setParent(e.target.value)} placeholder="e.g. Jo Baxter" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <KSLabel>Phone</KSLabel>
+            <KSInput value={phone} onChange={e => setPhone(e.target.value)} placeholder="07…" />
+          </div>
+          <div>
+            <KSLabel>Child's age</KSLabel>
+            <KSInput type="number" min={4} max={17} value={childAge}
+              onChange={e => setChildAge(e.target.value)} placeholder="e.g. 9" />
+          </div>
+        </div>
+        <div>
+          <KSLabel>Email</KSLabel>
+          <KSInput type="email" value={email} onChange={e => setEmail(e.target.value)}
+            placeholder="parent@example.com" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <KSLabel>Interest</KSLabel>
+            <KSSelect value={interest} onChange={e => setInterest(e.target.value)}>
+              {['Football', 'Tennis', 'Basketball', 'Badminton', 'Handball', 'Multi-sport'].map(s =>
+                <option key={s}>{s}</option>)}
+            </KSSelect>
+          </div>
+          <div>
+            <KSLabel>Source</KSLabel>
+            <KSSelect value={source} onChange={e => setSource(e.target.value)}>
+              {['Website', 'Word of mouth', 'Referral', 'School', 'Social media'].map(s =>
+                <option key={s}>{s}</option>)}
+            </KSSelect>
+          </div>
+        </div>
+        {error && <KSAlert>{error}</KSAlert>}
+        <KSButton onClick={save} className="w-full">Save lead</KSButton>
+      </div>
+    </KSModal>
+  );
+}
+
+function LeadModal({ lead, onStatus, onClose }:
+  { lead: Lead; onStatus: (id: number, s: Lead['status']) => void; onClose: () => void }) {
+  return (
+    <KSModal onClose={onClose}>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-extrabold tracking-tight text-slate-900">{lead.parent}</h3>
+          <div className="mt-1 text-sm text-slate-500">
+            Child age {lead.childAge || '—'} · {lead.interest} · via {lead.source}
+          </div>
+        </div>
+        <button onClick={onClose} aria-label="Close"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700">
+          <Icon name="close" size={20} />
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        <div className="flex flex-wrap gap-2">
+          {lead.phone && (
+            <a href={`tel:${lead.phone.replace(/\s/g, '')}`}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-[#FF6B00] px-4 py-2 text-sm font-bold text-white shadow-sm transition-all hover:bg-[#E85F00] hover:shadow-md">
+              <Icon name="call" size={17} />{lead.phone}
+            </a>
+          )}
+          {lead.email && (
+            <a href={`mailto:${lead.email}`}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50">
+              <Icon name="mail" size={17} />Email
+            </a>
+          )}
+        </div>
+
+        <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          Added {shortDay(lead.added)} · currently{' '}
+          <span className="font-bold">{LEAD_STATUS[lead.status].label.toLowerCase()}</span>
+        </div>
+
+        <div>
+          <KSLabel>Move to</KSLabel>
+          <div className="grid grid-cols-4 gap-2">
+            {(Object.keys(LEAD_STATUS) as Lead['status'][]).map(s => (
+              <button key={s} onClick={() => onStatus(lead.id, s)}
+                className={`rounded-xl border px-2 py-2 text-xs font-bold transition-colors
+                  ${lead.status === s
+                    ? 'border-[#FF6B00] bg-orange-50 text-[#FF6B00]'
+                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'}`}>
+                {LEAD_STATUS[s].label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </KSModal>
+  );
+}
+
+function LeadsTab({ leads, setLeads }:
+  { leads: Lead[]; setLeads: React.Dispatch<React.SetStateAction<Lead[]>> }) {
+  const [adding, setAdding] = useState(false);
+  const [selected, setSelected] = useState<Lead | null>(null);
+
+  const setStatus = (id: number, status: Lead['status']) => {
+    setLeads(ls => ls.map(l => (l.id === id ? { ...l, status } : l)));
+    setSelected(sel => (sel && sel.id === id ? { ...sel, status } : sel));
+  };
+
+  const addLead = (l: Omit<Lead, 'id' | 'status' | 'added'>) => {
+    setLeads(ls => [
+      { ...l, id: Math.max(0, ...ls.map(x => x.id)) + 1, status: 'new', added: isoDate(0) },
+      ...ls,
+    ]);
+  };
+
+  return (
+    <div className="space-y-4">
+      <SectionHead sample action={
+        <KSButton onClick={() => setAdding(true)}>
+          <Icon name="add" size={18} />Add lead
+        </KSButton>
+      }>Leads</SectionHead>
+      <p className="-mt-4 text-sm text-slate-500">
+        Prospective parents who haven't booked yet. Click a lead to call them or move them
+        along the pipeline.
+      </p>
+
+      {leads.length === 0 ? (
+        <EmptyNote icon="person_add" title="No leads yet"
+          hint="Add parents who've enquired and track them from first call to first booking." />
+      ) : (
+        <KSCard className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  <th className="px-4 py-3">Parent</th>
+                  <th className="px-4 py-3">Contact</th>
+                  <th className="px-4 py-3">Child</th>
+                  <th className="px-4 py-3">Interest</th>
+                  <th className="px-4 py-3">Source</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Added</th>
+                </tr>
+              </thead>
+              <tbody>
+                {leads.map(l => (
+                  <tr key={l.id} onClick={() => setSelected(l)}
+                    className="cursor-pointer border-b border-slate-100 transition-colors last:border-0 hover:bg-orange-50/60">
+                    <td className="px-4 py-3 font-bold text-slate-900">{l.parent}</td>
+                    <td className="px-4 py-3">
+                      <div className="font-semibold text-slate-700">{l.phone || '—'}</div>
+                      <div className="text-xs text-slate-400">{l.email}</div>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{l.childAge ? `Age ${l.childAge}` : '—'}</td>
+                    <td className="px-4 py-3 text-slate-600">{l.interest}</td>
+                    <td className="px-4 py-3 text-slate-500">{l.source}</td>
+                    <td className="px-4 py-3">
+                      <KSPill tone={LEAD_STATUS[l.status].tone}>{LEAD_STATUS[l.status].label}</KSPill>
+                    </td>
+                    <td className="px-4 py-3 text-xs tabular-nums text-slate-400">{shortDay(l.added)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </KSCard>
+      )}
+
+      {adding && <AddLeadModal onAdd={addLead} onClose={() => setAdding(false)} />}
+      {selected && (
+        <LeadModal lead={selected} onStatus={setStatus} onClose={() => setSelected(null)} />
+      )}
+    </div>
+  );
+}
+
+// ── Finance ─────────────────────────────────────────────────────────────
+function RevenueChart({ values, labels }: { values: number[]; labels: string[] }) {
+  const max = Math.max(...values, 1);
+  return (
+    <div>
+      <div className="flex h-44 items-end gap-2.5 sm:gap-4">
+        {values.map((v, i) => (
+          <div key={labels[i]} className="group flex h-full flex-1 flex-col items-center justify-end gap-1.5">
+            <div className="text-[11px] font-bold tabular-nums text-slate-500 opacity-0 transition-opacity group-hover:opacity-100 sm:opacity-100">
+              £{v.toLocaleString()}
+            </div>
+            <div className="w-full max-w-[52px] rounded-t-lg bg-gradient-to-t from-[#FF6B00] to-[#FF8A2B] shadow-sm transition-all duration-200 group-hover:brightness-110"
+              style={{ height: `${Math.max((v / max) * 100, 4)}%` }} />
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 flex gap-2.5 border-t border-slate-100 pt-2 sm:gap-4">
+        {labels.map(l => (
+          <div key={l} className="flex-1 text-center text-xs font-semibold text-slate-500">{l}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SignupsChart({ values, labels }: { values: number[]; labels: string[] }) {
+  const max = Math.max(...values, 1);
+  const W = 600, H = 150, PAD = 24;
+  const pts = values.map((v, i) => ({
+    x: PAD + (i * (W - PAD * 2)) / (values.length - 1),
+    y: H - PAD - ((H - PAD * 2) * v) / max,
+    v,
+  }));
+  const line = pts.map(p => `${p.x},${p.y}`).join(' ');
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img"
+        aria-label={`New students per month: ${values.join(', ')}`}>
+        <polygon points={`${pts[0].x},${H - PAD} ${line} ${pts[pts.length - 1].x},${H - PAD}`}
+          fill={ORANGE} opacity="0.08" />
+        <polyline points={line} fill="none" stroke={ORANGE} strokeWidth="3"
+          strokeLinecap="round" strokeLinejoin="round" />
+        {pts.map((p, i) => (
+          <g key={i}>
+            <circle cx={p.x} cy={p.y} r="5" fill="#fff" stroke={ORANGE} strokeWidth="3" />
+            <text x={p.x} y={p.y - 11} textAnchor="middle" fontSize="13" fontWeight="700" fill="#334155">
+              {p.v}
+            </text>
+          </g>
+        ))}
+      </svg>
+      <div className="flex border-t border-slate-100 pt-2">
+        {labels.map(l => (
+          <div key={l} className="flex-1 text-center text-xs font-semibold text-slate-500">{l}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FinanceTab() {
+  const labels = monthLabels();
+  const total = FIN_REVENUE.reduce((a, b) => a + b, 0);
+  const thisMonth = FIN_REVENUE[FIN_REVENUE.length - 1];
+  const students = MOCK_STUDENTS.length;
+  const avg = Math.round(total / students);
+
+  return (
+    <div className="space-y-6">
+      <SectionHead sample>Finance</SectionHead>
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatCard icon="payments" label="Total revenue" value={`£${total.toLocaleString()}`}
+          sub="last 6 months" />
+        <StatCard icon="groups" label="Active students" value={students} accent="#2563EB"
+          delay={60} sub="on the books" />
+        <StatCard icon="person" label="Avg per student" value={`£${avg.toLocaleString()}`}
+          accent="#16A34A" delay={120} sub="6-month average" />
+        <StatCard icon="calendar_month" label="This month" value={`£${thisMonth.toLocaleString()}`}
+          accent="#A78BFA" delay={180} sub={`${labels[labels.length - 1]} so far`} />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <KSCard className="p-5 transition-shadow hover:shadow-md">
+          <h3 className="font-extrabold tracking-tight text-slate-900">Revenue</h3>
+          <p className="mb-4 mt-0.5 text-xs text-slate-500">Last 6 months</p>
+          <RevenueChart values={FIN_REVENUE} labels={labels} />
+        </KSCard>
+        <KSCard className="p-5 transition-shadow hover:shadow-md">
+          <h3 className="font-extrabold tracking-tight text-slate-900">New sign-ups</h3>
+          <p className="mb-4 mt-0.5 text-xs text-slate-500">New students per month</p>
+          <SignupsChart values={FIN_SIGNUPS} labels={labels} />
+        </KSCard>
+      </div>
+
+      <KSCard className="p-5">
+        <h3 className="font-extrabold tracking-tight text-slate-900">Outstanding payments</h3>
+        <p className="mb-4 mt-0.5 text-xs text-slate-500">
+          Students with a balance to chase — oldest first.
+        </p>
+        <div className="space-y-2">
+          {MOCK_OUTSTANDING.map(o => (
+            <div key={o.student}
+              className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 px-3.5 py-3 transition-colors hover:border-slate-300 hover:bg-slate-50/60">
+              <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl
+                ${o.due.startsWith('Overdue') ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-600'}`}>
+                <Icon name={o.due.startsWith('Overdue') ? 'priority_high' : 'schedule'} size={18} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="font-bold text-slate-900">{o.student}</div>
+                <div className="text-xs text-slate-500">{o.reason}</div>
+              </div>
+              <div className="text-right">
+                <div className="font-extrabold tabular-nums text-slate-900">{money(o.amount_pence)}</div>
+                <div className={`text-[11px] font-bold ${o.due.startsWith('Overdue') ? 'text-red-600' : 'text-slate-400'}`}>
+                  {o.due}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </KSCard>
+    </div>
+  );
+}
+
+// ── Settings ────────────────────────────────────────────────────────────
 function AvailabilityPanel({ onChanged }: { onChanged: () => void }) {
   const [blocks, setBlocks] = useState<KsBlock[]>([]);
   const [date, setDate] = useState(isoDate(1));
@@ -112,9 +1852,10 @@ function AvailabilityPanel({ onChanged }: { onChanged: () => void }) {
 
   return (
     <KSCard className="p-5">
-      <h2 className="text-lg font-bold text-slate-900">Block out time</h2>
+      <h3 className="font-extrabold tracking-tight text-slate-900">Block out time</h3>
       <p className="mt-1 text-sm text-slate-600">
         Parents won't be offered these slots. Existing bookings are never affected.
+        Blocked time also shows on your calendar.
       </p>
 
       <div className="mt-4 space-y-3">
@@ -153,14 +1894,14 @@ function AvailabilityPanel({ onChanged }: { onChanged: () => void }) {
       </div>
 
       <div className="mt-6 border-t border-slate-100 pt-4">
-        <h3 className="text-sm font-bold uppercase tracking-wide text-slate-500">
+        <h4 className="text-sm font-bold uppercase tracking-wide text-slate-500">
           Blocked ({blocks.length})
-        </h3>
+        </h4>
         <div className="mt-3 space-y-2">
           {blocks.length === 0 ? (
             <p className="text-sm text-slate-500">Nothing blocked — you're available on every slot.</p>
           ) : blocks.map(b => (
-            <div key={b.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+            <div key={b.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm transition-colors hover:bg-slate-100">
               <div className="min-w-0 flex-1">
                 <div className="font-semibold text-slate-800">{shortDay(b.date)}</div>
                 <div className="text-xs text-slate-500">
@@ -170,7 +1911,7 @@ function AvailabilityPanel({ onChanged }: { onChanged: () => void }) {
                 </div>
               </div>
               <button onClick={() => remove(b.id)}
-                className="shrink-0 rounded-lg px-2 py-1 text-xs font-bold text-slate-400 hover:bg-red-50 hover:text-red-600">
+                className="shrink-0 rounded-lg px-2 py-1 text-xs font-bold text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600">
                 Remove
               </button>
             </div>
@@ -181,6 +1922,49 @@ function AvailabilityPanel({ onChanged }: { onChanged: () => void }) {
   );
 }
 
+function SettingsTab({ coach, onChanged, onSignOut }:
+  { coach: { name: string; slug: string }; onChanged: () => void; onSignOut: () => void }) {
+  return (
+    <div className="space-y-4">
+      <SectionHead>Settings</SectionHead>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-4">
+          <KSCard className="p-5">
+            <div className="flex items-center gap-4">
+              <span className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-[#FF8A2B] to-[#FF6B00] text-lg font-extrabold text-white">
+                {coach.name.split(' ').map(w => w[0]).join('').slice(0, 2)}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="font-extrabold text-slate-900">{coach.name}</div>
+                <div className="text-sm text-slate-500">Signed in as <span className="font-mono">{coach.slug}</span></div>
+              </div>
+              <KSButton tone="danger" onClick={onSignOut}>Sign out</KSButton>
+            </div>
+          </KSCard>
+
+          <KSCard className="p-5">
+            <div className="flex items-start gap-3">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-amber-50 text-amber-600">
+                <Icon name="sms" size={19} />
+              </span>
+              <div className="text-sm leading-relaxed text-slate-600">
+                <div className="font-bold text-slate-900">Parent texting is live</div>
+                Booking confirmations, reminders and no-show charge notices send real SMS
+                messages. Marking a session as a <span className="font-bold">no-show</span> texts
+                the parent that the session is still payable — use{' '}
+                <span className="font-bold">called off</span> when they gave notice.
+              </div>
+            </div>
+          </KSCard>
+        </div>
+
+        <AvailabilityPanel onChanged={onChanged} />
+      </div>
+    </div>
+  );
+}
+
+// ── Login ───────────────────────────────────────────────────────────────
 function CoachLogin({ onAuthed }: { onAuthed: (c: KsSchedule['coach']) => void }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -208,7 +1992,7 @@ function CoachLogin({ onAuthed }: { onAuthed: (c: KsSchedule['coach']) => void }
       <div className="text-center">
         <div className="flex justify-center"><KSMark size={48} /></div>
         <h1 className="mt-4 text-2xl font-extrabold tracking-tight text-slate-900">Coach sign-in</h1>
-        <p className="mt-1.5 text-slate-600">Your schedule, sessions and availability.</p>
+        <p className="mt-1.5 text-slate-600">Your calendar, students and finances in one place.</p>
       </div>
       <KSCard className="mt-7 p-6">
         <form onSubmit={submit} className="space-y-4">
@@ -231,13 +2015,52 @@ function CoachLogin({ onAuthed }: { onAuthed: (c: KsSchedule['coach']) => void }
   );
 }
 
+// ── Shell: sidebar + mobile drawer ──────────────────────────────────────
+function NavItems({ tab, onPick, badges }:
+  { tab: CoachTab; onPick: (t: CoachTab) => void; badges: Partial<Record<CoachTab, number>> }) {
+  return (
+    <nav className="flex flex-col gap-1">
+      {NAV.map(n => {
+        const active = tab === n.id;
+        const badge = badges[n.id] || 0;
+        return (
+          <button key={n.id} onClick={() => onPick(n.id)}
+            className={`relative flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-bold transition-all duration-200
+              ${active
+                ? 'bg-orange-50 text-[#FF6B00]'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`}>
+            {active && (
+              <span className="absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-[#FF6B00]" />
+            )}
+            <Icon name={n.icon} size={21} fill={active} />
+            <span className="flex-1 text-left">{n.label}</span>
+            {badge > 0 && (
+              <span className="grid h-5 min-w-[20px] place-items-center rounded-full bg-[#FF6B00] px-1 text-[11px] font-extrabold text-white">
+                {badge}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+// ── Root ────────────────────────────────────────────────────────────────
 export default function KSCoach() {
   const [coach, setCoach] = useState<KsSchedule['coach'] | null>(null);
   const [schedule, setSchedule] = useState<KsSchedule | null>(null);
   const [week, setWeek] = useState<string | undefined>(undefined);
   const [booting, setBooting] = useState(true);
-  const [tab, setTab] = useState<'week' | 'today' | 'availability'>('week');
+  const [tab, setTab] = useState<CoachTab>('dashboard');
+  const [drawer, setDrawer] = useState(false);
   const [error, setError] = useState('');
+  const [skills, setSkills] = useState<KsSkill[]>([]);
+  const [unmarked, setUnmarked] = useState<KsBooking[]>([]);
+  const [attendance, setAttendance] = useState<KsChildAttendance[]>([]);
+  const [selectedEvent, setSelectedEvent] = useState<CalEvent | null>(null);
+  // Leads live here (not in the tab) so pipeline changes survive tab switches.
+  const [leads, setLeads] = useState<Lead[]>(MOCK_LEADS);
 
   const load = useCallback(async (w?: string) => {
     try {
@@ -250,13 +2073,29 @@ export default function KSCoach() {
     }
   }, []);
 
+  // The register is the coach's chase-list, so it reloads whenever a mark is
+  // saved anywhere on the dashboard, not just on the dashboard tab.
+  const loadRegister = useCallback(async () => {
+    try {
+      const [u, s] = await Promise.all([ksApi.unmarkedSessions(), ksApi.attendanceSummary(true)]);
+      setUnmarked(u.sessions);
+      setAttendance(s.children);
+    } catch { /* the schedule still works without it */ }
+  }, []);
+
   useEffect(() => {
     if (!getCoachToken()) { setBooting(false); return; }
     ksApi.coachMe()
-      .then(r => { setCoach(r.coach); return load(); })
+      .then(r => { setCoach(r.coach); return Promise.all([load(), loadRegister()]); })
       .catch(() => clearCoachToken())
       .finally(() => setBooting(false));
-  }, [load]);
+    ksApi.skills().then(r => setSkills(r.skills)).catch(() => { /* chips hide */ });
+  }, [load, loadRegister]);
+
+  const afterMark = useCallback(() => {
+    load(week);
+    loadRegister();
+  }, [load, loadRegister, week]);
 
   const shiftWeek = (days: number) => {
     const base = schedule ? new Date(`${schedule.week_start}T00:00:00`) : new Date();
@@ -266,10 +2105,16 @@ export default function KSCoach() {
     load(iso);
   };
 
+  const goToday = () => { setWeek(undefined); load(undefined); };
+
   const toggleDone = async (b: KsBooking) => {
     try {
       await ksApi.complete(b.ref, b.status !== 'completed');
       await load(week);
+      // Keep an open detail popup in sync with the new status.
+      setSelectedEvent(sel => (sel?.booking?.ref === b.ref
+        ? { ...sel, booking: { ...sel.booking!, status: b.status === 'completed' ? 'confirmed' : 'completed' } }
+        : sel));
     } catch (e: any) {
       setError(e?.message || 'Could not update that session.');
     }
@@ -282,6 +2127,8 @@ export default function KSCoach() {
     setSchedule(null);
   };
 
+  const pickTab = (t: CoachTab) => { setTab(t); setDrawer(false); setError(''); };
+
   if (booting) {
     return (
       <KSShell nav={false}>
@@ -291,118 +2138,127 @@ export default function KSCoach() {
   }
 
   if (!coach) {
-    return <KSShell nav={false}><CoachLogin onAuthed={c => { setCoach(c); load(); }} /></KSShell>;
+    return <KSShell nav={false}><CoachLogin onAuthed={c => { setCoach(c); load(); loadRegister(); }} /></KSShell>;
   }
 
-  const today = schedule?.today_sessions || [];
+  const badges: Partial<Record<CoachTab, number>> = {
+    dashboard: unmarked.length,
+    leads: leads.filter(l => l.status === 'new').length,
+  };
+  const activeLabel = NAV.find(n => n.id === tab)?.label || '';
+
+  const sidebarFooter = (
+    <div className="border-t border-slate-200 p-3">
+      <div className="flex items-center gap-2.5 rounded-xl px-2 py-1.5">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-[#FF8A2B] to-[#FF6B00] text-xs font-extrabold text-white">
+          {coach.name.split(' ').map(w => w[0]).join('').slice(0, 2)}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-bold text-slate-900">{coach.name}</div>
+          <div className="text-[11px] text-slate-400">KS Coach</div>
+        </div>
+        <button onClick={signOut} title="Sign out"
+          className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600">
+          <Icon name="logout" size={18} />
+        </button>
+      </div>
+    </div>
+  );
 
   return (
     <KSShell nav={false} footer={false}>
-      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3 sm:px-6">
-          <KSMark size={34} />
-          <div className="min-w-0 flex-1">
-            <div className="truncate font-extrabold tracking-tight text-slate-900">{coach.name}</div>
-            <div className="text-[11px] font-medium text-slate-500">KS Coach dashboard</div>
+      <div className="flex min-h-screen bg-slate-50">
+        {/* ── Desktop sidebar ─────────────────────────────────────── */}
+        <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-slate-200 bg-white lg:flex">
+          <div className="flex items-center gap-2.5 border-b border-slate-200 p-4">
+            <KSMark size={34} />
+            <div className="min-w-0">
+              <div className="truncate text-sm font-extrabold tracking-tight text-slate-900">KS Sports</div>
+              <div className="text-[11px] font-medium text-slate-400">Coach dashboard</div>
+            </div>
           </div>
-          <KSButton tone="ghost" onClick={() => load(week)}>Refresh</KSButton>
-          <KSButton tone="ghost" onClick={signOut}>Sign out</KSButton>
-        </div>
-        <div className="mx-auto flex max-w-5xl gap-1 px-3 sm:px-5">
-          {([
-            ['week', 'This week'],
-            ['today', `Today${today.length ? ` (${today.length})` : ''}`],
-            ['availability', 'Availability'],
-          ] as const).map(([id, label]) => (
-            <button key={id} onClick={() => setTab(id)}
-              className={`relative px-3 py-2.5 text-sm font-bold transition-colors
-                ${tab === id ? 'text-[#FF6B00]' : 'text-slate-500 hover:text-slate-800'}`}>
-              {label}
-              {tab === id && <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-[#FF6B00]" />}
+          <div className="flex-1 overflow-y-auto p-3">
+            <NavItems tab={tab} onPick={pickTab} badges={badges} />
+          </div>
+          {sidebarFooter}
+        </aside>
+
+        {/* ── Main column ─────────────────────────────────────────── */}
+        <div className="min-w-0 flex-1">
+          {/* Mobile top bar */}
+          <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur-md lg:hidden">
+            <button onClick={() => setDrawer(true)} aria-label="Open menu"
+              className="grid h-9 w-9 place-items-center rounded-xl text-slate-600 transition-colors hover:bg-slate-100">
+              <Icon name="menu" size={22} />
             </button>
-          ))}
+            <KSMark size={30} />
+            <div className="min-w-0 flex-1 truncate font-extrabold tracking-tight text-slate-900">
+              {activeLabel}
+            </div>
+            <button onClick={() => { load(week); loadRegister(); }} aria-label="Refresh"
+              className="grid h-9 w-9 place-items-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800">
+              <Icon name="refresh" size={20} />
+            </button>
+          </header>
+
+          <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
+            {error && (
+              <div className="mb-5"><KSAlert>{error}</KSAlert></div>
+            )}
+            {/* keyed on the tab so every switch plays the entrance animation */}
+            <div key={tab} className="animate-fadeInUp">
+              {tab === 'dashboard' && (
+                <DashboardTab coachName={coach.name} schedule={schedule} unmarked={unmarked}
+                  skills={skills} onToggle={toggleDone} afterMark={afterMark}
+                  goCalendar={() => pickTab('calendar')} />
+              )}
+              {tab === 'calendar' && (
+                <CalendarTab schedule={schedule} loading={!schedule}
+                  onShiftWeek={shiftWeek} onToday={goToday} onOpen={setSelectedEvent} />
+              )}
+              {tab === 'route' && <RouteTab />}
+              {tab === 'students' && <StudentsTab attendance={attendance} />}
+              {tab === 'leads' && <LeadsTab leads={leads} setLeads={setLeads} />}
+              {tab === 'finance' && <FinanceTab />}
+              {tab === 'settings' && (
+                <SettingsTab coach={coach} onChanged={() => load(week)} onSignOut={signOut} />
+              )}
+            </div>
+          </main>
         </div>
-      </header>
+      </div>
 
-      <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
-        {error && <div className="mb-5"><KSAlert>{error}</KSAlert></div>}
-
-        {/* ── Totals ─────────────────────────────────────────────── */}
-        {schedule && (
-          <div className="mb-6 grid grid-cols-3 gap-3">
-            {[
-              ['Sessions', schedule.totals.sessions, 'text-slate-900'],
-              ['Completed', schedule.totals.completed, 'text-blue-600'],
-              ['Cancelled', schedule.totals.cancelled, 'text-red-500'],
-            ].map(([label, value, tone]) => (
-              <KSCard key={label as string} className="p-4">
-                <div className="text-xs font-bold uppercase tracking-wider text-slate-500">{label}</div>
-                <div className={`mt-1 text-2xl font-extrabold ${tone}`}>{value}</div>
-              </KSCard>
-            ))}
-          </div>
-        )}
-
-        {/* ── Week view ──────────────────────────────────────────── */}
-        {tab === 'week' && schedule && (
-          <>
-            <div className="mb-4 flex items-center justify-between gap-2">
-              <KSButton tone="secondary" onClick={() => shiftWeek(-7)}>← Previous</KSButton>
-              <div className="text-center text-sm font-bold text-slate-700">
-                {shortDay(schedule.week_start)} – {shortDay(schedule.week_end)}
+      {/* ── Mobile drawer ───────────────────────────────────────────── */}
+      {drawer && (
+        <div className="fixed inset-0 z-50 lg:hidden" onClick={() => setDrawer(false)}>
+          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" />
+          <div onClick={e => e.stopPropagation()}
+            className="absolute right-0 top-0 flex h-full w-72 flex-col bg-white shadow-2xl animate-slideInRight">
+            <div className="flex items-center gap-2.5 border-b border-slate-200 p-4">
+              <KSMark size={32} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-extrabold tracking-tight text-slate-900">KS Sports</div>
+                <div className="text-[11px] font-medium text-slate-400">Coach dashboard</div>
               </div>
-              <KSButton tone="secondary" onClick={() => shiftWeek(7)}>Next →</KSButton>
+              <button onClick={() => setDrawer(false)} aria-label="Close menu"
+                className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700">
+                <Icon name="close" size={20} />
+              </button>
             </div>
-
-            <div className="space-y-4">
-              {schedule.days.map(d => (
-                <div key={d.date}>
-                  <h3 className={`mb-2 flex items-center gap-2 text-sm font-bold
-                    ${d.is_today ? 'text-[#FF6B00]' : 'text-slate-700'}`}>
-                    {dayName(d.date)}
-                    {d.is_today && <KSPill tone="orange">Today</KSPill>}
-                  </h3>
-                  {d.blocks.map(b => (
-                    <div key={b.id} className="mb-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3.5 py-2 text-sm text-slate-500">
-                      Blocked {b.start_time === '00:00' && b.end_time === '23:59'
-                        ? 'all day' : `${b.start_time}–${b.end_time}`}
-                      {b.reason ? ` · ${b.reason}` : ''}
-                    </div>
-                  ))}
-                  {d.sessions.length === 0 && d.blocks.length === 0 ? (
-                    <p className="px-1 text-sm text-slate-400">No sessions</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {d.sessions.map(b => (
-                        <SessionRow key={b.id} b={b} onToggle={toggleDone} showContact={d.is_today} />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
+            <div className="flex-1 overflow-y-auto p-3">
+              <NavItems tab={tab} onPick={pickTab} badges={badges} />
             </div>
-          </>
-        )}
-
-        {/* ── Today ──────────────────────────────────────────────── */}
-        {tab === 'today' && (
-          <div className="space-y-3">
-            <h2 className="text-lg font-bold text-slate-900">
-              {schedule ? dayName(schedule.today) : 'Today'}
-            </h2>
-            {today.length === 0 ? (
-              <KSCard className="p-8 text-center text-slate-500">
-                Nothing on today. Enjoy the rest.
-              </KSCard>
-            ) : today.map(b => (
-              <SessionRow key={b.id} b={b} onToggle={toggleDone} showContact />
-            ))}
+            {sidebarFooter}
           </div>
-        )}
+        </div>
+      )}
 
-        {/* ── Availability ───────────────────────────────────────── */}
-        {tab === 'availability' && <AvailabilityPanel onChanged={() => load(week)} />}
-      </main>
+      {/* ── Session detail popup ────────────────────────────────────── */}
+      {selectedEvent && (
+        <EventModal ev={selectedEvent} skills={skills}
+          onClose={() => setSelectedEvent(null)}
+          onToggle={toggleDone} onSaved={afterMark} />
+      )}
     </KSShell>
   );
 }

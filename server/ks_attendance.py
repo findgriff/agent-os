@@ -104,9 +104,16 @@ def mark(coach: dict, body: dict) -> tuple[int, dict]:
 
     sms = None
     if status == "absent":
+        # A no-show charge the parent is never told about is the one thing
+        # this must not do, so fall back to the number on their account when
+        # the booking itself carries none (guest checkouts often don't).
+        if not (booking.get("parent_phone") or "").strip():
+            account = ks.parent_by_email(booking["parent_email"])
+            if account:
+                booking = {**booking, "parent_phone": account.get("phone")}
         sms = ks.notify(booking, "absent_charge")
 
-    row = ks._one("SELECT * FROM attendance WHERE booking_id = ? AND child_name = ?",
+    row = ks._one(_HISTORY_SQL + "WHERE a.booking_id = ? AND a.child_name = ?",
                   (booking["id"], child_name))
     return 200, {"attendance": _dto(row), "sms": sms,
                  "charged_pence": booking["price_pence"] if CHARGEABLE.get(status) else 0}

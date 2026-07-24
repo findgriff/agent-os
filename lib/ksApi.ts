@@ -118,6 +118,103 @@ export interface KsSchedule {
   totals: { sessions: number; completed: number; cancelled: number };
 }
 
+export type KsAttendanceStatus = 'attended' | 'absent' | 'cancelled';
+
+export interface KsAttendance {
+  id: number;
+  booking_id: number;
+  child_name: string;
+  status: KsAttendanceStatus;
+  notes: string | null;
+  marked_by: string | null;
+  created_at: number;
+  chargeable: boolean;
+  date: string | null;
+  start_time: string | null;
+  service_name: string | null;
+  coach_name: string | null;
+  ref: string | null;
+  price_pence: number | null;
+}
+
+export interface KsAttendanceTotals {
+  attended: number; absent: number; cancelled: number; sessions: number;
+  /** Attended as a % of sessions the child was expected at. Null when none yet. */
+  rate: number | null;
+  charged_pence: number;
+}
+
+export interface KsChildAttendance extends KsAttendanceTotals {
+  child_name: string;
+  last_seen: string | null;
+}
+
+export interface KsSkill { key: string; label: string }
+
+export interface KsProgressNote {
+  id: number;
+  booking_id: number;
+  child_name: string;
+  coach_name: string | null;
+  skills: string[];
+  skill_labels: string[];
+  notes: string | null;
+  rating: number | null;
+  rating_label: string | null;
+  created_at: number;
+  date: string | null;
+  start_time: string | null;
+  service_name: string | null;
+  ref: string | null;
+}
+
+export interface KsProgress {
+  child_name: string;
+  notes: KsProgressNote[];
+  skills_worked_on: { key: string; label: string; sessions: number }[];
+  summary: {
+    sessions: number;
+    average_rating: number | null;
+    recent_ratings: number[];
+    latest: string | null;
+  };
+}
+
+export interface KsPlan {
+  key: string;
+  label: string;
+  sessions: number | null;
+  amount_pence: number;
+  blurb: string;
+}
+
+export interface KsSubscription {
+  id: number;
+  parent_email: string;
+  plan: string;
+  plan_label: string;
+  sessions_included: number | null;
+  amount_pence: number;
+  active: boolean;
+  next_billing_date: string | null;
+  created_at: number;
+  cancelled_at: number | null;
+  sessions_used_this_month?: number;
+  allowance_remaining?: number | null;
+}
+
+export interface KsSubInvoice {
+  id: number;
+  subscription_id: number;
+  period_start: string;
+  period_end: string;
+  amount_pence: number;
+  status: 'pending' | 'paid' | 'failed';
+  checkout_url: string | null;
+  paid_at: number | null;
+  created_at: number;
+}
+
 export interface NewBooking {
   service_key: string;
   date: string;
@@ -187,6 +284,55 @@ export const ksApi = {
 
   unblock: (id: number) =>
     req<{ ok: boolean }>('POST', '/api/ks/coach/availability', { delete_id: id }, getCoachToken()),
+
+  // ── Attendance (coach writes, parent reads) ──────────────────────────
+  markAttendance: (data: {
+    ref: string; status: KsAttendanceStatus; child_name?: string; notes?: string;
+  }) => req<{ attendance: KsAttendance; sms: string | null; charged_pence: number }>(
+    'POST', '/api/ks/attendance/mark', data, getCoachToken()),
+
+  attendanceHistory: (child: string, asCoach = false) =>
+    req<{ child_name: string; attendance: KsAttendance[]; totals: KsAttendanceTotals }>(
+      'GET', `/api/ks/attendance/history?child=${encodeURIComponent(child)}`,
+      undefined, asCoach ? getCoachToken() : getParentToken()),
+
+  attendanceSummary: (asCoach = false) =>
+    req<{ children: KsChildAttendance[] }>('GET', '/api/ks/attendance/summary',
+      undefined, asCoach ? getCoachToken() : getParentToken()),
+
+  unmarkedSessions: () =>
+    req<{ sessions: KsBooking[] }>('GET', '/api/ks/attendance/unmarked',
+      undefined, getCoachToken()),
+
+  // ── Progress ─────────────────────────────────────────────────────────
+  skills: () => req<{ skills: KsSkill[]; ratings: Record<string, string> }>(
+    'GET', '/api/ks/progress/skills'),
+
+  saveProgress: (data: {
+    ref: string; child_name?: string; skills?: string[]; notes?: string; rating?: number | null;
+  }) => req<{ note: KsProgressNote }>('POST', '/api/ks/progress/save', data, getCoachToken()),
+
+  progressChildren: () =>
+    req<{ children: string[] }>('GET', '/api/ks/progress/children', undefined, getParentToken()),
+
+  progress: (child: string, asCoach = false) =>
+    req<KsProgress>('GET', `/api/ks/progress/${encodeURIComponent(child)}`,
+      undefined, asCoach ? getCoachToken() : getParentToken()),
+
+  // ── Subscriptions ────────────────────────────────────────────────────
+  plans: () => req<{ plans: KsPlan[] }>('GET', '/api/ks/subscriptions/plans'),
+
+  subscription: () => req<{
+    subscription: KsSubscription | null; invoices: KsSubInvoice[]; plans: KsPlan[];
+  }>('GET', '/api/ks/subscriptions/status', undefined, getParentToken()),
+
+  subscribe: (plan: string) =>
+    req<{ subscription: KsSubscription; first_bill_on: string }>(
+      'POST', '/api/ks/subscriptions/create', { plan }, getParentToken()),
+
+  unsubscribe: () =>
+    req<{ subscription: KsSubscription; note: string }>(
+      'POST', '/api/ks/subscriptions/cancel', {}, getParentToken()),
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────────

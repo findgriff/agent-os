@@ -42,8 +42,11 @@ import CrewApp from './pages/mg/CrewApp';
 import Inventory from './pages/Inventory';
 import Comms from './pages/Comms';
 import Reports from './pages/mg/Reports';
+import Marketing from './pages/mg/Marketing';
 import Invoices from './pages/mg/Invoices';
 import TimeClock from './pages/mg/TimeClock';
+import BookOnline from './pages/mg/BookOnline';
+import CrewTracking from './pages/mg/CrewTracking';
 
 // Redirect to the static ops board page (not a React component)
 function OpsBoardRedirect() {
@@ -105,7 +108,9 @@ function Shell() {
         <Route path="/investments" element={<Investments />} />
         <Route path="/call-center" element={<CallCenter />} />
         <Route path="/maxgleam/reports" element={<Reports />} />
+        <Route path="/maxgleam/marketing" element={<Marketing />} />
         <Route path="/maxgleam/invoices" element={<Invoices />} />
+        <Route path="/tracking" element={<CrewTracking />} />
         <Route path="/inventory" element={<Inventory />} />
         <Route path="/comms" element={<Comms />} />
         <Route path="/integrations" element={<Integrations />} />
@@ -133,7 +138,10 @@ export default function App() {
     || location.pathname === '/timeclock'
     // The mobile crew view: signed in with a code texted to the number on
     // the crew list, so it must never hit the HQ auth gate either.
-    || location.pathname === '/crew';
+    || location.pathname === '/crew'
+    // Self-serve booking: opened by someone who is not a customer yet, so it
+    // is the most public surface of the lot.
+    || location.pathname === '/book';
   const isPublicRoute = isPartnerRoute || isKsRoute || isMgRoute;
 
   useEffect(() => {
@@ -163,6 +171,7 @@ export default function App() {
           <Route path="/customer/*" element={<Navigate to="/customer/login" replace />} />
           <Route path="/timeclock" element={<TimeClock />} />
           <Route path="/crew" element={<CrewApp />} />
+          <Route path="/book" element={<BookOnline />} />
         </Routes>
       </ToastProvider>
     );

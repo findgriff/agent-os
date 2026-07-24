@@ -32,13 +32,17 @@ const NAV = [
   { to: '/search', label: 'Search', icon: 'search', colour: '#38BDF8', group: 'Intel' },
   { to: '/investments', label: 'Investments', icon: 'trending_up', colour: '#19C3E6', group: 'Intel' },
   { to: '/maxgleam/reports', label: 'MG Reports', icon: 'monitoring', colour: '#19C3E6', group: 'Intel' },
+  { to: '/maxgleam/marketing', label: 'MG Marketing', icon: 'campaign', colour: '#F472B6', group: 'Comms' },
   { to: '/maxgleam/invoices', label: 'MG Invoices', icon: 'receipt_long', colour: '#19C3E6', group: 'Intel' },
   { to: '/call-center', label: 'Call Center', icon: 'headset_mic', colour: '#FF6B00', group: 'Comms' },
   { to: '/comms', label: 'Comms Log', icon: 'forum', colour: '#38BDF8', group: 'Comms' },
   { to: '/inventory', label: 'Stock', icon: 'inventory_2', colour: '#22C55E', group: 'Command' },
+  { to: '/tracking', label: 'Crew Tracking', icon: 'my_location', colour: '#19C3E6', group: 'Command' },
   // The crew view repaints the page white and runs its own session, so it
   // must be a full page load rather than a client-side transition.
   { to: '/crew', label: 'Crew View', icon: 'directions_car', colour: '#19C3E6', group: 'Comms', external: true },
+  // The public booking page — light theme, no session at all.
+  { to: '/book', label: 'Book Online', icon: 'event_available', colour: '#19C3E6', group: 'Comms', external: true },
   // Partner portal has its own session + shell — always a full page load,
   // never a client-side transition into the HQ app.
   { to: '/partner', label: 'Partner Portal', icon: 'handshake', colour: '#19C3E6', group: 'Comms', external: true },
