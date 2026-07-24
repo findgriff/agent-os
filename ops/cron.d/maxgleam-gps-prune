@@ -1,0 +1,5 @@
+# Max Gleam — crew GPS retention prune.
+# Drops location points older than RETENTION_DAYS (14) so the tracking log
+# stays a dispatch tool, not surveillance. Idempotent; a run with nothing
+# stale deletes nothing.
+15 4 * * * root /usr/bin/python3 /opt/agent-os/tools/maxgleam_gps_prune.py >> /var/log/maxgleam-gps-prune.log 2>&1

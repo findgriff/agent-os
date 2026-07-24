@@ -1,0 +1,4 @@
+# Max Gleam — verify the daily crew GPS retention prune actually ran.
+# Fires 10 min after the 04:15 prune; appends a PASS/FAIL verdict line to the
+# verify log so a skipped or crashing prune surfaces instead of going unnoticed.
+25 4 * * * root /usr/bin/python3 /opt/agent-os/tools/maxgleam_gps_prune_verify.py >> /var/log/maxgleam-gps-prune-verify.log 2>&1

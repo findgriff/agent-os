@@ -1,0 +1,5 @@
+# Max Gleam — customer notifications + referral credits.
+# Notifications are gated by MAXGLEAM_NOTIFY_DRY_RUN in /etc/agent-os.env
+# (default "1" = log only). Nothing reaches a customer until that is set to 0.
+# Both sweeps are idempotent; a UNIQUE index prevents any double-send.
+*/30 * * * * root /usr/bin/python3 /opt/agent-os/tools/maxgleam_growth_sweep.py all >> /var/log/maxgleam-growth.log 2>&1

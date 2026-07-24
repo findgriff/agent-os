@@ -1,0 +1,2 @@
+# Max Gleam — auto-approve cleans left unsigned past the window
+0 * * * * root /usr/bin/python3 /opt/agent-os/tools/maxgleam_signoff_sweep.py >> /var/log/maxgleam-signoff.log 2>&1

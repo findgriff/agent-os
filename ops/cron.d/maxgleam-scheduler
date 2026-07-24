@@ -1,0 +1,4 @@
+# Max Gleam — recurring schedule generator.
+# Creates 'scheduled' jobs for properties due inside the next 14 days, based
+# on properties.frequency_weeks. Idempotent: a repeat run creates nothing.
+0 4 * * * root /usr/bin/python3 /opt/agent-os/tools/maxgleam_scheduler.py generate >> /var/log/maxgleam-scheduler.log 2>&1
