@@ -1275,7 +1275,10 @@ def _render_invoice_pdf(row: dict, tenant: dict) -> bytes:
         label = "Window cleaning"
         if row.get("address"):
             label += f" - {row['address']}"
-        items = [{"label": label, "amount_pence": row["amount_pence"]}]
+        # Stored line items are net; the Subtotal row below prints gross - vat
+        # (= net). Show the net figure here too so the single fallback line
+        # agrees with the Subtotal instead of printing the gross amount.
+        items = [{"label": label, "amount_pence": gross - (row.get("vat_pence") or 0)}]
 
     for it in items:
         desc = str(it.get("label") or it.get("description") or "Service")
