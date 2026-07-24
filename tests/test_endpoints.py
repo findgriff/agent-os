@@ -71,6 +71,18 @@ def test_requires_auth(client, path):
     assert status == 401, f"{path} should reject an unauthenticated caller"
 
 
+# The customer invoice-PDF route is gated by a signed capability token, not an
+# HQ session. A missing or malformed token is rejected before any maxgleam DB
+# access (bad tokens short-circuit in customer_for_token), so this stays inside
+# the hermetic suite even though authenticated maxgleam calls can't (see note
+# above). It proves the route is wired and never serves a PDF without a token.
+def test_customer_invoice_pdf_requires_token(client):
+    path = "/api/maxgleam/customer/invoices/1/pdf"
+    assert client.get(path, token=None)[0] == 401, "no token must be rejected"
+    assert client.get(path, token="not-a-real-token")[0] == 401, \
+        "a malformed customer token must be rejected"
+
+
 # ── authenticated smoke ─────────────────────────────────────────────
 
 @pytest.mark.parametrize("path", CORE_200)

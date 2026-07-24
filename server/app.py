@@ -3329,6 +3329,11 @@ def h_mg_customer_contact(req: Request):
     return maxgleam_portal.customer_contact(_mg_customer(req))
 
 
+def h_mg_customer_invoice_pdf(req: Request, invoice_id: int):
+    """A signed-in customer downloading one of their own invoices as a PDF."""
+    return maxgleam_portal.customer_invoice_pdf(_mg_customer(req), invoice_id)
+
+
 def h_mg_customer_pay(req: Request):
     """Start a SumUp hosted checkout for one of this customer's invoices."""
     try:
@@ -3680,6 +3685,7 @@ ROUTES = [
     ("GET",  re.compile(r"^/api/maxgleam/customer/jobs$"), h_mg_customer_jobs),
     ("GET",  re.compile(r"^/api/maxgleam/customer/payments$"), h_mg_customer_payments),
     ("GET",  re.compile(r"^/api/maxgleam/customer/contact$"), h_mg_customer_contact),
+    ("GET",  re.compile(r"^/api/maxgleam/customer/invoices/(\d+)/pdf$"), h_mg_customer_invoice_pdf),
     ("POST", re.compile(r"^/api/maxgleam/customer/pay$"), h_mg_customer_pay),
 
     # ── Max Gleam mobile crew view (public, texted-code sign-in) ────────

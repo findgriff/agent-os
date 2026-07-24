@@ -147,6 +147,21 @@ export const mgApi = {
 
   contact: () => req<{ company: MgCompany | null }>(
     'GET', '/api/maxgleam/customer/contact', undefined, getCustomerToken()),
+
+  // The invoice as a PDF (unpaid → to pay against, paid → a receipt). Fetched
+  // as a blob with the token in the header — a plain link couldn't carry it,
+  // and putting the capability token in the URL would leak it to logs.
+  invoicePdf: async (invoiceId: number): Promise<Blob> => {
+    const res = await fetch(`/api/maxgleam/customer/invoices/${invoiceId}/pdf`, {
+      headers: { Authorization: `Bearer ${getCustomerToken()}` },
+    });
+    if (!res.ok) {
+      let message = res.statusText;
+      try { message = (await res.json()).error || message; } catch { /* non-JSON body */ }
+      throw new MgApiError(res.status, message);
+    }
+    return res.blob();
+  },
 };
 
 export const photoUrl = (id: number) => `/api/maxgleam/photo/${id}`;

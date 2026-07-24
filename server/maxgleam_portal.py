@@ -710,6 +710,23 @@ def customer_checkout(customer: dict, invoice_id: int) -> tuple[int, dict]:
                              "amount_pence": outstanding}}
 
 
+def customer_invoice_pdf(customer: dict, invoice_id: int):
+    """GET /api/maxgleam/customer/invoices/:id/pdf — the customer's own invoice.
+
+    A signed-in customer can pull a PDF of any of their own invoices — an unpaid
+    one to pay against, a paid one as a receipt "for my records". Ownership is
+    checked here against the token's customer before the shared renderer runs,
+    so the id in the URL is never trusted on its own. Void invoices are hidden.
+    """
+    from server import maxgleam_invoicing
+    owns = _one("SELECT id FROM invoices "
+                " WHERE id = ? AND customer_id = ? AND status != 'void'",
+                (invoice_id, customer["id"]))
+    if not owns:
+        return 404, {"error": "invoice not found"}
+    return maxgleam_invoicing.invoice_pdf(invoice_id, tenant_id=customer["tenant_id"])
+
+
 def customer_contact(customer: dict) -> tuple[int, dict]:
     """The partner company looking after this customer's properties."""
     row = _one(
