@@ -2559,10 +2559,9 @@ function StudentsTab({ students, attendance, focus, onReload }: {
         </div>
 
         {real.length === 0 ? (
-          students.length === 0 ? (
-            <EmptyNote icon="person_add" title="No students on the books yet"
-              hint="Add your first student and they'll appear here — and in the calendar's booking picker." />
-          ) : (
+          // No real students yet → the badged sample list below carries the
+          // demo, so we only surface an empty note when a search misses.
+          students.length === 0 ? null : (
             <EmptyNote icon="person_search" title="No students match"
               hint={`Nothing found for "${query}".`} />
           )
@@ -2577,20 +2576,28 @@ function StudentsTab({ students, attendance, focus, onReload }: {
         )}
       </section>
 
-      <section>
-        <SectionHead sample>Sample students</SectionHead>
-        {mocks.length === 0 ? (
-          <p className="text-sm text-slate-400">No sample students match "{query}".</p>
-        ) : (
-          <div className="space-y-2.5">
-            {mocks.map((s, i) => (
-              <StudentCard key={s.id} s={s} open={openId === s.id}
-                onToggle={() => setOpenId(v => (v === s.id ? null : s.id))}
-                delay={Math.min(i * 50, 400)} />
-            ))}
-          </div>
-        )}
-      </section>
+      {/* Sample roster — a preview of the finished shape, shown only until the
+          coach adds their first real student (mirrors Leads / Route / Finance). */}
+      {students.length === 0 && (
+        <section>
+          <SectionHead sample>Sample students</SectionHead>
+          <p className="-mt-2 mb-4 text-sm text-slate-500">
+            How students will look here. Add your first real student and this sample
+            roster makes way for the real thing.
+          </p>
+          {mocks.length === 0 ? (
+            <p className="text-sm text-slate-400">No sample students match "{query}".</p>
+          ) : (
+            <div className="space-y-2.5">
+              {mocks.map((s, i) => (
+                <StudentCard key={s.id} s={s} open={openId === s.id}
+                  onToggle={() => setOpenId(v => (v === s.id ? null : s.id))}
+                  delay={Math.min(i * 50, 400)} />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {adding && <AddStudentModal onClose={() => setAdding(false)} onAdded={() => onReload()} />}
 
