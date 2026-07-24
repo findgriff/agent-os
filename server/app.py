@@ -20,7 +20,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, parse_qs, unquote
 
 from server import db as db_module
-from server import auth, agents, vault, bridges, metrics, inference, studio, omi, features, oracle_search, apollo, video_editor, auto_caption, transitions, speed_change, clip_split, audio_track, overlay, video_effects, export_presets, suno_bridge, investments_api, partner, ks, ks_attendance, ks_progress, ks_billing, maxgleam_portal, maxgleam_invoicing, maxgleam_ops, maxgleam_crew, maxgleam_inventory, maxgleam_reports, maxgleam_activity, maxgleam_alerts, maxgleam_referrals, maxgleam_notify, maxgleam_accounting, maxgleam_commissions, maxgleam_booking, maxgleam_gps, maxgleam_marketing, maxgleam_reviews, maxgleam_quotes, hermes
+from server import auth, agents, vault, bridges, metrics, inference, studio, omi, features, oracle_search, apollo, video_editor, auto_caption, transitions, speed_change, clip_split, audio_track, overlay, video_effects, export_presets, suno_bridge, investments_api, partner, ks, ks_attendance, ks_progress, ks_billing, maxgleam_portal, maxgleam_invoicing, maxgleam_ops, maxgleam_crew, maxgleam_inventory, maxgleam_reports, maxgleam_activity, maxgleam_alerts, maxgleam_referrals, maxgleam_notify, maxgleam_accounting, maxgleam_commissions, maxgleam_booking, maxgleam_gps, maxgleam_marketing, maxgleam_reviews, maxgleam_quotes, maxgleam_customers, hermes
 
 log = logging.getLogger("agentos")
 
@@ -2434,6 +2434,30 @@ def h_maxgleam_quote_convert(req: Request, quote_id: str):
     return maxgleam_quotes.convert_quote(int(quote_id), req.body or {}, tenant_id, company_id)
 
 
+def h_maxgleam_customers(req: Request):
+    """GET /api/maxgleam/customers?q= — the customer book + rollup summary."""
+    company_id, tenant_id = _maxgleam_scope(req)
+    return maxgleam_customers.list_customers(tenant_id, company_id, req.query.get("q") or "")
+
+
+def h_maxgleam_customer_detail(req: Request, customer_id: str):
+    """GET /api/maxgleam/customers/<id> — one customer's full record."""
+    company_id, tenant_id = _maxgleam_scope(req)
+    return maxgleam_customers.customer_detail(int(customer_id), tenant_id, company_id)
+
+
+def h_maxgleam_customer_update(req: Request, customer_id: str):
+    """POST /api/maxgleam/customers/<id>/update — edit the customer's own row."""
+    company_id, tenant_id = _maxgleam_scope(req)
+    return maxgleam_customers.update_customer(int(customer_id), req.body or {}, tenant_id, company_id)
+
+
+def h_maxgleam_customer_note(req: Request, customer_id: str):
+    """POST /api/maxgleam/customers/<id>/note — log an office note."""
+    company_id, tenant_id = _maxgleam_scope(req)
+    return maxgleam_customers.add_note(int(customer_id), req.body or {}, tenant_id, company_id)
+
+
 def h_maxgleam_referral_sweep(req: Request):
     """POST /api/maxgleam/referrals/sweep — promote sign-ups and apply credits.
     HQ only: it edits invoices."""
@@ -3454,6 +3478,10 @@ ROUTES = [
     ("POST", re.compile(r"^/api/maxgleam/quotes/create$"), h_maxgleam_quote_create),
     ("POST", re.compile(r"^/api/maxgleam/quotes/(\d+)/update$"), h_maxgleam_quote_update),
     ("POST", re.compile(r"^/api/maxgleam/quotes/(\d+)/convert$"), h_maxgleam_quote_convert),
+    ("GET",  re.compile(r"^/api/maxgleam/customers$"), h_maxgleam_customers),
+    ("GET",  re.compile(r"^/api/maxgleam/customers/(\d+)$"), h_maxgleam_customer_detail),
+    ("POST", re.compile(r"^/api/maxgleam/customers/(\d+)/update$"), h_maxgleam_customer_update),
+    ("POST", re.compile(r"^/api/maxgleam/customers/(\d+)/note$"), h_maxgleam_customer_note),
     ("GET",  re.compile(r"^/api/maxgleam/notifications/settings$"), h_maxgleam_notification_settings),
     ("POST", re.compile(r"^/api/maxgleam/notifications/settings$"), h_maxgleam_notification_settings),
     ("POST", re.compile(r"^/api/maxgleam/notifications/test$"), h_maxgleam_notification_test),
