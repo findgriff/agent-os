@@ -23,7 +23,9 @@
       "Bash(python3 tools/call_agent.py badcmd)",
       "Bash(./deploy.sh)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8100/healthz)",
-      "Bash(curl -s http://localhost:8100/)"
+      "Bash(curl -s http://localhost:8100/)",
+      "Bash(journalctl -u agent-os --no-pager -n 40 --since \"2 minutes ago\")",
+      "Bash(sudo journalctl -u agent-os --no-pager -n 40 --since \"2 minutes ago\")"
     ]
   }
 }
