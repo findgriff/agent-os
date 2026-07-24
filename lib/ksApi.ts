@@ -138,6 +138,13 @@ export interface KsStudent {
   attendance: { attended: number; absent: number; cancelled: number };
 }
 
+export interface KsLead {
+  id: number; parent: string; phone: string; email: string;
+  childAge: number; interest: string; source: string;
+  status: 'new' | 'contacted' | 'warm' | 'cold';
+  added: string;
+}
+
 export interface NewStudent {
   child_name: string; dob?: string; age?: number | string;
   parent_name: string; parent_email: string; parent_phone: string;
@@ -341,6 +348,16 @@ export const ksApi = {
 
   addStudent: (data: NewStudent) =>
     req<{ student: KsStudent }>('POST', '/api/ks/students/add', data, getCoachToken()),
+
+  // ── Leads (coach's enquiry pipeline) ─────────────────────────────────
+  leads: () =>
+    req<{ leads: KsLead[] }>('GET', '/api/ks/leads', undefined, getCoachToken()),
+
+  addLead: (data: Omit<KsLead, 'id' | 'status' | 'added'>) =>
+    req<{ lead: KsLead }>('POST', '/api/ks/leads/add', data, getCoachToken()),
+
+  updateLead: (id: number, status: KsLead['status']) =>
+    req<{ lead: KsLead }>('POST', `/api/ks/leads/${id}`, { status }, getCoachToken()),
 
   // ── Coach booking CRUD ───────────────────────────────────────────────
   coachCreateBooking: (data: NewCoachBooking) =>

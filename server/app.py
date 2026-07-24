@@ -2868,6 +2868,18 @@ def h_ks_students_add(req: Request):
     return ks.students_add(_ks_coach(req), req.body)
 
 
+def h_ks_leads(req: Request):
+    return ks.leads_list(_ks_coach(req))
+
+
+def h_ks_lead_add(req: Request):
+    return ks.lead_add(_ks_coach(req), req.body)
+
+
+def h_ks_lead_update(req: Request, lead_id: str):
+    return ks.lead_update(_ks_coach(req), int(lead_id), req.body)
+
+
 def h_ks_coach_booking_create(req: Request):
     return ks.coach_create_booking(_ks_coach(req), req.body)
 
@@ -2999,6 +3011,20 @@ def h_mg_invoice_send(req: Request, invoice_id: int):
 def h_mg_invoice_pdf(req: Request, invoice_id: int):
     """GET /api/maxgleam/invoices/:id/pdf — the invoice as a downloadable PDF."""
     return maxgleam_invoicing.invoice_pdf(invoice_id, company_id=_mg_scope(req))
+
+
+def h_mg_invoice_record_payment(req: Request, invoice_id: int):
+    """POST /api/maxgleam/invoices/:id/record-payment — mark paid offline."""
+    company_id = _mg_scope(req)
+    body = req.body or {}
+    return maxgleam_invoicing.record_payment(
+        invoice_id, body.get("method") or "", body.get("paid_at"),
+        company_id=company_id)
+
+
+def h_mg_invoice_unmark_payment(req: Request, invoice_id: int):
+    """POST /api/maxgleam/invoices/:id/unmark-payment — revert a manual payment."""
+    return maxgleam_invoicing.unmark_payment(invoice_id, company_id=_mg_scope(req))
 
 
 def h_mg_tax_report(req: Request):
@@ -3424,6 +3450,9 @@ ROUTES = [
     ("POST", re.compile(r"^/api/ks/sms-inbound$"), h_ks_sms_inbound),
     ("GET",  re.compile(r"^/api/ks/students$"), h_ks_students),
     ("POST", re.compile(r"^/api/ks/students/add$"), h_ks_students_add),
+    ("GET",  re.compile(r"^/api/ks/leads$"), h_ks_leads),
+    ("POST", re.compile(r"^/api/ks/leads/add$"), h_ks_lead_add),
+    ("POST", re.compile(r"^/api/ks/leads/(\d+)$"), h_ks_lead_update),
     ("POST", re.compile(r"^/api/ks/coach/bookings$"), h_ks_coach_booking_create),
     ("PUT",  re.compile(r"^/api/ks/bookings/(\d+)$"), h_ks_booking_update),
     ("GET",  re.compile(r"^/api/ks/coach/block-outs$"), h_ks_blockouts),
@@ -3453,6 +3482,8 @@ ROUTES = [
     ("POST", re.compile(r"^/api/maxgleam/invoices/auto-generate$"), h_mg_invoices_auto),
     ("POST", re.compile(r"^/api/maxgleam/invoices/(\d+)/send$"), h_mg_invoice_send),
     ("GET",  re.compile(r"^/api/maxgleam/invoices/(\d+)/pdf$"), h_mg_invoice_pdf),
+    ("POST", re.compile(r"^/api/maxgleam/invoices/(\d+)/record-payment$"), h_mg_invoice_record_payment),
+    ("POST", re.compile(r"^/api/maxgleam/invoices/(\d+)/unmark-payment$"), h_mg_invoice_unmark_payment),
     ("GET",  re.compile(r"^/api/maxgleam/reports/tax$"), h_mg_tax_report),
     ("GET",  re.compile(r"^/api/maxgleam/reports/tax.csv$"), h_mg_tax_csv),
 

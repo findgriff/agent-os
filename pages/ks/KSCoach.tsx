@@ -2707,26 +2707,49 @@ function LeadModal({ lead, onStatus, onClose }:
   );
 }
 
-function LeadsTab({ leads, setLeads }:
-  { leads: Lead[]; setLeads: React.Dispatch<React.SetStateAction<Lead[]>> }) {
+function LeadsTab({ leads, onReload }:
+  { leads: Lead[]; onReload: () => void }) {
   const [adding, setAdding] = useState(false);
   const [selected, setSelected] = useState<Lead | null>(null);
+  const [error, setError] = useState('');
+  // Local copy of the seeded pipeline, used only until the first real lead
+  // exists. Moving a sample lead's status is a demo-only, in-memory change.
+  const [sample, setSample] = useState<Lead[]>(MOCK_LEADS);
 
-  const setStatus = (id: number, status: Lead['status']) => {
-    setLeads(ls => ls.map(l => (l.id === id ? { ...l, status } : l)));
-    setSelected(sel => (sel && sel.id === id ? { ...sel, status } : sel));
+  const isSample = leads.length === 0;
+  const rows = isSample ? sample : leads;
+
+  // "Add lead" always writes a real lead — the first one flips the whole tab
+  // from the sample view to live data.
+  const addLead = async (l: Omit<Lead, 'id' | 'status' | 'added'>) => {
+    setError('');
+    try {
+      await ksApi.addLead(l);
+      onReload();
+    } catch (e: any) {
+      setError(e?.message || 'Could not save that lead.');
+    }
   };
 
-  const addLead = (l: Omit<Lead, 'id' | 'status' | 'added'>) => {
-    setLeads(ls => [
-      { ...l, id: Math.max(0, ...ls.map(x => x.id)) + 1, status: 'new', added: isoDate(0) },
-      ...ls,
-    ]);
+  const setStatus = async (id: number, status: Lead['status']) => {
+    setSelected(sel => (sel && sel.id === id ? { ...sel, status } : sel));
+    if (isSample) {
+      setSample(ls => ls.map(l => (l.id === id ? { ...l, status } : l)));
+      return;
+    }
+    setError('');
+    try {
+      await ksApi.updateLead(id, status);
+    } catch (e: any) {
+      setError(e?.message || 'Could not move that lead.');
+    } finally {
+      onReload();      // reconcile whether the write landed or not
+    }
   };
 
   return (
     <div className="space-y-4">
-      <SectionHead sample action={
+      <SectionHead sample={isSample} action={
         <KSButton onClick={() => setAdding(true)}>
           <Icon name="add" size={18} />Add lead
         </KSButton>
@@ -2735,8 +2758,9 @@ function LeadsTab({ leads, setLeads }:
         Prospective parents who haven't booked yet. Click a lead to call them or move them
         along the pipeline.
       </p>
+      {error && <KSAlert>{error}</KSAlert>}
 
-      {leads.length === 0 ? (
+      {rows.length === 0 ? (
         <EmptyNote icon="person_add" title="No leads yet"
           hint="Add parents who've enquired and track them from first call to first booking." />
       ) : (
@@ -2755,7 +2779,7 @@ function LeadsTab({ leads, setLeads }:
                 </tr>
               </thead>
               <tbody>
-                {leads.map(l => (
+                {rows.map(l => (
                   <tr key={l.id} onClick={() => setSelected(l)}
                     className="cursor-pointer border-b border-slate-100 transition-colors last:border-0 hover:bg-orange-50/60">
                     <td className="px-4 py-3 font-bold text-slate-900">{l.parent}</td>
@@ -3393,7 +3417,9 @@ export default function KSCoach() {
   // "View student" from the calendar deep-links the Students tab to a name.
   const [studentFocus, setStudentFocus] = useState('');
   // Leads live here (not in the tab) so pipeline changes survive tab switches.
-  const [leads, setLeads] = useState<Lead[]>(MOCK_LEADS);
+  // Real leads from the pipeline. Empty until the coach adds one, at which
+  // point the Leads tab flips from its seeded sample view to live data.
+  const [leads, setLeads] = useState<Lead[]>([]);
 
   const load = useCallback(async (w?: string) => {
     try {
@@ -3422,14 +3448,20 @@ export default function KSCoach() {
     } catch { /* the tab shows samples regardless */ }
   }, []);
 
+  const loadLeads = useCallback(async () => {
+    try {
+      setLeads((await ksApi.leads()).leads);
+    } catch { /* the tab falls back to samples */ }
+  }, []);
+
   useEffect(() => {
     if (!getCoachToken()) { setBooting(false); return; }
     ksApi.coachMe()
-      .then(r => { setCoach(r.coach); return Promise.all([load(), loadRegister(), loadStudents()]); })
+      .then(r => { setCoach(r.coach); return Promise.all([load(), loadRegister(), loadStudents(), loadLeads()]); })
       .catch(() => clearCoachToken())
       .finally(() => setBooting(false));
     ksApi.skills().then(r => setSkills(r.skills)).catch(() => { /* chips hide */ });
-  }, [load, loadRegister, loadStudents]);
+  }, [load, loadRegister, loadStudents, loadLeads]);
 
   const afterMark = useCallback(() => {
     load(week);
@@ -3477,7 +3509,7 @@ export default function KSCoach() {
   }
 
   if (!coach) {
-    return <KSShell nav={false}><CoachLogin onAuthed={c => { setCoach(c); load(); loadRegister(); }} /></KSShell>;
+    return <KSShell nav={false}><CoachLogin onAuthed={c => { setCoach(c); load(); loadRegister(); loadLeads(); }} /></KSShell>;
   }
 
   const badges: Partial<Record<CoachTab, number>> = {
@@ -3563,7 +3595,7 @@ export default function KSCoach() {
                 <StudentsTab students={students} attendance={attendance}
                   focus={studentFocus} onReload={loadStudents} />
               )}
-              {tab === 'leads' && <LeadsTab leads={leads} setLeads={setLeads} />}
+              {tab === 'leads' && <LeadsTab leads={leads} onReload={loadLeads} />}
               {tab === 'finance' && <FinanceTab />}
               {tab === 'settings' && (
                 <SettingsTab coach={coach} onChanged={() => load(week)} onSignOut={signOut} />

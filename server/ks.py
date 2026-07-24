@@ -138,6 +138,24 @@ CREATE TABLE IF NOT EXISTS students (
 );
 CREATE INDEX IF NOT EXISTS idx_students_parent ON students(parent_id);
 
+-- Prospective parents who've enquired but not booked. The coach's sales
+-- pipeline, distinct from students (who are on the books). No SMS is ever
+-- sent from here — leads are worked by hand.
+CREATE TABLE IF NOT EXISTS ks_leads (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  parent_name  TEXT NOT NULL,
+  phone        TEXT,
+  email        TEXT,
+  child_age    INTEGER,
+  interest     TEXT,
+  source       TEXT,
+  status       TEXT NOT NULL DEFAULT 'new',   -- new|contacted|warm|cold
+  notes        TEXT,
+  created_at   INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  updated_at   INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_ks_leads_status ON ks_leads(status);
+
 -- Whole-day leave (holiday / sick / personal). Distinct from availability,
 -- which blocks time windows: a blockout removes the coach from every slot
 -- on the date and flags any bookings already sitting on it.
@@ -1028,6 +1046,72 @@ def students_add(coach: dict, body: dict) -> tuple[int, dict]:
              "p.phone AS parent_phone FROM students s "
              "JOIN parents p ON p.id = s.parent_id WHERE s.id = ?", (sid,))
     return 200, {"student": _student_dto(s)}
+
+
+# --------------------------------------------------------------- leads --
+# The coach's enquiry pipeline. Statuses match the dashboard's four columns;
+# a lead that books becomes a student and drops off the list by hand.
+LEAD_STATUSES = ("new", "contacted", "warm", "cold")
+
+# Newest and hottest first: brand-new and warm leads want chasing today,
+# cold ones sink to the bottom.
+_LEAD_ORDER = ("new", "warm", "contacted", "cold")
+
+
+def _lead_dto(l: dict) -> dict:
+    return {
+        "id": l["id"],
+        "parent": l["parent_name"],
+        "phone": l["phone"] or "",
+        "email": l["email"] or "",
+        "childAge": l["child_age"] or 0,
+        "interest": l["interest"] or "",
+        "source": l["source"] or "",
+        "status": l["status"],
+        "added": datetime.fromtimestamp(l["created_at"], UK).date().isoformat(),
+    }
+
+
+def leads_list(coach: dict) -> tuple[int, dict]:
+    rows = _rows("SELECT * FROM ks_leads ORDER BY created_at DESC")
+    rank = {s: i for i, s in enumerate(_LEAD_ORDER)}
+    rows.sort(key=lambda l: rank.get(l["status"], len(rank)))
+    return 200, {"leads": [_lead_dto(l) for l in rows]}
+
+
+def lead_add(coach: dict, body: dict) -> tuple[int, dict]:
+    parent = (body.get("parent") or "").strip()
+    if not parent:
+        return 400, {"error": "the parent's name is required"}
+    email = (body.get("email") or "").strip().lower()
+    if email and not auth.valid_email(email):
+        return 400, {"error": "that email doesn't look right"}
+    try:
+        age = int(body.get("childAge") or 0) or None
+    except (TypeError, ValueError):
+        age = None
+    conn = _conn()
+    lid = conn.execute(
+        "INSERT INTO ks_leads (parent_name, phone, email, child_age, interest, source) "
+        "VALUES (?,?,?,?,?,?)",
+        (parent, (body.get("phone") or "").strip(), email, age,
+         (body.get("interest") or "").strip(), (body.get("source") or "").strip())).lastrowid
+    conn.commit()
+    return 200, {"lead": _lead_dto(_one("SELECT * FROM ks_leads WHERE id = ?", (lid,)))}
+
+
+def lead_update(coach: dict, lead_id: int, body: dict) -> tuple[int, dict]:
+    lead = _one("SELECT * FROM ks_leads WHERE id = ?", (lead_id,))
+    if not lead:
+        return 404, {"error": "that lead is no longer on the list"}
+    status = (body.get("status") or "").strip().lower()
+    if status not in LEAD_STATUSES:
+        return 400, {"error": "unknown lead status"}
+    conn = _conn()
+    conn.execute("UPDATE ks_leads SET status = ?, updated_at = strftime('%s','now') WHERE id = ?",
+                 (status, lead_id))
+    conn.commit()
+    return 200, {"lead": _lead_dto(_one("SELECT * FROM ks_leads WHERE id = ?", (lead_id,)))}
 
 
 # ------------------------------------------------------ coach booking CRUD --
