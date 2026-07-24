@@ -287,7 +287,22 @@ def start_job(crew: dict, body: dict) -> tuple[int, dict]:
     conn = _conn()
     conn.execute("UPDATE jobs SET started_at = ? WHERE id = ?", (now, job["id"]))
     conn.commit()
-    return 200, {"job": _job_dto(_crew_job(crew, job["id"]))}
+
+    # Tapping START is the crew saying "I'm on my way", so this is where the
+    # customer's heads-up fires. It runs through maxgleam_notify, so every guard
+    # there applies: dry-run by default, opt-out tags, and a once-per-(job,
+    # trigger) log that makes a double-tap or a stop/restart harmless. A failure
+    # here must never cost the crew their START, so it is caught and reported,
+    # not raised.
+    notified = None
+    try:
+        from server import maxgleam_notify
+        notified = maxgleam_notify.notify_job_by_id(
+            job["id"], "job_on_my_way", job["tenant_id"])
+    except Exception:                                       # noqa: BLE001
+        log.exception("maxgleam crew: on-my-way notify failed for job %s", job["id"])
+
+    return 200, {"job": _job_dto(_crew_job(crew, job["id"])), "notified": notified}
 
 
 def complete_job(crew: dict, body: dict) -> tuple[int, dict]:

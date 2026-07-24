@@ -15,7 +15,7 @@ export function Avatar({ colour = '#19C3E6', initials, size = 42, glow, ring = t
       }}>
       {(initials || '··').slice(0, 2)}
       {status && (
-        <span className="absolute -bottom-0.5 -right-0.5 rounded-full border-2 border-[#0D1520]"
+        <span className="absolute -bottom-0.5 -right-0.5 rounded-full border-2 border-surface"
           style={{ width: size * 0.28, height: size * 0.28, background: statusColour[status],
             boxShadow: status === 'running' ? `0 0 8px ${statusColour[status]}` : undefined }} />
       )}

@@ -285,7 +285,7 @@ export default function WarRoom() {
                   style={{ animationDelay: `${i * 40}ms` }}
                   className={`group w-full animate-fadeInUp rounded-xl border px-3 py-2.5 text-left transition-all active:scale-[0.99]
                     ${active
-                      ? 'border-[#EF4444]/40 bg-[#EF4444]/10 shadow-[0_0_20px_-6px_rgba(239,68,68,0.5)]'
+                      ? 'border-kitt/40 bg-kitt/10 shadow-[0_0_20px_-6px_rgba(239,68,68,0.5)]'
                       : 'border-white/8 hover:border-white/15 hover:bg-white/5'}`}>
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate text-sm font-semibold text-ink">{room.name}</span>
@@ -303,7 +303,7 @@ export default function WarRoom() {
                       <div className="flex -space-x-1.5">
                         {room.participants.slice(0, 5).map((p, idx) => (
                           <span key={idx} title={p.name}
-                            className="h-3.5 w-3.5 rounded-full border border-[#0D1520]"
+                            className="h-3.5 w-3.5 rounded-full border border-surface"
                             style={{ background: p.colour }} />
                         ))}
                       </div>

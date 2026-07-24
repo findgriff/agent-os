@@ -260,7 +260,7 @@ export default function Dashboard() {
                     <Galaxy memories={stars} mini interactive={false} />
                   </div>
                   <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_58%,rgba(5,8,12,0.65)_100%)]" />
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-[#05080C]/70 to-transparent" />
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-bg/70 to-transparent" />
                   <div className="pointer-events-none absolute bottom-2.5 right-3 font-mono text-[10px] uppercase tracking-widest text-muted/60">
                     {stars.length} stars
                   </div>

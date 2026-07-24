@@ -1247,6 +1247,108 @@ def blockout_delete(coach: dict, blockout_id: int) -> tuple[int, dict]:
     return 200, {"ok": True}
 
 
+# ----------------------------------------------------------------- finance --
+
+def _month_keys(n: int = 6) -> list[str]:
+    """The last n calendar months as 'YYYY-MM', oldest first, ending this month."""
+    today = datetime.now(UK).date()
+    y, m, keys = today.year, today.month, []
+    for _ in range(n):
+        keys.append(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0:
+            m, y = 12, y - 1
+    return list(reversed(keys))
+
+
+def coach_finance(coach: dict) -> tuple[int, dict]:
+    """Business-wide money view: earned revenue, sign-ups and unpaid sessions.
+
+    Revenue is recognised when a session is *completed* (delivered), matching
+    how coaches think about earnings; a delivered session is outstanding until
+    it is marked paid. Figures span every coach, like the students list.
+    """
+    months = _month_keys(6)
+    start_month = months[0] + "-01"
+
+    # Revenue by month from delivered (completed) sessions.
+    rev = {k: 0 for k in months}
+    for r in _rows(
+        "SELECT substr(date,1,7) AS ym, COALESCE(SUM(price_pence),0) AS pence "
+        "FROM bookings WHERE status = 'completed' AND date >= ? GROUP BY ym",
+        (start_month,)):
+        if r["ym"] in rev:
+            rev[r["ym"]] = r["pence"]
+
+    # New students onboarded per month.
+    signups = {k: 0 for k in months}
+    for r in _rows(
+        "SELECT strftime('%Y-%m', created_at, 'unixepoch') AS ym, COUNT(*) AS n "
+        "FROM students GROUP BY ym"):
+        if r["ym"] in signups:
+            signups[r["ym"]] = r["n"]
+
+    active_students = _one("SELECT COUNT(*) AS n FROM students")["n"]
+    collected = _one("SELECT COALESCE(SUM(price_pence),0) AS p FROM bookings "
+                     "WHERE status = 'completed' AND paid_at IS NOT NULL")["p"]
+    outstanding_total = _one("SELECT COALESCE(SUM(price_pence),0) AS p FROM bookings "
+                             "WHERE status = 'completed' AND paid_at IS NULL")["p"]
+    upcoming = _one("SELECT COALESCE(SUM(price_pence),0) AS p FROM bookings "
+                    "WHERE status = 'confirmed' AND starts_at > ?", (int(time.time()),))["p"]
+
+    # Unpaid delivered sessions, grouped per child (oldest first).
+    groups: dict[tuple, dict] = {}
+    for b in _rows(
+        "SELECT id, date, price_pence, child_name, parent_name, parent_email, parent_phone "
+        "FROM bookings WHERE status = 'completed' AND paid_at IS NULL "
+        "ORDER BY date ASC, start_time ASC"):
+        key = (b["child_name"].lower(), (b["parent_email"] or "").lower())
+        g = groups.get(key)
+        if not g:
+            g = groups[key] = {
+                "student": b["child_name"], "parent_name": b["parent_name"],
+                "parent_email": b["parent_email"], "parent_phone": b["parent_phone"],
+                "amount_pence": 0, "sessions": 0,
+                "oldest_date": b["date"], "booking_ids": [],
+            }
+        g["amount_pence"] += b["price_pence"]
+        g["sessions"] += 1
+        g["booking_ids"].append(b["id"])
+    outstanding = sorted(groups.values(), key=lambda g: g["oldest_date"])
+
+    return 200, {
+        "months": months,
+        "revenue_pence": [rev[k] for k in months],
+        "signups": [signups[k] for k in months],
+        "active_students": active_students,
+        "earned_total_pence": sum(rev.values()),
+        "this_month_pence": rev[months[-1]],
+        "collected_pence": collected,
+        "outstanding_pence": outstanding_total,
+        "upcoming_pence": upcoming,
+        "outstanding": outstanding,
+    }
+
+
+def coach_mark_paid(coach: dict, body: dict) -> tuple[int, dict]:
+    """Mark delivered sessions paid (or, with paid=false, un-mark them)."""
+    ids = body.get("booking_ids") or []
+    if not isinstance(ids, list) or not ids:
+        return 400, {"error": "no sessions selected"}
+    try:
+        ids = [int(i) for i in ids]
+    except (TypeError, ValueError):
+        return 400, {"error": "invalid session id"}
+    paid = bool(body.get("paid", True))
+    conn = _conn()
+    placeholders = ",".join("?" for _ in ids)
+    n = conn.execute(
+        f"UPDATE bookings SET paid_at = ? WHERE id IN ({placeholders}) AND status = 'completed'",
+        (int(time.time()) if paid else None, *ids)).rowcount
+    conn.commit()
+    return 200, {"updated": n, "paid": paid}
+
+
 # -------------------------------------------------------------------- SMS ---
 
 def _read_secret(path: str) -> str:

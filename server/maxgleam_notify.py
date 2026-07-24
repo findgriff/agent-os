@@ -42,7 +42,7 @@ DEFAULT_TENANT_ID = int(os.environ.get("MAXGLEAM_TENANT_ID", "2"))
 DRY_RUN = os.environ.get("MAXGLEAM_NOTIFY_DRY_RUN", "1") != "0"
 
 CHANNELS = ("sms", "email")
-TRIGGERS = ("job_reminder_24h", "job_completed")
+TRIGGERS = ("job_reminder_24h", "job_on_my_way", "job_completed")
 OPT_OUT_TAGS = {"sms_opt_out", "no_sms", "do_not_text"}
 
 # Seeded once, then owned by the office through the settings endpoint.
@@ -51,6 +51,10 @@ DEFAULT_TEMPLATES = {
         "sms",
         "Hi {customer_name}, your Max Gleam cleaner arrives tomorrow "
         "({date}) at {address}. Reply if that no longer suits."),
+    "job_on_my_way": (
+        "sms",
+        "Hi {customer_name}, your Max Gleam cleaner is on the way to "
+        "{address}. See you shortly!"),
     "job_completed": (
         "sms",
         "Your clean is complete! Rate it: {link}"),
@@ -327,6 +331,22 @@ def notify_job(job: dict, trigger: str, tenant_id: int = DEFAULT_TENANT_ID,
     _log(job, trigger, channel, to_addr, body, status, error)
     return {"job_id": job_id, "trigger": trigger, "status": status,
             "to": to_addr, "body": body, "error": error}
+
+
+def notify_job_by_id(job_id: int, trigger: str,
+                     tenant_id: int = DEFAULT_TENANT_ID, force: bool = False) -> dict:
+    """Send one notification for a job identified only by id.
+
+    The sweeps hand notify_job a job row they already hold; an event trigger
+    (a crew tapping START) only knows the id, and its own job row is shaped for
+    the crew app, not for rendering. So we re-read the job in the shape render()
+    expects rather than trust the caller's dict. Never raises — an event
+    handler must not lose its own work because a text could not be sent.
+    """
+    job = _one(_JOB_SELECT + " WHERE j.id = ? AND j.tenant_id = ?", (job_id, tenant_id))
+    if not job:
+        return {"job_id": job_id, "trigger": trigger, "status": "no_job"}
+    return notify_job(job, trigger, tenant_id, force=force)
 
 
 # ── Sweeps ──────────────────────────────────────────────────────────

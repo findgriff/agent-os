@@ -89,6 +89,8 @@ export interface KsBooking {
   price_pence: number;
   status: string;
   series_ref?: string | null;
+  paid?: boolean;
+  paid_at?: number | null;
   created_at: number;
   is_upcoming: boolean;
   can_cancel: boolean;
@@ -156,6 +158,26 @@ export interface BookingPatch {
   date?: string; start_time?: string; duration_minutes?: number;
   coach_id?: number; child_name?: string;
   status?: 'cancelled'; scope?: 'one' | 'series';
+}
+
+export interface KsOutstanding {
+  student: string; parent_name: string;
+  parent_email: string; parent_phone: string | null;
+  amount_pence: number; sessions: number;
+  oldest_date: string; booking_ids: number[];
+}
+
+export interface KsFinance {
+  months: string[];              // 'YYYY-MM', oldest first
+  revenue_pence: number[];
+  signups: number[];
+  active_students: number;
+  earned_total_pence: number;
+  this_month_pence: number;
+  collected_pence: number;
+  outstanding_pence: number;
+  upcoming_pence: number;
+  outstanding: KsOutstanding[];
 }
 
 export type KsAttendanceStatus = 'attended' | 'absent' | 'cancelled';
@@ -344,6 +366,14 @@ export const ksApi = {
   deleteBlockout: (id: number) =>
     req<{ ok: boolean }>('DELETE', `/api/ks/coach/block-out/${id}`,
       undefined, getCoachToken()),
+
+  // ── Finance (business-wide revenue + payment tracking) ───────────────
+  finance: () =>
+    req<KsFinance>('GET', '/api/ks/coach/finance', undefined, getCoachToken()),
+
+  markPaid: (bookingIds: number[], paid = true) =>
+    req<{ updated: number; paid: boolean }>(
+      'POST', '/api/ks/coach/mark-paid', { booking_ids: bookingIds, paid }, getCoachToken()),
 
   complete: (ref: string, completed: boolean, coachNotes?: string) =>
     req<{ booking: KsBooking }>('POST', '/api/ks/coach/complete',

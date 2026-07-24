@@ -275,7 +275,7 @@ export default function CallCenter() {
           <div className="flex items-baseline justify-between mb-4">
             <h2 className="text-white text-lg font-semibold">📶 Last 7 days</h2>
             <span className="text-white/30 text-xs">
-              answered <span style={{ color: ORANGE }}>■</span> · unanswered <span className="text-white/25">■</span> · blocked <span className="text-[#EF4444]">■</span>
+              answered <span style={{ color: ORANGE }}>■</span> · unanswered <span className="text-white/25">■</span> · blocked <span className="text-kitt">■</span>
             </span>
           </div>
           <div className="flex items-end gap-2 h-28">
@@ -285,7 +285,7 @@ export default function CallCenter() {
               return (
                 <div key={d.date} className="flex-1 flex flex-col items-center gap-1 h-full justify-end group relative">
                   <div className="w-full flex flex-col justify-end h-full gap-px">
-                    {d.blocked > 0 && <div className="w-full rounded-t bg-[#EF4444]/70" style={{ height: h(d.blocked) }} />}
+                    {d.blocked > 0 && <div className="w-full rounded-t bg-kitt/70" style={{ height: h(d.blocked) }} />}
                     {unanswered > 0 && <div className="w-full bg-white/15" style={{ height: h(unanswered) }} />}
                     {d.answered > 0 && <div className="w-full rounded-b" style={{ height: h(d.answered), background: ORANGE }} />}
                     {d.calls + d.blocked === 0 && <div className="w-full h-px bg-white/10" />}
@@ -322,17 +322,17 @@ export default function CallCenter() {
               </select>
               <input value={phoneNumber} onChange={e => setPhoneNumber(e.target.value)}
                 placeholder="Phone number (e.g. +447939554798)"
-                className="w-full bg-[#0A0A0F] border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder-white/30 outline-none focus:border-[#19C3E6]/40 transition-colors" />
+                className="w-full bg-[#0A0A0F] border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder-white/30 outline-none focus:border-accent/40 transition-colors" />
               <div className="flex gap-2">
                 <button onClick={handleCall} disabled={calling || phase === 'ringing' || phase === 'connected' || !phoneNumber}
                   className={`flex-1 text-sm px-4 py-2.5 rounded-xl border transition-all duration-200 ease-out disabled:cursor-not-allowed
                     ${phase === 'ringing'
                       ? 'bg-[#FF6B00]/15 border-[#FF6B00]/50 text-[#FF6B00] animate-pulse shadow-[0_0_28px_-6px_rgba(255,107,0,0.6)]'
                       : phase === 'connected'
-                      ? 'bg-[#22C55E]/15 border-[#22C55E]/50 text-[#22C55E] animate-pulse shadow-[0_0_28px_-6px_rgba(34,197,94,0.6)]'
+                      ? 'bg-emerald/15 border-emerald/50 text-emerald animate-pulse shadow-[0_0_28px_-6px_rgba(34,197,94,0.6)]'
                       : phase === 'ended'
                       ? 'bg-white/5 border-white/15 text-white/60'
-                      : 'bg-[#19C3E6]/10 border-[#19C3E6]/30 text-[#19C3E6] hover:bg-[#19C3E6]/20 hover:shadow-[0_0_24px_-6px_rgba(25,195,230,0.6)] disabled:opacity-40'}`}>
+                      : 'bg-accent/10 border-accent/30 text-accent hover:bg-accent/20 hover:shadow-[0_0_24px_-6px_rgba(25,195,230,0.6)] disabled:opacity-40'}`}>
                   {phase === 'ringing' ? '🔔 Ringing...'
                     : phase === 'connected' ? '🎙 Connected...'
                     : phase === 'ended' ? '✓ Ended'
@@ -384,7 +384,7 @@ export default function CallCenter() {
                       className={`${FIELD} mt-1 [color-scheme:dark]`} />
                   </label>
                 </div>
-                {formError && <div className="text-[#EF4444] text-xs">{formError}</div>}
+                {formError && <div className="text-kitt text-xs">{formError}</div>}
                 <button onClick={handleCreateCampaign} disabled={saving || !form.name}
                   className="w-full text-sm px-4 py-2 rounded-xl border transition-all duration-200 ease-out hover:shadow-[0_0_20px_-6px_rgba(255,107,0,0.6)] hover:brightness-125 disabled:opacity-40"
                   style={{ color: ORANGE, borderColor: `${ORANGE}4D`, background: `${ORANGE}1A` }}>
@@ -414,7 +414,7 @@ export default function CallCenter() {
                         <span className="text-[10px] px-2 py-0.5 rounded-full border"
                           style={{ color: ORANGE, borderColor: `${ORANGE}33` }}>{c.status}</span>
                         <button onClick={() => handleDeleteCampaign(c.id)}
-                          className="text-white/25 hover:text-[#EF4444] transition-colors text-xs">×</button>
+                          className="text-white/25 hover:text-kitt transition-colors text-xs">×</button>
                       </div>
                     </div>
                     <div className="grid grid-cols-4 gap-2 mt-2 text-center">
@@ -468,13 +468,13 @@ export default function CallCenter() {
                   return (
                     <div key={i} className={`flex items-center justify-between bg-[#0A0A0F]/50 rounded-xl px-3 py-2 text-xs ${ROW}`}>
                       <div className="flex items-center gap-3">
-                        <span className={ok ? 'text-[#19C3E6]' : 'text-[#EF4444]'}>{ok ? '✅' : '❌'}</span>
+                        <span className={ok ? 'text-accent' : 'text-kitt'}>{ok ? '✅' : '❌'}</span>
                         <span className="text-white/70 font-medium">{c.business}</span>
                         <span className="text-white/40">{c.phone}</span>
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="text-white/40">{ts}</span>
-                        <span className={ok ? 'text-[#19C3E6]' : 'text-[#EF4444]'}>{c.result}</span>
+                        <span className={ok ? 'text-accent' : 'text-kitt'}>{c.result}</span>
                       </div>
                     </div>
                   );
@@ -515,8 +515,8 @@ export default function CallCenter() {
             <div className="space-y-0.5 text-sm">
               {([
                 ['Calls made', stats.total || calls.length, 'text-white'],
-                ['Successful', stats.successful || 0, 'text-[#19C3E6]'],
-                ['DND list', stats.blocked || 0, 'text-[#EF4444]'],
+                ['Successful', stats.successful || 0, 'text-accent'],
+                ['DND list', stats.blocked || 0, 'text-kitt'],
                 ['Leads waiting', leads.length, 'text-white'],
                 ['Campaigns', campaigns.length, 'text-white'],
                 ['Businesses', Object.keys(scripts).length, 'text-white'],
@@ -536,7 +536,7 @@ export default function CallCenter() {
               <h2 className="text-white text-lg font-semibold mb-3">🛡 Compliance</h2>
               <div className="space-y-0.5 text-sm">
                 {([
-                  ['On DND list', compliance.dnd_total, { className: 'text-[#EF4444]' }],
+                  ['On DND list', compliance.dnd_total, { className: 'text-kitt' }],
                   ['Opted out on a call', compliance.opt_outs_this_call, { className: 'text-white' }],
                   ['Calls blocked', compliance.blocked_total, { style: { color: ORANGE } }],
                   ['Recording notices', compliance.recording_notices_total, { className: 'text-white' }],
@@ -583,7 +583,7 @@ export default function CallCenter() {
                   {compliance.dnd.map((d, i) => (
                     <div key={i} className={`flex items-center justify-between bg-[#0A0A0F]/50 rounded-xl px-3 py-2 text-xs gap-3 ${ROW}`}>
                       <div className="flex items-center gap-3 min-w-0">
-                        <span className="text-[#EF4444]">⛔</span>
+                        <span className="text-kitt">⛔</span>
                         <span className="text-white/70 font-medium">{d.phone}</span>
                         <span className="text-white/35 truncate">
                           {d.source === 'call_opt_out' ? 'opted out on a call' : d.source}
@@ -636,7 +636,7 @@ export default function CallCenter() {
                     {compliance.recording_notices.map((n, i) => (
                       <div key={i} className={`flex items-center justify-between bg-[#0A0A0F]/50 rounded-xl px-3 py-2 text-xs gap-3 ${ROW}`}>
                         <div className="flex items-center gap-3 min-w-0">
-                          <span className="text-[#19C3E6]">🎙</span>
+                          <span className="text-accent">🎙</span>
                           <span className="text-white/70 font-medium">{n.phone}</span>
                           <span className="text-white/35 truncate">{n.business}</span>
                         </div>

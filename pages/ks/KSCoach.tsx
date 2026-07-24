@@ -2,10 +2,12 @@
 // Full back-office for Saul & Kellie: sidebar navigation, a Teams-style week
 // calendar, student profiles, a lead tracker and a finance overview.
 //
-// Live vs sample data: the calendar, register and availability run on the real
-// KS API (attendance marks send REAL texts to parents). Students, Leads and
-// Finance are seeded with sample data — badged "Sample data" in the UI — so
-// the coaches can see the finished shape before the real records build up.
+// Live vs sample data: the calendar, register, availability, students and
+// finance run on the real KS API (attendance marks send REAL texts to parents;
+// finance recognises revenue from completed bookings and tracks payments).
+// Tabs with no real records yet fall back to seeded samples — badged "Sample
+// data" — so coaches can see the finished shape before real data builds up.
+// Leads and the route map remain seeded for now.
 // Demo calendar sessions carry `demo: true` and expose no actions, so a
 // mis-click can never charge or text a real parent.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -17,7 +19,8 @@ import { Icon } from '../../components/ui';
 import {
   ksApi, getCoachToken, setCoachToken, clearCoachToken, dayName, shortDay, isoDate, money,
   type KsAttendanceStatus, type KsBlock, type KsBlockout, type KsBooking,
-  type KsChildAttendance, type KsSchedule, type KsService, type KsSkill, type KsStudent,
+  type KsChildAttendance, type KsFinance, type KsOutstanding, type KsSchedule,
+  type KsService, type KsSkill, type KsStudent,
 } from '../../lib/ksApi';
 
 const ORANGE = '#FF6B00';
@@ -2843,7 +2846,7 @@ function SignupsChart({ values, labels }: { values: number[]; labels: string[] }
   );
 }
 
-function FinanceTab() {
+function SampleFinanceTab() {
   const labels = monthLabels();
   const total = FIN_REVENUE.reduce((a, b) => a + b, 0);
   const thisMonth = FIN_REVENUE[FIN_REVENUE.length - 1];
@@ -2904,6 +2907,149 @@ function FinanceTab() {
             </div>
           ))}
         </div>
+      </KSCard>
+    </div>
+  );
+}
+
+// A 'YYYY-MM' key → short month label ("Jul").
+const monthShort = (ym: string) =>
+  new Date(`${ym}-01T12:00:00`).toLocaleDateString('en-GB', { month: 'short' });
+
+function OutstandingRow({ o, busy, onMarkPaid }:
+  { o: KsOutstanding; busy: boolean; onMarkPaid: (ids: number[]) => void }) {
+  const daysAgo = Math.floor(
+    (Date.now() - new Date(`${o.oldest_date}T12:00:00`).getTime()) / 86400000);
+  const overdue = daysAgo >= 7;
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 px-3.5 py-3 transition-colors hover:border-slate-300 hover:bg-slate-50/60">
+      <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl
+        ${overdue ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-600'}`}>
+        <Icon name={overdue ? 'priority_high' : 'schedule'} size={18} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="font-bold text-slate-900">{o.student}</div>
+        <div className="truncate text-xs text-slate-500">
+          {o.sessions} session{o.sessions === 1 ? '' : 's'} · {o.parent_name}
+          {o.parent_phone ? ` · ${o.parent_phone}` : ''}
+        </div>
+      </div>
+      <div className="text-right">
+        <div className="font-extrabold tabular-nums text-slate-900">{money(o.amount_pence)}</div>
+        <div className={`text-[11px] font-bold ${overdue ? 'text-red-600' : 'text-slate-400'}`}>
+          {daysAgo <= 0 ? 'since today' : `oldest ${daysAgo}d ago`}
+        </div>
+      </div>
+      <KSButton tone="secondary" loading={busy} className="py-1.5 text-xs"
+        onClick={() => onMarkPaid(o.booking_ids)}>
+        <Icon name="done_all" size={15} />Mark paid
+      </KSButton>
+    </div>
+  );
+}
+
+function FinanceTab() {
+  const [fin, setFin] = useState<KsFinance | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [payingKey, setPayingKey] = useState('');
+
+  const load = useCallback(() => {
+    setLoading(true);
+    ksApi.finance()
+      .then(setFin)
+      .catch(() => setFin(null))
+      .finally(() => setLoading(false));
+  }, []);
+  useEffect(load, [load]);
+
+  const markPaid = async (key: string, ids: number[]) => {
+    setPayingKey(key);
+    try { await ksApi.markPaid(ids, true); load(); }
+    catch { /* a reload shows the true state */ }
+    finally { setPayingKey(''); }
+  };
+
+  if (loading && !fin) {
+    return (
+      <div className="space-y-6">
+        <SectionHead>Finance</SectionHead>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {[0, 1, 2, 3].map(i => <Skeleton key={i} className="h-24 w-full" />)}
+        </div>
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
+
+  // No real financial footprint yet — show the seeded sample so the tab still
+  // demonstrates its shape, exactly like the students and route tabs do.
+  const hasReal = !!fin && (fin.active_students > 0 || fin.earned_total_pence > 0
+    || fin.outstanding.length > 0 || fin.upcoming_pence > 0);
+  if (!hasReal) return <SampleFinanceTab />;
+
+  const labels = fin!.months.map(monthShort);
+  const revenuePounds = fin!.revenue_pence.map(p => Math.round(p / 100));
+
+  return (
+    <div className="space-y-6">
+      <SectionHead>Finance</SectionHead>
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatCard icon="payments" label="Revenue earned" value={money(fin!.earned_total_pence)}
+          sub="delivered · last 6 months" />
+        <StatCard icon="calendar_month" label="This month" value={money(fin!.this_month_pence)}
+          accent="#A78BFA" delay={60} sub={`${labels[labels.length - 1]} so far`} />
+        <StatCard icon="hourglass_top" label="Outstanding" value={money(fin!.outstanding_pence)}
+          accent={fin!.outstanding_pence > 0 ? '#DC2626' : '#16A34A'} delay={120}
+          sub={fin!.outstanding_pence > 0 ? 'delivered, unpaid' : 'all settled'} />
+        <StatCard icon="event_upcoming" label="Booked ahead" value={money(fin!.upcoming_pence)}
+          accent="#2563EB" delay={180} sub={`${fin!.active_students} active student${fin!.active_students === 1 ? '' : 's'}`} />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <KSCard className="p-5 transition-shadow hover:shadow-md">
+          <h3 className="font-extrabold tracking-tight text-slate-900">Revenue</h3>
+          <p className="mb-4 mt-0.5 text-xs text-slate-500">
+            Earned from completed sessions · last 6 months
+          </p>
+          <RevenueChart values={revenuePounds} labels={labels} />
+        </KSCard>
+        <KSCard className="p-5 transition-shadow hover:shadow-md">
+          <h3 className="font-extrabold tracking-tight text-slate-900">New sign-ups</h3>
+          <p className="mb-4 mt-0.5 text-xs text-slate-500">Students onboarded per month</p>
+          <SignupsChart values={fin!.signups} labels={labels} />
+        </KSCard>
+      </div>
+
+      <KSCard className="p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <h3 className="font-extrabold tracking-tight text-slate-900">Outstanding payments</h3>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Delivered sessions not yet marked paid — oldest first.
+            </p>
+          </div>
+          {fin!.collected_pence > 0 && (
+            <div className="hidden text-right sm:block">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Collected</div>
+              <div className="font-extrabold tabular-nums text-green-600">{money(fin!.collected_pence)}</div>
+            </div>
+          )}
+        </div>
+        {fin!.outstanding.length === 0 ? (
+          <EmptyNote icon="verified" title="Nothing outstanding"
+            hint="Every delivered session has been marked paid. Nice and tidy." />
+        ) : (
+          <div className="space-y-2">
+            {fin!.outstanding.map(o => {
+              const key = `${o.student}·${o.parent_email}`;
+              return (
+                <OutstandingRow key={key} o={o} busy={payingKey === key}
+                  onMarkPaid={ids => markPaid(key, ids)} />
+              );
+            })}
+          </div>
+        )}
       </KSCard>
     </div>
   );

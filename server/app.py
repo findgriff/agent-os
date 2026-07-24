@@ -2888,6 +2888,14 @@ def h_ks_blockout_delete(req: Request, blockout_id: str):
     return ks.blockout_delete(_ks_coach(req), int(blockout_id))
 
 
+def h_ks_finance(req: Request):
+    return ks.coach_finance(_ks_coach(req))
+
+
+def h_ks_mark_paid(req: Request):
+    return ks.coach_mark_paid(_ks_coach(req), req.body or {})
+
+
 # ── KS attendance, progress and subscriptions ────────────────────────
 # Coaches write, parents read. Every read is scoped by the caller's own
 # identity inside the module, so a parent can never name another family's
@@ -3421,6 +3429,8 @@ ROUTES = [
     ("GET",  re.compile(r"^/api/ks/coach/block-outs$"), h_ks_blockouts),
     ("POST", re.compile(r"^/api/ks/coach/block-out$"), h_ks_blockout_add),
     ("DELETE", re.compile(r"^/api/ks/coach/block-out/(\d+)$"), h_ks_blockout_delete),
+    ("GET",  re.compile(r"^/api/ks/coach/finance$"), h_ks_finance),
+    ("POST", re.compile(r"^/api/ks/coach/mark-paid$"), h_ks_mark_paid),
     ("POST", re.compile(r"^/api/ks/attendance/mark$"), h_ks_attendance_mark),
     ("GET",  re.compile(r"^/api/ks/attendance/history$"), h_ks_attendance_history),
     ("GET",  re.compile(r"^/api/ks/attendance/summary$"), h_ks_attendance_summary),

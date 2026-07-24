@@ -283,7 +283,7 @@ export default function VideoStudio() {
           <Card ref={previewRef} className="relative flex aspect-video items-center justify-center overflow-hidden bg-black/60">
             {clips.length > 0 ? (
               <>
-                <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-[#0a1628] to-[#05080C]">
+                <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-[#0a1628] to-bg">
                   {renderUrl ? (
                     <video src={renderUrl} controls className="max-h-full max-w-full" />
                   ) : (

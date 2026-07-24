@@ -15,7 +15,7 @@ function PriceChange({ pct }: { pct: number }) {
   if (pct === 0) return <span className="text-white/50">—</span>;
   const isUp = pct > 0;
   return (
-    <span className={`flex items-center gap-1 text-sm ${isUp ? 'text-[#19C3E6]' : 'text-[#EF4444]'}`}>
+    <span className={`flex items-center gap-1 text-sm ${isUp ? 'text-accent' : 'text-kitt'}`}>
       <span className="text-xs">{isUp ? '▲' : '▼'}</span>
       {Math.abs(pct).toFixed(2)}%
     </span>
@@ -49,15 +49,15 @@ function InvestmentCard({ d, showYield, showFloor, showPE, showCountry }: {
       <div className="flex items-baseline gap-2">
         <span className="text-white text-lg font-bold">${d.price.toFixed(2)}</span>
         {showYield && d.dividend_yield_pct > 0 && (
-          <span className="text-[#19C3E6] text-xs font-medium bg-[#19C3E6]/10 px-2 py-0.5 rounded-full">
+          <span className="text-accent text-xs font-medium bg-accent/10 px-2 py-0.5 rounded-full">
             {d.dividend_yield_pct.toFixed(1)}%
           </span>
         )}
         {showFloor && (
           <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-            d.pct_from_52w_high < -30 ? 'bg-[#EF4444]/10 text-[#EF4444]' :
-            d.pct_from_52w_high < -15 ? 'bg-[#F59E0B]/10 text-[#F59E0B]' :
-            'bg-[#19C3E6]/10 text-[#19C3E6]'
+            d.pct_from_52w_high < -30 ? 'bg-kitt/10 text-kitt' :
+            d.pct_from_52w_high < -15 ? 'bg-amber/10 text-amber' :
+            'bg-accent/10 text-accent'
           }`}>
             {d.pct_from_52w_high.toFixed(0)}%
           </span>
@@ -208,11 +208,11 @@ export default function Investments() {
           onKeyDown={e => e.key === 'Enter' && addToWatchlist()}
           placeholder="Add ticker to watchlist (e.g. AAPL)"
           className="flex-1 bg-[#14141F]/80 border border-white/10 rounded-xl px-4 py-2.5
-            text-white text-sm placeholder-white/30 outline-none focus:border-[#19C3E6]/50 transition-colors"
+            text-white text-sm placeholder-white/30 outline-none focus:border-accent/50 transition-colors"
         />
         <button onClick={addToWatchlist}
-          className="bg-[#19C3E6]/10 border border-[#19C3E6]/30 text-[#19C3E6] text-sm
-            px-4 py-2.5 rounded-xl hover:bg-[#19C3E6]/20 hover:shadow-[0_0_24px_-6px_rgba(25,195,230,0.6)] transition-all duration-200 ease-out">
+          className="bg-accent/10 border border-accent/30 text-accent text-sm
+            px-4 py-2.5 rounded-xl hover:bg-accent/20 hover:shadow-[0_0_24px_-6px_rgba(25,195,230,0.6)] transition-all duration-200 ease-out">
           + Add
         </button>
       </div>
@@ -251,13 +251,13 @@ export default function Investments() {
                 </div>
                 <div>
                   <div className="text-white/40 text-xs">Total P&amp;L</div>
-                  <div className={`text-lg font-bold ${(portfolioSummary.total_pl || 0) >= 0 ? 'text-[#19C3E6]' : 'text-[#EF4444]'}`}>
+                  <div className={`text-lg font-bold ${(portfolioSummary.total_pl || 0) >= 0 ? 'text-accent' : 'text-kitt'}`}>
                     {(portfolioSummary.total_pl || 0) >= 0 ? '+' : ''}${(portfolioSummary.total_pl || 0).toLocaleString(undefined, {minimumFractionDigits:2,maximumFractionDigits:2})}
                   </div>
                 </div>
                 <div>
                   <div className="text-white/40 text-xs">Return</div>
-                  <div className={`text-lg font-bold ${(portfolioSummary.total_pl_pct || 0) >= 0 ? 'text-[#19C3E6]' : 'text-[#EF4444]'}`}>
+                  <div className={`text-lg font-bold ${(portfolioSummary.total_pl_pct || 0) >= 0 ? 'text-accent' : 'text-kitt'}`}>
                     {(portfolioSummary.total_pl_pct || 0) >= 0 ? '+' : ''}{(portfolioSummary.total_pl_pct || 0).toFixed(2)}%
                   </div>
                 </div>
@@ -272,7 +272,7 @@ export default function Investments() {
                     </div>
                     <div className="flex items-center gap-4">
                       <span className="text-white/60 text-xs">${h.current_price?.toFixed(2)}</span>
-                      <span className={`text-xs font-medium w-24 text-right ${(h.pl || 0) >= 0 ? 'text-[#19C3E6]' : 'text-[#EF4444]'}`}>
+                      <span className={`text-xs font-medium w-24 text-right ${(h.pl || 0) >= 0 ? 'text-accent' : 'text-kitt'}`}>
                         {(h.pl || 0) >= 0 ? '+' : ''}${(h.pl || 0).toLocaleString(undefined, {minimumFractionDigits:2,maximumFractionDigits:2})}
                         <br/>
                         <span className="text-[10px]">({(h.pl_pct || 0) >= 0 ? '+' : ''}{(h.pl_pct || 0).toFixed(2)}%)</span>
@@ -352,7 +352,7 @@ export default function Investments() {
                   transition-all duration-200 ease-out group">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <span className="text-[#19C3E6]/70 text-xs font-medium">{n.ticker}</span>
+                    <span className="text-accent/70 text-xs font-medium">{n.ticker}</span>
                     <div className="text-white/80 text-sm mt-0.5 group-hover:text-white transition-colors">{n.title}</div>
                     <div className="text-white/30 text-[10px] mt-1">{n.publisher}</div>
                   </div>

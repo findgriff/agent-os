@@ -75,6 +75,26 @@ export interface CrewToday {
   summary: { total: number; done: number; remaining: number; value_pence: number };
 }
 
+/** Outcome of the "on my way" text fired when a crew starts a job. */
+export interface NotifyResult {
+  trigger: string;
+  status: 'sent' | 'dry_run' | 'duplicate' | 'disabled' | 'skipped_opt_out'
+        | 'no_contact' | 'failed' | 'no_job';
+  to?: string;
+}
+
+/** A one-line, crew-facing summary of whether the customer was told. Returns
+ *  null when there is nothing worth saying (already sent, or office disabled). */
+export function notifyNotice(n: NotifyResult | null | undefined): string | null {
+  switch (n?.status) {
+    case 'sent':            return 'Customer texted you’re on the way';
+    case 'dry_run':         return 'Customer would be texted (test mode)';
+    case 'skipped_opt_out': return 'Customer has opted out of texts';
+    case 'no_contact':      return 'No number on file — customer not texted';
+    default:                return null;   // duplicate / disabled / failed / no_job
+  }
+}
+
 export interface CrewLoginResult {
   ok?: boolean;
   sent?: boolean;
@@ -95,7 +115,8 @@ export const crewApi = {
   today: (date?: string) =>
     req<CrewToday>('GET', '/api/maxgleam/crew/today' + (date ? `?date=${date}` : '')),
   startJob: (jobId: number) =>
-    req<{ job: CrewJob }>('POST', '/api/maxgleam/crew/start-job', { job_id: jobId }),
+    req<{ job: CrewJob; notified: NotifyResult | null }>(
+      'POST', '/api/maxgleam/crew/start-job', { job_id: jobId }),
   completeJob: (jobId: number, notes: string) =>
     req<{ job: CrewJob }>('POST', '/api/maxgleam/crew/complete-job',
       { job_id: jobId, notes }),

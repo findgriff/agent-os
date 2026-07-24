@@ -14,7 +14,7 @@ import {
   MGAlert, MGPill, MGSpinner,
 } from './MGKit';
 import {
-  crewApi, getCrewToken, setCrewToken, clearCrewToken, photoUrl, money,
+  crewApi, getCrewToken, setCrewToken, clearCrewToken, photoUrl, money, notifyNotice,
   type Crew, type CrewJob, type CrewToday,
 } from '../../lib/crewApi';
 
@@ -353,6 +353,7 @@ function JobCard({ job, stop, onChanged }:
   const [panel, setPanel] = useState<'none' | 'complete' | 'issue' | 'photos'>('none');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const done = job.status === 'done';
   const started = !!job.started_at && !done;
@@ -364,7 +365,11 @@ function JobCard({ job, stop, onChanged }:
 
   async function start() {
     setBusy(true); setError(null);
-    try { await crewApi.startJob(job.job_id); onChanged(); }
+    try {
+      const res = await crewApi.startJob(job.job_id);
+      setNotice(notifyNotice(res.notified));   // "Customer texted you're on the way", or null
+      onChanged();
+    }
     catch (err) { setError(err instanceof Error ? err.message : 'Could not start the job'); }
     finally { setBusy(false); }
   }
@@ -454,6 +459,11 @@ function JobCard({ job, stop, onChanged }:
       {/* Primary actions */}
       <div className="space-y-2 border-t border-slate-100 bg-slate-50/60 p-4">
         {error && <MGAlert>{error}</MGAlert>}
+        {notice && !done && (
+          <p className="flex items-center gap-1.5 text-center text-sm font-semibold text-[#0E9BB8]">
+            <span aria-hidden>💬</span>{notice}
+          </p>
+        )}
         {!done && (
           <div className="grid grid-cols-2 gap-2">
             <MGButton tone="secondary" onClick={start} loading={busy} disabled={started}
