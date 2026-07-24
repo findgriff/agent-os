@@ -730,7 +730,7 @@ export default function Voice() {
               <label className="text-xs font-semibold uppercase tracking-wider text-muted">Speak replies</label>
               <p className="mt-0.5 text-[11px] text-muted/70">Apollo reads answers aloud.</p>
             </div>
-            <Toggle checked={settings.speak}
+            <Toggle ariaLabel="Speak replies" checked={settings.speak}
               onChange={() => setSettings(s => ({ ...s, speak: !s.speak }))} />
           </div>
           <div className="flex items-center justify-between gap-3">
@@ -741,14 +741,14 @@ export default function Voice() {
                   : 'Voice input isn’t supported in this browser.'}
               </p>
             </div>
-            <Toggle checked={realtime} disabled={!speechAvailable} onChange={toggleRealtime} />
+            <Toggle ariaLabel="Always listen" checked={realtime} disabled={!speechAvailable} onChange={toggleRealtime} />
           </div>
           <div className="flex items-center justify-between gap-3">
             <div>
               <label className="text-xs font-semibold uppercase tracking-wider text-muted">Wake word (“Apollo”)</label>
               <p className="mt-0.5 text-[11px] text-muted/70">Hands-free activation — coming soon.</p>
             </div>
-            <Toggle checked={settings.wakeWord}
+            <Toggle ariaLabel="Wake word (Apollo)" checked={settings.wakeWord}
               onChange={() => setSettings(s => ({ ...s, wakeWord: !s.wakeWord }))} />
           </div>
           <div className="flex items-center justify-between gap-3">
@@ -756,7 +756,7 @@ export default function Voice() {
               <label className="text-xs font-semibold uppercase tracking-wider text-muted">Real-time mode (WebSocket)</label>
               <p className="mt-0.5 text-[11px] text-muted/70">Low-latency streaming voice — coming soon.</p>
             </div>
-            <Toggle checked={settings.realtimeWs}
+            <Toggle ariaLabel="Real-time mode (WebSocket)" checked={settings.realtimeWs}
               onChange={() => setSettings(s => ({ ...s, realtimeWs: !s.realtimeWs }))} />
           </div>
           <div className="flex justify-end pt-1">

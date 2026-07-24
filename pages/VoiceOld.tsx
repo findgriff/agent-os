@@ -567,7 +567,7 @@ export default function VoiceOld() {
                 {synthAvailable ? "Hermes reads answers aloud." : 'Not supported in this browser.'}
               </p>
             </div>
-            <Toggle checked={settings.speak} disabled={!synthAvailable}
+            <Toggle ariaLabel="Speak replies" checked={settings.speak} disabled={!synthAvailable}
               onChange={() => setSettings(s => ({ ...s, speak: !s.speak }))} />
           </div>
           <div className="flex justify-end pt-1">

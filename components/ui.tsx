@@ -83,10 +83,11 @@ export const TEAM_COLOUR: Record<string, string> = {
 };
 
 // ── Toggle ──────────────────────────────────────────────────────────────
-export function Toggle({ checked, onChange, disabled }:
-  { checked: boolean; onChange: () => void; disabled?: boolean }) {
+export function Toggle({ checked, onChange, disabled, ariaLabel }:
+  { checked: boolean; onChange: () => void; disabled?: boolean; ariaLabel?: string }) {
   return (
-    <button type="button" role="switch" aria-checked={checked} disabled={disabled} onClick={onChange}
+    <button type="button" role="switch" aria-checked={checked} aria-label={ariaLabel}
+      disabled={disabled} onClick={onChange}
       className={`relative h-6 w-11 rounded-full transition-colors disabled:opacity-40
         ${checked ? 'bg-accent shadow-[0_0_12px_rgba(25,195,230,0.5)]' : 'bg-white/10'}`}>
       <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform
