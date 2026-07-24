@@ -2,6 +2,7 @@
 // single partner company. Standalone shell (no AGENT OS sidebar): partners
 // only ever see their own estate.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Badge, Button, Card, EmptyState, Icon, Input, Select, SkeletonList, Textarea, useToast,
 } from '../components/ui';
@@ -48,13 +49,27 @@ interface KebabItem {
 function KebabMenu({ items, label = 'Job actions', title = 'Job actions' }:
   { items: KebabItem[]; label?: string; title?: string }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [isMobile, setIsMobile] = useState(false);
+  const btnRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Below `sm` the menu is a bottom sheet; from `sm` up it is a dropdown.
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 639px)');
+    const sync = () => setIsMobile(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
-    // pointerdown covers mouse and touch in one listener.
+    // pointerdown covers mouse and touch. The sheet is portalled to <body>, so
+    // it lives outside btnRef — check menuRef too or a tap on it would close it.
     const onDown = (e: Event) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     document.addEventListener('pointerdown', onDown);
@@ -65,8 +80,19 @@ function KebabMenu({ items, label = 'Job actions', title = 'Job actions' }:
     };
   }, [open]);
 
+  const itemButtons = items.map(item => (
+    <button key={item.label} type="button" role="menuitem" disabled={item.disabled}
+      onClick={() => { setOpen(false); item.onClick(); }}
+      className={`flex w-full items-center gap-3 rounded-lg px-2.5 py-3 text-left text-sm
+        transition-colors disabled:cursor-not-allowed disabled:opacity-40 sm:gap-2.5 sm:py-2
+        ${item.danger ? 'text-rose hover:bg-rose/10' : 'text-ink hover:bg-white/6'}`}>
+      <Icon name={item.icon} size={18} className={item.danger ? 'text-rose' : 'text-muted'} />
+      {item.label}
+    </button>
+  ));
+
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative" ref={btnRef}>
       <button type="button" aria-haspopup="menu" aria-expanded={open} aria-label={label}
         onClick={() => setOpen(o => !o)}
         className={`grid h-11 w-11 place-items-center rounded-lg border border-white/8 text-muted
@@ -75,35 +101,38 @@ function KebabMenu({ items, label = 'Job actions', title = 'Job actions' }:
         <Icon name="more_vert" size={18} />
       </button>
 
-      {open && (
+      {/* Mobile: a bottom sheet portalled to <body> so it escapes any
+          transformed ancestor (the tab-content entrance animation keeps a
+          transform under `both` fill-mode, which would otherwise trap a
+          position:fixed sheet at the bottom of that element, off-screen). */}
+      {open && isMobile && createPortal(
         <>
-          {/* Scrim — phones only; the dropdown needs no backdrop */}
-          <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px] sm:hidden"
+          <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-[2px]"
             aria-hidden onClick={() => setOpen(false)} />
-          <div role="menu"
-            className="fixed inset-x-0 bottom-0 z-50 overflow-hidden rounded-t-2xl border-t border-white/10
+          <div ref={menuRef} role="menu"
+            className="fixed inset-x-0 bottom-0 z-[61] overflow-hidden rounded-t-2xl border-t border-white/10
               bg-surface/95 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]
               shadow-[0_-12px_40px_-8px_rgba(0,0,0,0.6)] backdrop-blur-xl
-              animate-[fadeInUp_0.16s_ease-out_both]
-              sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:mt-1 sm:w-44 sm:rounded-xl
-              sm:border sm:pb-2 sm:shadow-[0_12px_40px_-8px_rgba(0,0,0,0.6)]">
-            {/* Sheet header — phones only: grabber + title */}
-            <div className="mb-1 sm:hidden">
+              animate-[fadeInUp_0.16s_ease-out_both]">
+            <div className="mb-1">
               <span className="mx-auto mb-2 block h-1 w-9 rounded-full bg-white/15" />
               <span className="block truncate px-2 text-[11px] font-semibold uppercase tracking-wider text-muted">{title}</span>
             </div>
-            {items.map(item => (
-              <button key={item.label} type="button" role="menuitem" disabled={item.disabled}
-                onClick={() => { setOpen(false); item.onClick(); }}
-                className={`flex w-full items-center gap-3 rounded-lg px-2.5 py-3 text-left text-sm
-                  transition-colors disabled:cursor-not-allowed disabled:opacity-40 sm:gap-2.5 sm:py-2
-                  ${item.danger ? 'text-rose hover:bg-rose/10' : 'text-ink hover:bg-white/6'}`}>
-                <Icon name={item.icon} size={18} className={item.danger ? 'text-rose' : 'text-muted'} />
-                {item.label}
-              </button>
-            ))}
+            {itemButtons}
           </div>
-        </>
+        </>,
+        document.body,
+      )}
+
+      {/* Desktop: a dropdown anchored to the trigger. position:absolute is
+          unaffected by ancestor transforms, so it needs no portal. */}
+      {open && !isMobile && (
+        <div ref={menuRef} role="menu"
+          className="absolute right-0 z-40 mt-1 w-44 overflow-hidden rounded-xl border border-white/10
+            bg-surface/95 p-1 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.6)] backdrop-blur-xl
+            animate-[fadeInUp_0.12s_ease-out_both]">
+          {itemButtons}
+        </div>
       )}
     </div>
   );
