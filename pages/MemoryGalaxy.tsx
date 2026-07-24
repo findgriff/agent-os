@@ -4,7 +4,7 @@ import { useApp } from '../lib/store';
 import { api } from '../lib/api';
 import type { GalaxyStar } from '../lib/types';
 import { Galaxy, CONSTELLATION_COLOUR } from '../components/Galaxy';
-import { Badge, EmptyState, Icon } from '../components/ui';
+import { Badge, Button, EmptyState, Icon } from '../components/ui';
 import { Logo } from '../components/Logo';
 import { useSpaceAmbient, AmbientToggle } from '../components/SpaceAmbient';
 
@@ -27,6 +27,8 @@ export default function MemoryGalaxy() {
   const [constellations, setConstellations] = useState<string[]>([]);
   const [count, setCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [filter, setFilter] = useState('all');
   const [selected, setSelected] = useState<GalaxyStar | null>(null);
   const [hover, setHover] = useState<Hover | null>(null);
@@ -35,6 +37,7 @@ export default function MemoryGalaxy() {
   useEffect(() => {
     let alive = true;
     setLoading(true);
+    setError(false);
     (async () => {
       try {
         const res = await api.galaxy(selectedTenant ?? undefined);
@@ -44,15 +47,13 @@ export default function MemoryGalaxy() {
         setCount(res.count ?? (res.memories || []).length);
       } catch {
         if (!alive) return;
-        setStars([]);
-        setConstellations([]);
-        setCount(0);
+        setError(true);
       } finally {
         if (alive) setLoading(false);
       }
     })();
     return () => { alive = false; };
-  }, [selectedTenant]);
+  }, [selectedTenant, reloadKey]);
 
   // Reset selection/hover when the data set changes.
   useEffect(() => { setSelected(null); setHover(null); }, [selectedTenant]);
@@ -122,6 +123,15 @@ export default function MemoryGalaxy() {
             </div>
             <div className="font-display text-sm tracking-wide text-muted">Mapping the galaxy…</div>
           </div>
+        </div>
+      ) : error ? (
+        <div className="absolute inset-0 grid place-items-center px-4">
+          <EmptyState
+            icon="cloud_off"
+            title="Couldn't load the galaxy"
+            hint="Something went wrong reaching the server."
+            action={<Button icon="refresh" onClick={() => setReloadKey(k => k + 1)}>Retry</Button>}
+          />
         </div>
       ) : count === 0 ? (
         <div className="absolute inset-0 grid place-items-center px-4">

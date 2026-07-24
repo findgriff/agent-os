@@ -37,14 +37,18 @@ export default function Dashboard() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [stars, setStars] = useState<GalaxyStar[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   const load = async () => {
     setLoading(true);
+    setError(false);
     try {
       const ov = await api.overview();
       setOverview(ov);
     } catch {
       setOverview(null);
+      setError(true);
     }
     try {
       const g = await api.galaxy();
@@ -63,12 +67,15 @@ export default function Dashboard() {
   };
 
   const syncVault = async () => {
+    setSyncing(true);
     try {
       const res = await api.vaultSync();
       toast(`Synced ${res.synced} memories`, 'ok');
       load();
     } catch {
       toast('Vault sync failed', 'danger');
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -113,7 +120,7 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
-            <Button variant="glass" icon="sync" onClick={syncVault}>Sync vault</Button>
+            <Button variant="glass" icon="sync" onClick={syncVault} loading={syncing}>Sync vault</Button>
             <Button variant="secondary" icon="refresh" onClick={load} loading={loading}>Refresh</Button>
           </div>
         </div>
@@ -121,6 +128,10 @@ export default function Dashboard() {
 
       {loading ? (
         <SkeletonList count={4} />
+      ) : error ? (
+        <EmptyState icon="cloud_off" title="Couldn't load your fleet"
+          hint="Something went wrong reaching the server."
+          action={<Button icon="refresh" onClick={load}>Retry</Button>} />
       ) : isEmpty ? (
         /* ── First-run welcome: no projects, agents, memories or activity yet ── */
         <Card glass className="relative overflow-hidden p-8 text-center animate-fadeInUp sm:p-12">
@@ -159,7 +170,7 @@ export default function Dashboard() {
 
             <div className="mt-8 flex flex-wrap justify-center gap-2">
               <Button variant="primary" icon="hub" onClick={() => navigate('/integrations')}>Connect a platform</Button>
-              <Button variant="glass" icon="sync" onClick={syncVault}>Sync vault</Button>
+              <Button variant="glass" icon="sync" onClick={syncVault} loading={syncing}>Sync vault</Button>
             </div>
           </div>
         </Card>

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Button, Card, EmptyState, Icon, useToast, Input, Modal } from '../components/ui';
+import { Button, Card, EmptyState, Icon, useToast, Badge } from '../components/ui';
 import { api } from '../lib/api';
 
 interface Headline {
@@ -35,6 +35,7 @@ export default function Oracle() {
   const toast = useToast();
   const [keywords, setKeywords] = useState('');
   const [scanning, setScanning] = useState(false);
+  const [addingSource, setAddingSource] = useState(false);
   const [headlines, setHeadlines] = useState<Headline[]>([]);
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -90,12 +91,14 @@ export default function Oracle() {
 
   const addSource = async () => {
     if (!srcName.trim() || !srcUrl.trim()) { toast('Name and URL are required', 'warn'); return; }
+    setAddingSource(true);
     try {
       await api.addOracleSource({ name: srcName.trim(), url_template: srcUrl.trim(), response_path: srcPath.trim() || 'hits', title_field: srcTitle.trim() || 'title', url_field: srcUrlField.trim() || 'url' });
       toast('Source added', 'ok');
       setSrcName(''); setSrcUrl(''); setSrcPath('hits'); setSrcTitle('title'); setSrcUrlField('url');
       loadSources();
     } catch { toast('Failed to add source', 'danger'); }
+    finally { setAddingSource(false); }
   };
 
   const deleteSource = async (id: number) => {
@@ -107,15 +110,15 @@ export default function Oracle() {
   return (
     <div className="flex h-full flex-col">
       {/* Top bar */}
-      <div className="flex items-center gap-3 border-b border-white/6 bg-surface/60 px-4 py-3">
+      <div className="flex flex-wrap items-center gap-3 border-b border-white/6 bg-surface/60 px-4 py-3">
         <div className="grid h-8 w-8 place-items-center rounded-lg bg-amber/10 text-amber">
           <Icon name="travel_explore" size={18} />
         </div>
         <h1 className="font-display text-base font-bold text-ink">Hermes Oracle</h1>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           <input value={keywords} onChange={e => setKeywords(e.target.value)}
             placeholder="Keywords: AI, business, marketing…"
-            className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-1.5 text-xs text-ink placeholder:text-muted/60 focus:border-accent/50 focus:outline-none"
+            className="w-full sm:w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-1.5 text-xs text-ink placeholder:text-muted/60 focus:border-accent/50 focus:outline-none"
             onKeyDown={e => e.key === 'Enter' && scan()}
           />
           <Button variant="primary" icon="auto_awesome" loading={scanning}
@@ -225,7 +228,7 @@ export default function Oracle() {
                     <input value={srcTitle} onChange={e => setSrcTitle(e.target.value)} placeholder="title field" className="w-16 rounded border border-white/10 bg-black/20 px-1 py-1 text-[10px] text-ink" />
                     <input value={srcUrlField} onChange={e => setSrcUrlField(e.target.value)} placeholder="url field" className="w-16 rounded border border-white/10 bg-black/20 px-1 py-1 text-[10px] text-ink" />
                   </div>
-                  <Button variant="primary" icon="add" onClick={addSource} className="w-full h-7 text-xs" style={{ background: '#F59E0B' }}>Add Source</Button>
+                  <Button variant="primary" icon="add" loading={addingSource} onClick={addSource} className="w-full h-7 text-xs" style={{ background: '#F59E0B' }}>Add Source</Button>
                 </div>
                 <div className="mt-3 space-y-1">
                   {sources.map(s => (
@@ -248,8 +251,4 @@ export default function Oracle() {
       </div>
     </div>
   );
-}
-
-function Badge({ tone, children }: { tone: string; children: React.ReactNode }) {
-  return <span className={"inline-block rounded-full px-2 py-0.5 text-[9px] font-medium " + (tone === 'neutral' ? 'bg-white/10 text-muted' : '')}>{children}</span>;
 }

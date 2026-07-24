@@ -77,6 +77,7 @@ export default function Voice() {
   const [liveTranscript, setLiveTranscript] = useState('');
   const [textInput, setTextInput] = useState('');
   const [history, setHistory] = useState<ApolloCommand[] | null>(null);
+  const [historyError, setHistoryError] = useState(false);
 
   const [showSettings, setShowSettings] = useState(false);
   const [voices, setVoices] = useState<any[]>([]);
@@ -137,7 +138,8 @@ export default function Voice() {
     try {
       const r = await api.apolloHistory(selectedTenant ?? undefined);
       setHistory(r.commands);
-    } catch { setHistory([]); }
+      setHistoryError(false);
+    } catch { setHistory([]); setHistoryError(true); }
   };
   useEffect(() => {
     setMessages([]); setHistory(null); loadHistory();
@@ -622,6 +624,18 @@ export default function Voice() {
             <div className="space-y-4">
               <SidePanel title="Command history" icon="history" count={history?.length}>
                 {history === null ? <Loading />
+                  : historyError ? (
+                    <div className="flex items-center justify-between gap-2 rounded-xl border border-rose/20 bg-rose/5 px-3 py-2">
+                      <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted">
+                        <Icon name="error" size={14} className="shrink-0 text-rose" />
+                        <span className="truncate">Couldn't load history.</span>
+                      </span>
+                      <button onClick={loadHistory}
+                        className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-muted transition-colors hover:text-ink">
+                        <Icon name="refresh" size={14} /> Retry
+                      </button>
+                    </div>
+                  )
                   : history.length === 0 ? <Empty text="No commands yet." />
                   : history.slice(0, 12).map(c => (
                     <div key={c.id} className="rounded-xl border border-white/6 bg-white/[0.02] px-3 py-2">

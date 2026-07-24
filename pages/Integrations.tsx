@@ -78,6 +78,7 @@ export default function Integrations() {
   const toast = useToast();
   const [data, setData] = useState<BridgesResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [busy, setBusy] = useState<Record<number, boolean>>({}); // per-connection action lock
 
   // Add-connection modal state
@@ -87,12 +88,13 @@ export default function Integrations() {
   const [saving, setSaving] = useState(false);
 
   const load = async () => {
+    setError(false);
     try {
       const res = await api.bridges();
       setData(res);
     } catch {
       toast('Failed to load integrations', 'danger');
-      setData({ connections: [], available: [] });
+      setError(true);
     } finally {
       setLoading(false);
     }
@@ -193,6 +195,11 @@ export default function Integrations() {
 
       {loading ? (
         <SkeletonList count={4} />
+      ) : error ? (
+        <EmptyState icon="cloud_off"
+          title="Couldn't load integrations"
+          hint="Something went wrong reaching the server."
+          action={<Button icon="refresh" onClick={load}>Retry</Button>} />
       ) : (
         <>
           {/* Connected ─────────────────────────────────────────────────── */}

@@ -1,7 +1,7 @@
 // Call Center — AI-powered outbound calling dashboard
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { apiReq } from '../lib/api';
-import { Icon } from '../components/ui';
+import { Icon, Button, EmptyState, SkeletonList, useToast } from '../components/ui';
 
 const ORANGE = '#FF6B00';
 
@@ -88,6 +88,9 @@ export default function CallCenter() {
   const [phase, setPhase] = useState<CallPhase>('idle');
   const [result, setResult] = useState('');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const toast = useToast();
   // Timers driving the ringing → connected → ended button phases.
   const phaseTimers = useRef<number[]>([]);
   const clearPhaseTimers = () => {
@@ -110,6 +113,7 @@ export default function CallCenter() {
   const [tab, setTab] = useState<'dnd' | 'blocked' | 'notices'>('dnd');
 
   const load = useCallback(async () => {
+    setError(false);
     try {
       const res = await apiReq<{ scripts: Record<string, CallScript> }>('GET', '/api/call-center/scripts');
       setScripts(res.scripts);
@@ -118,7 +122,10 @@ export default function CallCenter() {
         setSelectedBusiness(b => b || keys[0]);
         setForm(f => (f.business ? f : { ...f, business: keys[0] }));
       }
-    } catch {}
+    } catch {
+      setError(true);
+      toast('Could not reach the call center', 'danger');
+    }
     try {
       const res = await apiReq<{ calls: CallLog[] }>('GET', '/api/call-center/history');
       setCalls(res.calls || []);
@@ -142,7 +149,12 @@ export default function CallCenter() {
       setCompliance(await apiReq<Compliance>('GET', '/api/call-center/compliance'));
     } catch {}
     setLoading(false);
-  }, []);
+  }, [toast]);
+
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    try { await load(); } finally { setRefreshing(false); }
+  }, [load]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -207,7 +219,9 @@ export default function CallCenter() {
     try {
       await apiReq('DELETE', `/api/call-center/campaigns/${id}`);
       load();
-    } catch {}
+    } catch (e: any) {
+      setResult(e.message || 'Could not delete campaign');
+    }
   };
 
   const peakDay = Math.max(1, ...(analytics?.daily || []).map(d => d.calls + d.blocked));
@@ -226,11 +240,21 @@ export default function CallCenter() {
           <h1 className="text-2xl font-bold text-white">Call Center</h1>
           <p className="text-white/40 text-sm mt-1">AI-powered outbound calling — powered by Kimi K3</p>
         </div>
-        <button onClick={load}
-          className="text-xs text-white/50 hover:text-white/80 transition-all duration-200 ease-out bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg hover:shadow-[0_0_18px_-6px_rgba(255,107,0,0.5)]">
-          ↻ Refresh
+        <button onClick={refresh} disabled={refreshing}
+          className="text-xs text-white/50 hover:text-white/80 transition-all duration-200 ease-out bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg hover:shadow-[0_0_18px_-6px_rgba(255,107,0,0.5)] disabled:opacity-40 disabled:cursor-not-allowed">
+          {refreshing ? '↻ Refreshing…' : '↻ Refresh'}
         </button>
       </div>
+
+      {/* Load failure — the fetch fell over, not an empty account. */}
+      {error && (
+        <div className={`${CARD} p-2 relative animate-fadeInUp`}>
+          <EmptyState icon="cloud_off" title="Couldn't load the call center"
+            hint="Something went wrong reaching the server."
+            accent={ORANGE}
+            action={<Button icon="refresh" onClick={() => load()}>Retry</Button>} />
+        </div>
+      )}
 
       {/* Analytics cards — icon + number + label */}
       {loading && !analytics ? (
@@ -384,7 +408,7 @@ export default function CallCenter() {
                       className={`${FIELD} mt-1 [color-scheme:dark]`} />
                   </label>
                 </div>
-                {formError && <div className="text-kitt text-xs">{formError}</div>}
+                {formError && <div className="text-rose text-xs">{formError}</div>}
                 <button onClick={handleCreateCampaign} disabled={saving || !form.name}
                   className="w-full text-sm px-4 py-2 rounded-xl border transition-all duration-200 ease-out hover:shadow-[0_0_20px_-6px_rgba(255,107,0,0.6)] hover:brightness-125 disabled:opacity-40"
                   style={{ color: ORANGE, borderColor: `${ORANGE}4D`, background: `${ORANGE}1A` }}>
@@ -393,7 +417,9 @@ export default function CallCenter() {
               </div>
             )}
 
-            {campaigns.length === 0 ? (
+            {loading ? (
+              <SkeletonList count={2} />
+            ) : campaigns.length === 0 ? (
               <div className="text-white/30 text-sm text-center py-6">
                 No campaigns yet — create one to group calls by business and date range.
               </div>
@@ -417,7 +443,7 @@ export default function CallCenter() {
                           className="text-white/25 hover:text-kitt transition-colors text-xs">×</button>
                       </div>
                     </div>
-                    <div className="grid grid-cols-4 gap-2 mt-2 text-center">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2 text-center">
                       {[
                         ['Calls', c.stats.calls, 'text-white/80'],
                         ['Answered', c.stats.answered, 'text-white/80'],
@@ -458,7 +484,12 @@ export default function CallCenter() {
           )}
 
           {/* Call History */}
-          {calls.length > 0 && (
+          {loading ? (
+            <div className={`${CARD} ${LIFT} p-5 animate-fadeInUp`} style={{ animationDelay: '340ms' }}>
+              <h2 className="text-white text-lg font-semibold mb-3">📊 Call History</h2>
+              <SkeletonList count={4} />
+            </div>
+          ) : calls.length > 0 && (
             <div className={`${CARD} ${LIFT} p-5 animate-fadeInUp`} style={{ animationDelay: '340ms' }}>
               <h2 className="text-white text-lg font-semibold mb-3">📊 Call History</h2>
               <div className="space-y-1.5">
@@ -488,7 +519,9 @@ export default function CallCenter() {
         <div className="space-y-6">
           <div className={`${CARD} ${LIFT} p-5 animate-fadeInUp`} style={{ animationDelay: '200ms' }}>
             <h2 className="text-white text-lg font-semibold mb-3">👤 Lead Queue</h2>
-            {leads.length === 0 ? (
+            {loading ? (
+              <SkeletonList count={3} />
+            ) : leads.length === 0 ? (
               <div className="flex flex-col items-center gap-2 py-6 text-center">
                 <span className="grid h-11 w-11 place-items-center rounded-2xl border border-white/8 bg-white/[0.03] text-white/25">
                   <Icon name="person_search" size={22} />

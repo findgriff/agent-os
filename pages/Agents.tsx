@@ -39,19 +39,23 @@ export default function Agents() {
 
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [team, setTeam] = useState<'all' | Team>('all');
   const [query, setQuery] = useState('');
   const [running, setRunning] = useState<Record<number, boolean>>({});
+  const [toggling, setToggling] = useState<Record<number, boolean>>({});
   const [openId, setOpenId] = useState<number | null>(null);
   const [openTab, setOpenTab] = useState<Tab>('certificate');
 
   const load = async () => {
     setLoading(true);
+    setError(false);
     try {
       const res = await api.agents(selectedTenant ?? undefined);
       setAgents(res.agents || []);
     } catch {
       setAgents([]);
+      setError(true);
       toast('Failed to load agents', 'danger');
     }
     setLoading(false);
@@ -84,11 +88,15 @@ export default function Agents() {
   };
 
   const toggle = async (a: Agent) => {
+    if (toggling[a.id]) return;
+    setToggling(t => ({ ...t, [a.id]: true }));
     try {
       const res = await api.toggleAgent(a.id);
       patchAgent(a.id, { enabled: res.enabled });
     } catch {
       toast('Could not toggle agent', 'danger');
+    } finally {
+      setToggling(t => ({ ...t, [a.id]: false }));
     }
   };
 
@@ -156,6 +164,10 @@ export default function Agents() {
       {/* Grid ────────────────────────────────────────────────────────── */}
       {loading ? (
         <SkeletonList count={6} />
+      ) : error ? (
+        <EmptyState icon="cloud_off" title="Couldn't load agents"
+          hint="Something went wrong reaching the server."
+          action={<Button icon="refresh" onClick={load}>Retry</Button>} />
       ) : filtered.length === 0 ? (
         agents.length === 0 ? (
           <EmptyState icon="smart_toy" accent="#38BDF8" large
@@ -239,7 +251,7 @@ export default function Agents() {
                   ) : <span className="text-[11px] text-muted/60">No generation</span>}
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] text-muted">{isOn(a) ? 'Enabled' : 'Disabled'}</span>
-                    <Toggle checked={isOn(a)} onChange={() => toggle(a)} />
+                    <Toggle checked={isOn(a)} onChange={() => toggle(a)} disabled={!!toggling[a.id]} />
                   </div>
                 </div>
               </Card>
@@ -381,15 +393,15 @@ function SoulPanel({ agent }: { agent: Agent }) {
 // ── Log ───────────────────────────────────────────────────────────────
 function LogPanel({ agent }: { agent: Agent }) {
   const [logs, setLogs] = useState<LogEntry[] | null>(null);
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try { const res = await api.agentLog(agent.id); if (alive) setLogs(res.logs || []); }
-      catch { if (alive) setLogs([]); }
-    })();
-    return () => { alive = false; };
-  }, [agent.id]);
+  const [err, setErr] = useState(false);
+  const load = async () => {
+    setErr(false); setLogs(null);
+    try { const res = await api.agentLog(agent.id); setLogs(res.logs || []); }
+    catch { setLogs([]); setErr(true); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [agent.id]);
 
+  if (err) return <EmptyState icon="cloud_off" title="Couldn't load log" hint="Something went wrong reaching the server." action={<Button icon="refresh" onClick={load}>Retry</Button>} />;
   if (logs === null) return <SkeletonList count={5} />;
   if (logs.length === 0) return <EmptyState icon="receipt_long" title="No log entries" hint="This agent hasn't run yet." />;
   return (
@@ -415,13 +427,15 @@ function LogPanel({ agent }: { agent: Agent }) {
 function MemoryPanel({ agent }: { agent: Agent }) {
   const toast = useToast();
   const [memories, setMemories] = useState<Memory[] | null>(null);
+  const [err, setErr] = useState(false);
   const [topic, setTopic] = useState('');
   const [fact, setFact] = useState('');
   const [saving, setSaving] = useState(false);
 
   const load = async () => {
+    setErr(false);
     try { const res = await api.agentMemory(agent.id); setMemories(res.memories || []); }
-    catch { setMemories([]); }
+    catch { setMemories([]); setErr(true); }
   };
   useEffect(() => { setMemories(null); load(); /* eslint-disable-next-line */ }, [agent.id]);
 
@@ -453,6 +467,7 @@ function MemoryPanel({ agent }: { agent: Agent }) {
 
       {/* List */}
       {memories === null ? <SkeletonList count={4} />
+        : err ? <EmptyState icon="cloud_off" title="Couldn't load memories" hint="Something went wrong reaching the server." action={<Button icon="refresh" onClick={load}>Retry</Button>} />
         : memories.length === 0 ? <EmptyState icon="auto_awesome" title="No memories" hint="This agent hasn't learned anything yet." />
         : (
           <div className="space-y-2">
@@ -475,13 +490,15 @@ function MemoryPanel({ agent }: { agent: Agent }) {
 function InboxPanel({ agent }: { agent: Agent }) {
   const toast = useToast();
   const [messages, setMessages] = useState<InboxMessage[] | null>(null);
+  const [err, setErr] = useState(false);
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);
 
   const load = async () => {
+    setErr(false);
     try { const res = await api.agentInbox(agent.id); setMessages(res.messages || []); }
-    catch { setMessages([]); }
+    catch { setMessages([]); setErr(true); }
   };
   useEffect(() => { setMessages(null); load(); /* eslint-disable-next-line */ }, [agent.id]);
 
@@ -513,6 +530,7 @@ function InboxPanel({ agent }: { agent: Agent }) {
 
       {/* Thread */}
       {messages === null ? <SkeletonList count={4} />
+        : err ? <EmptyState icon="cloud_off" title="Couldn't load inbox" hint="Something went wrong reaching the server." action={<Button icon="refresh" onClick={load}>Retry</Button>} />
         : messages.length === 0 ? <EmptyState icon="mail" title="Inbox empty" hint="No messages for this agent yet." />
         : (
           <div className="space-y-2">

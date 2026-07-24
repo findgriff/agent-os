@@ -39,11 +39,13 @@ export default function WarRoom() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loadingRooms, setLoadingRooms] = useState(true);
+  const [roomsError, setRoomsError] = useState(false);
   const [activeRoomId, setActiveRoomId] = useState<number | null>(null);
 
   // ── Active thread ──────────────────────────────────────────────────────
   const [messages, setMessages] = useState<RoomMessage[]>([]);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const [threadError, setThreadError] = useState(false);
   const [typing, setTyping] = useState(false);
   const [pending, setPending] = useState<Agent[]>([]);
 
@@ -69,19 +71,26 @@ export default function WarRoom() {
     [rooms, activeRoomId],
   );
 
-  // Load rooms + agent directory whenever the project changes.
-  useEffect(() => {
-    let alive = true;
+  // Load rooms + agent directory. Shared by the project-change effect and the
+  // error-state retry; isAlive guards against a stale response after a switch.
+  const loadRooms = (isAlive: () => boolean = () => true) => {
     setLoadingRooms(true);
-    setActiveRoomId(null);
-    setMessages([]);
-    Promise.all([
+    setRoomsError(false);
+    return Promise.all([
       api.chatRooms(selectedTenant ?? undefined),
       api.agents(selectedTenant ?? undefined),
     ])
-      .then(([r, a]) => { if (alive) { setRooms(r.rooms); setAgents(a.agents); } })
-      .catch(() => { if (alive) toast('Could not load war rooms', 'danger'); })
-      .finally(() => { if (alive) setLoadingRooms(false); });
+      .then(([r, a]) => { if (isAlive()) { setRooms(r.rooms); setAgents(a.agents); } })
+      .catch(() => { if (isAlive()) { setRoomsError(true); toast('Could not load war rooms', 'danger'); } })
+      .finally(() => { if (isAlive()) setLoadingRooms(false); });
+  };
+
+  // Load rooms + agent directory whenever the project changes.
+  useEffect(() => {
+    let alive = true;
+    setActiveRoomId(null);
+    setMessages([]);
+    loadRooms(() => alive);
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTenant]);
@@ -93,20 +102,27 @@ export default function WarRoom() {
     }
   }, [rooms, activeRoomId]);
 
+  // Load the thread for a room. Shared by the active-room effect and the
+  // thread error-state retry.
+  const loadThread = (roomId: number, isAlive: () => boolean = () => true) => {
+    setLoadingMsgs(true);
+    setThreadError(false);
+    setTyping(false);
+    return api.roomMessages(roomId)
+      .then(r => {
+        if (!isAlive()) return;
+        setMessages(r.messages);
+        setRooms(rs => rs.map(x => x.id === r.room.id ? { ...x, ...r.room } : x));
+      })
+      .catch(() => { if (isAlive()) { setThreadError(true); toast('Could not load messages', 'danger'); } })
+      .finally(() => { if (isAlive()) setLoadingMsgs(false); });
+  };
+
   // Load the thread for the active room.
   useEffect(() => {
     if (!activeRoomId) { setMessages([]); return; }
     let alive = true;
-    setLoadingMsgs(true);
-    setTyping(false);
-    api.roomMessages(activeRoomId)
-      .then(r => {
-        if (!alive) return;
-        setMessages(r.messages);
-        setRooms(rs => rs.map(x => x.id === r.room.id ? { ...x, ...r.room } : x));
-      })
-      .catch(() => { if (alive) toast('Could not load messages', 'danger'); })
-      .finally(() => { if (alive) setLoadingMsgs(false); });
+    loadThread(activeRoomId, () => alive);
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRoomId]);
@@ -272,6 +288,10 @@ export default function WarRoom() {
         <div className="flex-1 space-y-2 overflow-y-auto p-3">
           {loadingRooms ? (
             <SkeletonList count={6} />
+          ) : roomsError ? (
+            <EmptyState icon="cloud_off" title="Couldn't load war rooms"
+              hint="Something went wrong reaching the server."
+              action={<Button variant="secondary" icon="refresh" onClick={() => loadRooms()}>Retry</Button>} />
           ) : rooms.length === 0 ? (
             <EmptyState icon="forum" title="No war rooms yet" accent={FEATURE}
               hint="Spin up a room to get your agents talking."
@@ -374,6 +394,13 @@ export default function WarRoom() {
             <div className="flex-1 space-y-3 overflow-y-auto px-3 py-4 md:px-6">
               {loadingMsgs ? (
                 <SkeletonList count={5} />
+              ) : threadError ? (
+                <div className="grid h-full place-items-center">
+                  <EmptyState icon="cloud_off" title="Couldn't load messages"
+                    hint="Something went wrong reaching the server."
+                    action={<Button variant="secondary" icon="refresh"
+                      onClick={() => activeRoomId && loadThread(activeRoomId)}>Retry</Button>} />
+                </div>
               ) : messages.length === 0 ? (
                 <div className="grid h-full place-items-center">
                   <EmptyState icon="waving_hand" accent={FEATURE} title="Start the conversation"

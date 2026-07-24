@@ -1,7 +1,7 @@
 // Investments Dashboard — live stock tracker
 // AGENT OS design system: dark theme, glassmorphism, teal accents
 import { useEffect, useState, useCallback } from 'react';
-import { Card, Stat, SkeletonList, EmptyState, Icon } from '../components/ui';
+import { Card, Stat, SkeletonList, EmptyState, Icon, Button } from '../components/ui';
 import { useApp } from '../lib/store';
 import { api, apiReq, timeAgo } from '../lib/api';
 import type { InvestmentData, InvestmentList, InvestmentNews } from '../lib/types';
@@ -15,7 +15,7 @@ function PriceChange({ pct }: { pct: number }) {
   if (pct === 0) return <span className="text-white/50">—</span>;
   const isUp = pct > 0;
   return (
-    <span className={`flex items-center gap-1 text-sm ${isUp ? 'text-accent' : 'text-kitt'}`}>
+    <span className={`flex items-center gap-1 text-sm ${isUp ? 'text-accent' : 'text-rose'}`}>
       <span className="text-xs">{isUp ? '▲' : '▼'}</span>
       {Math.abs(pct).toFixed(2)}%
     </span>
@@ -55,7 +55,7 @@ function InvestmentCard({ d, showYield, showFloor, showPE, showCountry }: {
         )}
         {showFloor && (
           <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-            d.pct_from_52w_high < -30 ? 'bg-kitt/10 text-kitt' :
+            d.pct_from_52w_high < -30 ? 'bg-rose/10 text-rose' :
             d.pct_from_52w_high < -15 ? 'bg-amber/10 text-amber' :
             'bg-accent/10 text-accent'
           }`}>
@@ -101,6 +101,8 @@ export default function Investments() {
   const [prices, setPrices] = useState<Record<string, InvestmentData>>({});
   const [news, setNews] = useState<InvestmentNews[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [portfolioError, setPortfolioError] = useState(false);
   const [watchlist, setWatchlist] = useState<string[]>([]);
   const [searchInput, setSearchInput] = useState('');
   const [portfolios, setPortfolios] = useState<any[]>([]);
@@ -109,12 +111,13 @@ export default function Investments() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
+    setError(false);
     try {
       const res = await apiReq<{ prices: InvestmentData[] }>('GET', `/api/investments/prices?tickers=${ALL_TICKERS.join(',')}`);
       const map: Record<string, InvestmentData> = {};
       for (const d of res.prices) map[d.ticker] = d;
       setPrices(map);
-    } catch { /* ignore */ }
+    } catch { setError(true); }
     try {
       const res = await apiReq<{ news: InvestmentNews[] }>('GET', `/api/investments/news?tickers=${ALL_TICKERS.slice(0,5).join(',')}`);
       setNews(res.news.slice(0, 10));
@@ -145,12 +148,15 @@ export default function Investments() {
   };
 
   // Load portfolio summary when selected
-  useEffect(() => {
+  const loadPortfolioSummary = useCallback(() => {
     if (!selectedPortfolio) return;
+    setPortfolioError(false);
     apiReq<{ summary: any }>('GET', `/api/portfolios/${selectedPortfolio}`)
       .then(res => setPortfolioSummary(res.summary))
-      .catch(() => setPortfolioSummary(null));
+      .catch(() => { setPortfolioSummary(null); setPortfolioError(true); });
   }, [selectedPortfolio]);
+
+  useEffect(() => { loadPortfolioSummary(); }, [loadPortfolioSummary]);
 
   return (
     <div className="relative p-6 max-w-7xl mx-auto space-y-8">
@@ -166,10 +172,7 @@ export default function Investments() {
           <h1 className="text-2xl font-bold text-white">Investments</h1>
           <p className="text-white/40 text-sm mt-1">Live prices, dividends & market data</p>
         </div>
-        <button onClick={fetchAll}
-          className="text-xs text-white/50 hover:text-white/80 transition-all duration-200 ease-out bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg hover:shadow-[0_0_18px_-6px_rgba(25,195,230,0.5)]">
-          ↻ Refresh
-        </button>
+        <Button variant="secondary" icon="refresh" loading={loading} onClick={fetchAll}>Refresh</Button>
       </div>
 
       {/* Stats bar — icon + number + label */}
@@ -199,6 +202,15 @@ export default function Investments() {
           </div>
         ))}
       </div>
+
+      {/* Load error */}
+      {error && !loading && (
+        <Card className="p-6 animate-fadeInUp">
+          <EmptyState icon="cloud_off" title="Couldn't load market data"
+            hint="Something went wrong reaching the server."
+            action={<Button icon="refresh" loading={loading} onClick={fetchAll}>Retry</Button>} />
+        </Card>
+      )}
 
       {/* Watchlist search */}
       <div className="flex gap-2 animate-fadeInUp" style={{ animationDelay: '160ms' }}>
@@ -251,13 +263,13 @@ export default function Investments() {
                 </div>
                 <div>
                   <div className="text-white/40 text-xs">Total P&amp;L</div>
-                  <div className={`text-lg font-bold ${(portfolioSummary.total_pl || 0) >= 0 ? 'text-accent' : 'text-kitt'}`}>
+                  <div className={`text-lg font-bold ${(portfolioSummary.total_pl || 0) >= 0 ? 'text-accent' : 'text-rose'}`}>
                     {(portfolioSummary.total_pl || 0) >= 0 ? '+' : ''}${(portfolioSummary.total_pl || 0).toLocaleString(undefined, {minimumFractionDigits:2,maximumFractionDigits:2})}
                   </div>
                 </div>
                 <div>
                   <div className="text-white/40 text-xs">Return</div>
-                  <div className={`text-lg font-bold ${(portfolioSummary.total_pl_pct || 0) >= 0 ? 'text-accent' : 'text-kitt'}`}>
+                  <div className={`text-lg font-bold ${(portfolioSummary.total_pl_pct || 0) >= 0 ? 'text-accent' : 'text-rose'}`}>
                     {(portfolioSummary.total_pl_pct || 0) >= 0 ? '+' : ''}{(portfolioSummary.total_pl_pct || 0).toFixed(2)}%
                   </div>
                 </div>
@@ -272,7 +284,7 @@ export default function Investments() {
                     </div>
                     <div className="flex items-center gap-4">
                       <span className="text-white/60 text-xs">${h.current_price?.toFixed(2)}</span>
-                      <span className={`text-xs font-medium w-24 text-right ${(h.pl || 0) >= 0 ? 'text-accent' : 'text-kitt'}`}>
+                      <span className={`text-xs font-medium w-24 text-right ${(h.pl || 0) >= 0 ? 'text-accent' : 'text-rose'}`}>
                         {(h.pl || 0) >= 0 ? '+' : ''}${(h.pl || 0).toLocaleString(undefined, {minimumFractionDigits:2,maximumFractionDigits:2})}
                         <br/>
                         <span className="text-[10px]">({(h.pl_pct || 0) >= 0 ? '+' : ''}{(h.pl_pct || 0).toFixed(2)}%)</span>
@@ -282,6 +294,10 @@ export default function Investments() {
                 ))}
               </div>
             </>
+          ) : portfolioError ? (
+            <EmptyState icon="cloud_off" title="Couldn't load portfolio"
+              hint="Something went wrong reaching the server."
+              action={<Button icon="refresh" onClick={loadPortfolioSummary}>Retry</Button>} />
           ) : (
             <div className="space-y-2">
               {[0, 1, 2].map(i => (

@@ -19,6 +19,7 @@ export default function SearchPage() {
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [error, setError] = useState(false);
   const [agentMode, setAgentMode] = useState(false);
   const [agentId, setAgentId] = useState<number | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -31,6 +32,7 @@ export default function SearchPage() {
   const search = async () => {
     if (!query.trim()) { toast('Enter a search query', 'warn'); return; }
     setSearching(true);
+    setError(false);
     try {
       const q = query.trim();
       const res = (agentMode && agentId)
@@ -39,7 +41,7 @@ export default function SearchPage() {
       setResults(res.results || []);
       setHistory(h => [q, ...h.slice(0, 19)]);
       toast(`Found ${(res.results || []).length} results`, 'ok');
-    } catch { toast('Search failed', 'danger'); }
+    } catch { setError(true); toast('Search failed', 'danger'); }
     finally { setSearching(false); }
   };
 
@@ -105,7 +107,14 @@ export default function SearchPage() {
 
         {/* Results */}
         <div className="flex-1 overflow-y-auto p-4">
-          {results.length === 0 ? (
+          {error ? (
+            <div className="grid h-full place-items-center">
+              <EmptyState icon="cloud_off"
+                title="Couldn't load results"
+                hint="Something went wrong reaching the server."
+                action={<Button icon="refresh" onClick={search}>Try again</Button>} />
+            </div>
+          ) : results.length === 0 ? (
             <div className="grid h-full place-items-center">
               <EmptyState icon="search" accent="#38BDF8" large
                 title="Search the web"

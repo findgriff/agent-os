@@ -9,6 +9,12 @@ interface Round {
   work_preview: string; passed: boolean;
 }
 
+// Parse a certificate JSON string, returning {} on any malformed value so a
+// single bad row can't throw during render and blank the whole page.
+const safeParse = (s: unknown): Record<string, any> => {
+  try { return JSON.parse((s as string) || '{}'); } catch { return {}; }
+};
+
 export default function Factory() {
   const { selectedTenant } = useApp();
   const toast = useToast();
@@ -38,8 +44,8 @@ export default function Factory() {
   };
 
   // Separate agents by team
-  const revenueAgents = agents.filter(a => JSON.parse((a as any).certificate_json || '{}').team === 'revenue-operations');
-  const creativeAgents = agents.filter(a => JSON.parse((a as any).certificate_json || '{}').team === 'creative-systems');
+  const revenueAgents = agents.filter(a => safeParse((a as any).certificate_json).team === 'revenue-operations');
+  const creativeAgents = agents.filter(a => safeParse((a as any).certificate_json).team === 'creative-systems');
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-4 md:p-6">
@@ -120,7 +126,7 @@ export default function Factory() {
 
           {/* Round history */}
           {result.rounds.map((r, i) => (
-            <Card key={i} glass className={`p-4 ${r.passed ? 'border-green/30' : ''}`}>
+            <Card key={i} glass className={`p-4 ${r.passed ? 'border-emerald/30' : ''}`}>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <span className="font-display text-sm font-bold text-ink">Round {r.round}</span>

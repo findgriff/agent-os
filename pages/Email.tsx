@@ -33,6 +33,8 @@ export default function Email() {
   const [folder, setFolder] = useState<FolderKey>('inbox');
   const [emails, setEmails] = useState<AgentEmail[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [metrics, setMetrics] = useState<EmailMetrics | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -52,11 +54,12 @@ export default function Email() {
   const [connectProvider, setConnectProvider] = useState('gmail');
 
   const refreshMetrics = useCallback(() => {
-    api.emailMetrics(selectedTenant ?? undefined).then(setMetrics).catch(() => {});
-  }, [selectedTenant]);
+    api.emailMetrics(selectedTenant ?? undefined).then(setMetrics)
+      .catch(() => toast('Failed to load email metrics', 'danger'));
+  }, [selectedTenant, toast]);
 
   const loadEmails = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
+    if (!silent) { setLoading(true); setError(false); }
     try {
       const params: { tenant_id?: number; status?: string } = {};
       if (selectedTenant != null) params.tenant_id = selectedTenant;
@@ -64,7 +67,7 @@ export default function Email() {
       const res = await api.emailInbox(params);
       setEmails(res.emails || []);
     } catch {
-      if (!silent) setEmails([]);
+      if (!silent) { setEmails([]); setError(true); }
       toast('Failed to load emails', 'danger');
     } finally {
       if (!silent) setLoading(false);
@@ -74,8 +77,9 @@ export default function Email() {
   useEffect(() => { loadEmails(); }, [loadEmails]);
   useEffect(() => {
     refreshMetrics();
-    api.agents(selectedTenant ?? undefined).then(r => setAgents(r.agents || [])).catch(() => {});
-  }, [selectedTenant, refreshMetrics]);
+    api.agents(selectedTenant ?? undefined).then(r => setAgents(r.agents || []))
+      .catch(() => toast('Failed to load mailboxes', 'danger'));
+  }, [selectedTenant, refreshMetrics, toast]);
 
   const selected = useMemo(
     () => emails.find(e => e.id === selectedId) || null,
@@ -188,7 +192,12 @@ export default function Email() {
         </div>
         <div className="ml-auto flex items-center gap-2">
           <Button variant="ghost" icon="refresh" title="Refresh" aria-label="Refresh"
-            className="!px-2.5" onClick={() => { loadEmails(); refreshMetrics(); }} />
+            className="!px-2.5" loading={refreshing}
+            onClick={async () => {
+              setRefreshing(true);
+              try { await loadEmails(); refreshMetrics(); }
+              finally { setRefreshing(false); }
+            }} />
           <Button variant="primary" icon="edit_note" onClick={openCompose} style={composeBtnStyle}>
             Compose
           </Button>
@@ -293,6 +302,10 @@ export default function Email() {
           <div className="flex-1 overflow-y-auto p-2">
             {loading ? (
               <SkeletonList count={6} />
+            ) : error ? (
+              <EmptyState icon="cloud_off" title="Couldn't load mail"
+                hint="Something went wrong reaching the server."
+                action={<Button icon="refresh" onClick={() => loadEmails()}>Retry</Button>} />
             ) : emails.length === 0 ? (
               <EmptyState icon={FOLDERS.find(f => f.key === folder)?.icon || 'inbox'} accent={TEAL}
                 title={folder === 'inbox' ? 'Inbox zero' : `No ${folder} mail`}

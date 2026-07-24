@@ -199,9 +199,11 @@ export default function ImageStudio() {
           <h1 className="font-display text-sm font-bold tracking-wide text-ink">Studio</h1>
         </div>
         <div className="hidden h-5 w-px bg-white/8 sm:block" />
-        <select value={model} onChange={e => setModel(e.target.value)}
-          className="h-8 rounded-lg border border-white/10 bg-black/30 px-2 text-xs font-semibold text-ink transition-colors hover:border-white/25 focus:border-accent/50 focus:outline-none">
-          {models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+        <select value={model} onChange={e => setModel(e.target.value)} disabled={!models.length}
+          className="h-8 rounded-lg border border-white/10 bg-black/30 px-2 text-xs font-semibold text-ink transition-colors hover:border-white/25 focus:border-accent/50 focus:outline-none disabled:opacity-50">
+          {models.length === 0
+            ? <option value="">No models available</option>
+            : models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
         </select>
         <div className="flex gap-1 rounded-lg border border-white/8 bg-black/20 p-0.5">
           {ASPECTS.slice(0,5).map(a => (

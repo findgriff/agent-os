@@ -33,6 +33,7 @@ interface Filters {
 export default function Comms() {
   const [data, setData] = useState<CommsResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [filters, setFilters] = useState<Filters>({});
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState<CommsEntry | null>(null);
@@ -40,9 +41,11 @@ export default function Comms() {
 
   const load = useCallback(async (f: Filters) => {
     setLoading(true);
+    setError(false);
     try {
       setData(await api.comms(f));
     } catch (err) {
+      setError(true);
       toast(err instanceof Error ? err.message : 'Could not load the log', 'danger');
     } finally { setLoading(false); }
   }, [toast]);
@@ -112,7 +115,11 @@ export default function Comms() {
       </Card>
 
       {loading && !data ? <SkeletonList count={6} />
-        : !data?.entries.length ? (
+        : error ? (
+          <EmptyState icon="cloud_off" title="Couldn't load the comms log"
+            hint="Something went wrong reaching the server."
+            action={<Button icon="refresh" onClick={() => load(filters)}>Retry</Button>} />
+        ) : !data?.entries.length ? (
           <EmptyState icon="forum" title="Nothing logged"
             hint={active
               ? 'No messages match those filters.'

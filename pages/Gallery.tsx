@@ -45,6 +45,8 @@ export default function Gallery() {
   const [items, setItems] = useState<WorkspaceItem[]>([]);   // filtered (server) result
   const [facets, setFacets] = useState<WorkspaceItem[]>([]); // unfiltered tenant set → folders/options
   const [stats, setStats] = useState<WorkspaceStats | null>(null);
+  const [statsError, setStatsError] = useState(false);
+  const [itemsError, setItemsError] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
@@ -76,7 +78,9 @@ export default function Gallery() {
     let ignore = false;
     const t = selectedTenant ?? undefined;
     api.workspace({ tenant_id: t }).then(r => { if (!ignore) setFacets(r.items || []); }).catch(() => {});
-    api.workspaceStats(t).then(s => { if (!ignore) setStats(s); }).catch(() => { if (!ignore) setStats(null); });
+    api.workspaceStats(t)
+      .then(s => { if (!ignore) { setStats(s); setStatsError(false); } })
+      .catch(() => { if (!ignore) { setStats(null); setStatsError(true); } });
     api.agents(t).then(a => { if (!ignore) setAgents(a.agents || []); }).catch(() => {});
     return () => { ignore = true; };
   }, [selectedTenant, reloadKey]);
@@ -93,8 +97,8 @@ export default function Gallery() {
       project: project || undefined,
       q: q || undefined,
     })
-      .then(r => { if (!ignore) setItems(r.items || []); })
-      .catch(() => { if (!ignore) { setItems([]); toast('Could not load the gallery', 'danger'); } })
+      .then(r => { if (!ignore) { setItems(r.items || []); setItemsError(false); } })
+      .catch(() => { if (!ignore) { setItems([]); setItemsError(true); toast('Could not load the gallery', 'danger'); } })
       .finally(() => { if (!ignore) setLoading(false); });
     return () => { ignore = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -196,6 +200,14 @@ export default function Gallery() {
               return <CountStat key={t} label={m.plural} value={c} icon={m.icon} accent={m.colour} delay={(i + 1) * 80} />;
             })}
           </div>
+        ) : statsError ? (
+          <Card glass className="flex items-center justify-between gap-3 p-4">
+            <div className="flex min-w-0 items-center gap-2 text-sm text-muted">
+              <Icon name="error" size={18} className="shrink-0 text-rose" />
+              <span className="truncate">Couldn't load workspace stats.</span>
+            </div>
+            <Button variant="secondary" icon="refresh" loading={loading} onClick={refresh} className="shrink-0">Retry</Button>
+          </Card>
         ) : (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {Array.from({ length: 4 }).map((_, i) => (
@@ -290,6 +302,10 @@ export default function Gallery() {
           {/* Results */}
           {loading ? (
             view === 'grid' ? <SkeletonGrid /> : <SkeletonList count={6} />
+          ) : itemsError ? (
+            <EmptyState icon="cloud_off" title="Couldn't load the gallery"
+              hint="Something went wrong fetching your assets. Check your connection and try again."
+              action={<Button variant="secondary" icon="refresh" loading={loading} onClick={refresh}>Retry</Button>} />
           ) : displayed.length === 0 ? (
             facets.length === 0 ? (
               <EmptyState icon="photo_library" accent="#C084FC" large

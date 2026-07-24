@@ -25,6 +25,7 @@ const CATEGORY_ICON: Record<string, string> = {
 export default function Inventory() {
   const [data, setData] = useState<InventoryResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [filter, setFilter] = useState<Filter>('all');
   const [category, setCategory] = useState('');
   const [search, setSearch] = useState('');
@@ -34,9 +35,11 @@ export default function Inventory() {
   const toast = useToast();
 
   const load = useCallback(async () => {
+    setError(false);
     try {
       setData(await api.inventory());
     } catch (err) {
+      setError(true);
       toast(err instanceof Error ? err.message : 'Could not load stock', 'danger');
     } finally { setLoading(false); }
   }, [toast]);
@@ -103,7 +106,11 @@ export default function Inventory() {
       </Card>
 
       {loading ? <SkeletonList count={6} />
-        : !items.length ? (
+        : error ? (
+          <EmptyState icon="cloud_off" title="Couldn't load stock"
+            hint="Something went wrong reaching the server."
+            action={<Button icon="refresh" onClick={load}>Retry</Button>} />
+        ) : !items.length ? (
           <EmptyState icon="inventory_2" title="Nothing here"
             hint={data?.items.length
               ? 'No items match those filters.'

@@ -253,6 +253,7 @@ export default function MissionControl() {
   const [data, setData] = useState<MC | null>(null);
   const [loading, setLoading] = useState(true);   // only true on the very first load
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(false);      // first-load failure only
   const [syncing, setSyncing] = useState(false);
 
   // Drawer state for an inspected agent.
@@ -285,8 +286,9 @@ export default function MissionControl() {
       const mc = await api.missionControl(selectedTenant ?? undefined);
       if (activeTenant.current !== reqTenant) return;   // project switched mid-flight — drop stale data
       setData(mc);
+      setError(false);
     } catch {
-      if (activeTenant.current === reqTenant && firstLoad.current) setData(null);
+      if (activeTenant.current === reqTenant && firstLoad.current) { setData(null); setError(true); }
       // On a poll failure keep the previous data on screen.
     } finally {
       firstLoad.current = false;
@@ -596,6 +598,10 @@ export default function MissionControl() {
 
         {loading ? (
           <SkeletonList count={5} />
+        ) : error ? (
+          <EmptyState icon="cloud_off" large title="Couldn't load Mission Control"
+            hint="Something went wrong reaching the server."
+            action={<Button icon="refresh" onClick={() => load()}>Retry</Button>} />
         ) : !data ? (
           <EmptyState icon="satellite_alt" accent="#F59E0B" large title="Start your first mission"
             hint="No telemetry yet — deploy an agent and give it work. Live fleet data streams here the moment a mission begins.">
@@ -1001,7 +1007,8 @@ export default function MissionControl() {
           {drawerLoading ? (
             <SkeletonList count={4} />
           ) : !drawerAgent ? (
-            <EmptyState icon="smart_toy" accent="#F59E0B" title="Unavailable" hint="Could not load this agent." />
+            <EmptyState icon="smart_toy" accent="#F59E0B" title="Unavailable" hint="Could not load this agent."
+              action={<Button icon="refresh" onClick={() => drawerId != null && openAgent(drawerId)}>Retry</Button>} />
           ) : (
             <>
               <div className="flex items-center gap-3">

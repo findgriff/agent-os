@@ -86,6 +86,7 @@ export default function Leads() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   // Search / generate
   const [industry, setIndustry] = useState('');
@@ -120,6 +121,7 @@ export default function Leads() {
 
   const load = async () => {
     setLoading(true);
+    setError(false);
     try {
       const [lr, cr] = await Promise.all([
         api.leads({ tenant_id: selectedTenant ?? undefined }),
@@ -129,6 +131,7 @@ export default function Leads() {
       setCampaigns(cr.campaigns || []);
     } catch {
       setLeads([]); setCampaigns([]);
+      setError(true);
       toast('Failed to load leads', 'danger');
     }
     setLoading(false);
@@ -340,6 +343,10 @@ export default function Leads() {
 
         {loading ? (
           <SkeletonList count={6} />
+        ) : error ? (
+          <EmptyState icon="cloud_off" title="Couldn't load leads"
+            hint="Something went wrong reaching the server."
+            action={<Button icon="refresh" onClick={load}>Retry</Button>} />
         ) : filtered.length === 0 ? (
           leads.length === 0 ? (
             <EmptyState icon="person_search" accent="#38BDF8" large
@@ -443,6 +450,10 @@ export default function Leads() {
 
         {loading ? (
           <SkeletonList count={3} />
+        ) : error ? (
+          <EmptyState icon="cloud_off" title="Couldn't load campaigns"
+            hint="Something went wrong reaching the server."
+            action={<Button icon="refresh" onClick={load}>Retry</Button>} />
         ) : campaigns.length === 0 ? (
           <EmptyState icon="campaign" accent="#A78BFA"
             title="No campaigns yet"

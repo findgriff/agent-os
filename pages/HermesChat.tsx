@@ -1,7 +1,7 @@
 // Hermes Chat — talk to Hermes directly from the AGENT OS web UI, no
 // WhatsApp or terminal needed. Backed by POST /api/hermes/chat (which drives
 // the Hermes CLI on a per-user session) and GET /api/hermes/history.
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { Icon, useToast } from '../components/ui';
 
@@ -36,15 +36,20 @@ export default function HermesChat() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Load transcript on entry.
-  useEffect(() => {
+  const loadHistory = useCallback(() => {
+    setLoading(true);
+    setError(false);
     api.get<{ messages: HermesMessage[] }>('/api/hermes/history')
       .then(r => setMessages(r.messages || []))
-      .catch(() => toast('Could not load chat history', 'danger'))
+      .catch(() => { setError(true); toast('Could not load chat history', 'danger'); })
       .finally(() => setLoading(false));
-  }, []);
+  }, [toast]);
+
+  // Load transcript on entry.
+  useEffect(() => { loadHistory(); }, [loadHistory]);
 
   // Auto-scroll to newest.
   useEffect(() => {
@@ -104,6 +109,8 @@ export default function HermesChat() {
               <Icon name="progress_activity" size={20} className="animate-spin" />
               <span className="text-sm">Loading conversation…</span>
             </div>
+          ) : error ? (
+            <ErrorState onRetry={loadHistory} />
           ) : messages.length === 0 ? (
             <EmptyState onPick={send} />
           ) : (
@@ -172,6 +179,29 @@ function EmptyState({ onPick }: { onPick: (s: string) => void }) {
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ── Error state ───────────────────────────────────────────────────────────
+function ErrorState({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="flex flex-col items-center gap-4 py-16 text-center animate-fadeInUp">
+      <div className="grid h-16 w-16 place-items-center rounded-3xl border border-rose/30"
+        style={{ background: 'rgba(244,63,94,0.10)', color: '#F43F5E' }}>
+        <Icon name="cloud_off" size={34} />
+      </div>
+      <div>
+        <h2 className="font-display text-xl font-bold text-ink">Couldn't load the conversation</h2>
+        <p className="mt-1 max-w-sm text-sm text-muted">
+          Something went wrong reaching the server.
+        </p>
+      </div>
+      <button onClick={onRetry}
+        className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-ink
+          transition-all hover:border-accent/40 active:scale-95">
+        <Icon name="refresh" size={17} /> Retry
+      </button>
     </div>
   );
 }

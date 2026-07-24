@@ -52,6 +52,7 @@ export default function Kanban() {
   const [tasks, setTasks] = useState<KanbanTask[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   // filters (client-side)
   const [filterAgent, setFilterAgent] = useState<number | 'all'>('all');
@@ -70,10 +71,12 @@ export default function Kanban() {
 
   const load = async () => {
     setLoading(true);
+    setError(false);
     try {
       const t = await api.kanbanTasks({ tenant_id: selectedTenant ?? undefined });
       setTasks(t.tasks || []);
     } catch {
+      setError(true);
       toast('Failed to load the board', 'danger');
     }
     try {
@@ -229,6 +232,12 @@ export default function Kanban() {
       {/* ── Board ────────────────────────────────────────────────────────── */}
       {loading ? (
         <BoardSkeleton />
+      ) : error ? (
+        <div className="flex flex-1 items-center justify-center p-6">
+          <EmptyState icon="cloud_off" title="Couldn't load board"
+            hint="Something went wrong reaching the server."
+            action={<Button icon="refresh" onClick={load}>Retry</Button>} />
+        </div>
       ) : tasks.length === 0 ? (
         <div className="flex flex-1 items-center justify-center p-6">
           <EmptyState icon="dashboard" accent="#F59E0B" large

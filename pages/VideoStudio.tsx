@@ -82,6 +82,7 @@ export default function VideoStudio() {
   const [previewCaption, setPreviewCaption] = useState<VideoCaption | null>(null);
   const [rendering, setRendering] = useState(false);
   const [renderUrl, setRenderUrl] = useState<string | null>(null);
+  const [renderError, setRenderError] = useState<string | null>(null);
   const [showAddCaption, setShowAddCaption] = useState(false);
   const [captionDraft, setCaptionDraft] = useState<VideoCaption>({
     id: genId(), start: 0, end: 2, text: '', position: 'bottom', fontSize: 24, color: '#FFFFFF',
@@ -136,30 +137,32 @@ export default function VideoStudio() {
     if (!file) return;
     setUploading(true);
     try {
-      // Read file as base64
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const base64 = (reader.result as string).split(',')[1];
-        const res = await fetch('/api/studio/video/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('agentos_token') || ''}` },
-          body: JSON.stringify({ data: base64, filename: file.name }),
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-        const clip: VideoClip = {
-          id: genId(), name: file.name, path: data.path,
-          duration: data.duration || 5, trimStart: 0, trimEnd: data.duration || 5,
-          width: data.width, height: data.height,
-        };
-        setClips(prev => [...prev, clip]);
-        setTotalDuration(t => Math.max(t, clip.duration));
-        toast(`Uploaded ${file.name}`, 'ok');
-        setUploading(false);
+      // Read file as base64 (promisified so failures reject into the try/catch)
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error || new Error('Could not read the file'));
+        reader.readAsDataURL(file);
+      });
+      const base64 = dataUrl.split(',')[1];
+      const res = await fetch('/api/studio/video/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('agentos_token') || ''}` },
+        body: JSON.stringify({ data: base64, filename: file.name }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      const clip: VideoClip = {
+        id: genId(), name: file.name, path: data.path,
+        duration: data.duration || 5, trimStart: 0, trimEnd: data.duration || 5,
+        width: data.width, height: data.height,
       };
-      reader.readAsDataURL(file);
+      setClips(prev => [...prev, clip]);
+      setTotalDuration(t => Math.max(t, clip.duration));
+      toast(`Uploaded ${file.name}`, 'ok');
     } catch (err: any) {
       toast(err.message || 'Upload failed', 'danger');
+    } finally {
       setUploading(false);
     }
   };
@@ -188,6 +191,7 @@ export default function VideoStudio() {
     if (!clips.length) { toast('Add a video clip first', 'warn'); return; }
     setRendering(true);
     setRenderUrl(null);
+    setRenderError(null);
     try {
       const res = await fetch('/api/studio/video/render', {
         method: 'POST',
@@ -199,6 +203,7 @@ export default function VideoStudio() {
       setRenderUrl(data.path);
       toast('Render complete', 'ok');
     } catch (err: any) {
+      setRenderError(err.message || 'Render failed');
       toast(err.message || 'Render failed', 'danger');
     }
     setRendering(false);
@@ -277,9 +282,9 @@ export default function VideoStudio() {
       </div>
 
       {/* Main area: preview + timeline */}
-      <div className="flex flex-1 gap-3 overflow-hidden">
+      <div className="flex flex-1 flex-col gap-3 overflow-hidden lg:flex-row">
         {/* LEFT: Preview */}
-        <div className="flex w-2/5 flex-col gap-3">
+        <div className="flex w-full flex-col gap-3 lg:w-2/5">
           <Card ref={previewRef} className="relative flex aspect-video items-center justify-center overflow-hidden bg-black/60">
             {clips.length > 0 ? (
               <>
@@ -481,6 +486,18 @@ export default function VideoStudio() {
                   className="rounded-lg bg-accent/10 px-3 py-1 text-xs text-accent hover:bg-accent/20 transition-all">
                   Download MP4
                 </a>
+              </div>
+            </Card>
+          )}
+          {!renderUrl && renderError && (
+            <Card className="p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Icon name="error" size={16} className="text-rose shrink-0" />
+                  <span className="truncate text-xs text-ink">{renderError}</span>
+                </div>
+                <Button variant="secondary" icon="refresh" loading={rendering}
+                  className="shrink-0 py-1 text-xs" onClick={handleRender}>Retry</Button>
               </div>
             </Card>
           )}

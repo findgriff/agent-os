@@ -63,14 +63,17 @@ export default function Pipelines() {
 
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detail, setDetail] = useState<Pipeline | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState(false);
 
   const [creating, setCreating] = useState(false);
   const [running, setRunning] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
 
   const [editor, setEditor] = useState<{ mode: 'add' | 'edit'; position: number; step?: PipelineStep } | null>(null);
@@ -80,11 +83,13 @@ export default function Pipelines() {
   // ── Loaders ──────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
     setLoading(true);
+    setError(false);
     try {
       const res = await api.pipelines(selectedTenant ?? undefined);
       setPipelines(res.pipelines || []);
     } catch {
       setPipelines([]);
+      setError(true);
       toast('Failed to load pipelines', 'danger');
     }
     setLoading(false);
@@ -92,11 +97,13 @@ export default function Pipelines() {
 
   const loadDetail = useCallback(async (id: number) => {
     setDetailLoading(true);
+    setDetailError(false);
     try {
       const res = await api.pipeline(id);
       setDetail(res.pipeline);
       setPipelines(prev => prev.map(x => (x.id === id ? { ...x, ...res.pipeline } : x)));
     } catch {
+      setDetailError(true);
       toast('Failed to load pipeline', 'danger');
     }
     setDetailLoading(false);
@@ -169,15 +176,17 @@ export default function Pipelines() {
   const doDelete = async () => {
     const p = confirmDelete;
     if (!p) return;
-    setConfirmDelete(null);
+    setDeleting(true);
     try {
       await api.deletePipeline(p.id);
       setPipelines(prev => prev.filter(x => x.id !== p.id));
       if (selectedId === p.id) { setSelectedId(null); setDetail(null); }
       toast('Pipeline deleted', 'ok');
+      setConfirmDelete(null);
     } catch {
       toast('Could not delete pipeline', 'danger');
     }
+    setDeleting(false);
   };
 
   // Persist a new step list (re-index positions 0..n, PATCH, reconcile).
@@ -290,6 +299,12 @@ export default function Pipelines() {
           <SkeletonList count={5} />
           <SkeletonList count={3} />
         </div>
+      ) : error ? (
+        <Card className="p-6">
+          <EmptyState icon="cloud_off" title="Couldn't load pipelines"
+            hint="Something went wrong reaching the server."
+            action={<Button icon="refresh" onClick={() => load()}>Retry</Button>} />
+        </Card>
       ) : pipelines.length === 0 ? (
         <Card className="p-6">
           <EmptyState large icon="account_tree" accent={FEATURE}
@@ -358,7 +373,14 @@ export default function Pipelines() {
 
           {/* ── MAIN: builder + run history ─────────────────────────────── */}
           <div className="min-w-0 space-y-6">
-            {!showBuilder || !detail ? (
+            {detailError && !detail ? (
+              <Card className="p-6">
+                <EmptyState icon="cloud_off" title="Couldn't load pipeline"
+                  hint="Something went wrong reaching the server."
+                  action={<Button icon="refresh"
+                    onClick={() => selectedId != null && loadDetail(selectedId)}>Retry</Button>} />
+              </Card>
+            ) : !showBuilder || !detail ? (
               <SkeletonList count={3} />
             ) : (
               <>
@@ -503,7 +525,7 @@ export default function Pipelines() {
         </p>
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setConfirmDelete(null)}>Cancel</Button>
-          <Button variant="danger" icon="delete" onClick={doDelete}>Delete</Button>
+          <Button variant="danger" icon="delete" loading={deleting} onClick={doDelete}>Delete</Button>
         </div>
       </Modal>
 
