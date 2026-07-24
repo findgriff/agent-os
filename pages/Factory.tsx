@@ -67,7 +67,7 @@ export default function Factory() {
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Goal</label>
             <textarea value={goal} onChange={e => setGoal(e.target.value)} rows={2}
               placeholder="e.g. Write a 500-word blog post about AI agents for small businesses..."
-              className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-ink placeholder:text-muted/60 focus:border-accent/50 focus:outline-none resize-none" />
+              className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-base text-ink placeholder:text-muted/60 focus:border-accent/50 focus:outline-none resize-none" />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">

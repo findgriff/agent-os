@@ -470,7 +470,7 @@ export default function WarRoom() {
                 onChange={e => { setInput(e.target.value); syncMention(e.target.value, e.target.selectionStart ?? e.target.value.length); }}
                 onKeyDown={onComposerKey}
                 onBlur={() => setTimeout(closeMention, 120)}
-                className="max-h-32 min-h-[42px] flex-1 resize-none rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-ink
+                className="max-h-32 min-h-[42px] flex-1 resize-none rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-base text-ink
                   placeholder:text-muted/60 focus:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/30" />
               <button type="submit" disabled={sending || !input.trim()} aria-label="Send message"
                 className="grid h-[42px] w-[42px] shrink-0 place-items-center rounded-xl bg-accent text-[#04222b]

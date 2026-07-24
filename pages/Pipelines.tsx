@@ -728,7 +728,7 @@ function StepEditor({ mode, initial, agents, onSave, onClose }: {
           <select
             value={model}
             onChange={e => setModel(e.target.value)}
-            className="block w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-ink outline-none transition focus:border-accent focus:ring-1 focus:ring-accent [&>option]:bg-[#0B1826]">
+            className="block w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-base text-ink outline-none transition focus:border-accent focus:ring-1 focus:ring-accent [&>option]:bg-[#0B1826]">
             <optgroup label="DeepSeek">
               <option value="deepseek-chat">DeepSeek V4 Flash (fast)</option>
               <option value="deepseek-reasoner">DeepSeek V4 Pro (reasoning)</option>

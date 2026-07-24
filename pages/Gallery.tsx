@@ -606,7 +606,7 @@ function AddItemModal({ agents, tenantId, onClose, onSaved }:
 
   const fieldCls = 'mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted';
   const textareaCls =
-    'w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 text-sm text-ink placeholder:text-muted/60 focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/30 resize-none';
+    'w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 text-base text-ink placeholder:text-muted/60 focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/30 resize-none';
 
   return (
     <Modal open onClose={onClose} title="Add to workspace" width="max-w-lg">

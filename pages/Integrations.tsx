@@ -333,7 +333,7 @@ export default function Integrations() {
                   {PLATFORM_MODELS[addPlatform] ? (
                     <select value={form.model || PLATFORM_MODELS[addPlatform][0].value}
                       onChange={e => setForm(f => ({ ...f, model: e.target.value }))}
-                      className="block w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-ink outline-none transition focus:border-accent focus:ring-1 focus:ring-accent [&>option]:bg-[#0B1826]">
+                      className="block w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-base text-ink outline-none transition focus:border-accent focus:ring-1 focus:ring-accent [&>option]:bg-[#0B1826]">
                       <option value="">Auto (platform default)</option>
                       {PLATFORM_MODELS[addPlatform].map(m => (
                         <option key={m.value} value={m.value}>{m.label}</option>

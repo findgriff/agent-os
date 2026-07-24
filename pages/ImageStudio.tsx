@@ -367,7 +367,7 @@ export default function ImageStudio() {
               onChange={e => setPrompt(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); generate(); } }}
               placeholder="Describe the image you want to generate…"
-              className="w-full resize-none rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-ink transition-shadow placeholder:text-muted/60 focus:border-[#C084FC]/50 focus:outline-none focus:ring-1 focus:ring-[#C084FC]/30 focus:shadow-[0_0_32px_-10px_rgba(192,132,252,0.5)]"
+              className="w-full resize-none rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-base text-ink transition-shadow placeholder:text-muted/60 focus:border-[#C084FC]/50 focus:outline-none focus:ring-1 focus:ring-[#C084FC]/30 focus:shadow-[0_0_32px_-10px_rgba(192,132,252,0.5)]"
             />
             <div className="mt-1 flex items-center gap-3 text-[11px] text-muted/60">
               <button onClick={() => setShowNegative(v => !v)} className="hover:text-ink">+ negative</button>

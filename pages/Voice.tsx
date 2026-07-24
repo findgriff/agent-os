@@ -693,7 +693,7 @@ export default function Voice() {
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Voice</label>
             <select value={settings.voiceUri}
               onChange={e => setSettings(s => ({ ...s, voiceUri: e.target.value }))}
-              className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-ink focus:border-amber/50 focus:outline-none">
+              className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-base text-ink focus:border-amber/50 focus:outline-none">
               {renderVoiceOptions()}
             </select>
             <p className="mt-1 text-[11px] text-muted/70">Apollo speaks with natural OpenAI voices; browser voices are also available.</p>
@@ -702,7 +702,7 @@ export default function Voice() {
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Microphone</label>
             <select value={selectedMicId}
               onChange={e => setSelectedMicId(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-ink focus:border-amber/50 focus:outline-none">
+              className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-base text-ink focus:border-amber/50 focus:outline-none">
               <option value="">System default microphone</option>
               {audioDevices.map(d => (
                 <option key={d.id} value={d.id}>{d.label}</option>
@@ -718,7 +718,7 @@ export default function Voice() {
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Recognition language</label>
             <select value={settings.lang}
               onChange={e => setSettings(s => ({ ...s, lang: e.target.value }))}
-              className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-ink focus:border-amber/50 focus:outline-none">
+              className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-base text-ink focus:border-amber/50 focus:outline-none">
               {LANGS.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}
             </select>
           </div>

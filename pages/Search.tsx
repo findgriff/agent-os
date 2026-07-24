@@ -58,7 +58,7 @@ export default function SearchPage() {
               <div className="relative">
                 <input value={query} onChange={e => setQuery(e.target.value)}
                   placeholder="Search the web…"
-                  className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-2.5 text-sm text-ink placeholder:text-muted/60 focus:border-accent/50 focus:outline-none"
+                  className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-2.5 text-base text-ink placeholder:text-muted/60 focus:border-accent/50 focus:outline-none"
                   onKeyDown={e => e.key === 'Enter' && search()}
                 />
                 <button onClick={search} disabled={searching}

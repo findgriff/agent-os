@@ -5,7 +5,7 @@
 // 30 buckets, and a charting dependency would cost more than it earns.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Badge, Button, Card, EmptyState, Icon, Input, Select, SkeletonList, useToast,
+  Badge, Button, Card, EmptyState, Field, Icon, Input, Select, SkeletonList, useToast,
 } from '../../components/ui';
 import {
   reportsApi, downloadCsv, downloadActivityCsv, gbp, gbpShort, hoursMins,
@@ -809,8 +809,7 @@ function ActivityTab() {
       </div>
 
       <Card className="flex flex-wrap items-end gap-3 p-3.5">
-        <div className="min-w-[9rem] flex-1">
-          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">Who</label>
+        <Field label="Who" className="min-w-[9rem] flex-1">
           <Select value={actorType} onChange={e => setActorType(e.target.value)} className="w-full">
             <option value="">Everyone</option>
             <option value="crew">Crew</option>
@@ -819,20 +818,18 @@ function ActivityTab() {
             <option value="customer">Customer</option>
             <option value="system">System</option>
           </Select>
-        </div>
-        <div className="min-w-[9rem] flex-1">
-          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">What</label>
+        </Field>
+        <Field label="What" className="min-w-[9rem] flex-1">
           <Select value={action} onChange={e => setAction(e.target.value)} className="w-full">
             <option value="">All actions</option>
             {(allActions.length ? allActions : feed?.actions || []).map(a => (
               <option key={a} value={a}>{actionStyle(a).label}</option>
             ))}
           </Select>
-        </div>
-        <div className="min-w-[9rem] flex-1">
-          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">Day</label>
+        </Field>
+        <Field label="Day" className="min-w-[9rem] flex-1">
           <Input type="date" value={day} onChange={e => setDay(e.target.value)} />
-        </div>
+        </Field>
         <div className="flex gap-2">
           {(actorType || action || day) && (
             <Button variant="ghost" icon="filter_alt_off"
@@ -1169,18 +1166,16 @@ function TaxTab() {
     <div className="space-y-5">
       {/* Range picker */}
       <Card className="flex flex-wrap items-end gap-3 p-4">
-        <div>
-          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted">From</label>
+        <Field label="From">
           <input type="month" value={from} max={to} onChange={e => setFrom(e.target.value)}
-            className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-ink
+            className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-base text-ink
               focus:border-accent/50 focus:outline-none" />
-        </div>
-        <div>
-          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted">To</label>
+        </Field>
+        <Field label="To">
           <input type="month" value={to} min={from} onChange={e => setTo(e.target.value)}
-            className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-ink
+            className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-base text-ink
               focus:border-accent/50 focus:outline-none" />
-        </div>
+        </Field>
         <div className="flex flex-wrap gap-1.5">
           {RANGE_PRESETS.map(p => (
             <button key={p.label}
@@ -1362,23 +1357,20 @@ function ExportsTab() {
 
       <Card className="space-y-3 p-3.5">
         <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">From</label>
+          <Field label="From">
             <Input type="date" value={from} onChange={e => setFrom(e.target.value)}
               className="!w-auto" />
-          </div>
-          <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">To</label>
+          </Field>
+          <Field label="To">
             <Input type="date" value={to} onChange={e => setTo(e.target.value)}
               className="!w-auto" />
-          </div>
-          <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">Date format</label>
+          </Field>
+          <Field label="Date format">
             <Select value={iso ? 'iso' : 'uk'} onChange={e => setIso(e.target.value === 'iso')}>
               <option value="uk">DD/MM/YYYY (QuickBooks/Xero UK)</option>
               <option value="iso">YYYY-MM-DD (ISO)</option>
             </Select>
-          </div>
+          </Field>
           {(from || to) && (
             <Button variant="ghost" icon="clear" onClick={() => { setFrom(''); setTo(''); }}>
               Whole book
@@ -1586,8 +1578,7 @@ function CommissionsTab() {
       )}
 
       <Card className="flex flex-wrap items-end gap-3 p-3.5">
-        <div>
-          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">Crew</label>
+        <Field label="Crew">
           <Select value={crewId ?? ''}
             onChange={e => setCrewId(e.target.value ? Number(e.target.value) : null)}>
             <option value="">All crew</option>
@@ -1595,23 +1586,20 @@ function CommissionsTab() {
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </Select>
-        </div>
-        <div>
-          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">Status</label>
+        </Field>
+        <Field label="Status">
           <Select value={status} onChange={e => setStatus(e.target.value)}>
             <option value="">All</option>
             <option value="pending">Pending</option>
             <option value="paid">Paid</option>
           </Select>
-        </div>
-        <div>
-          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">From</label>
+        </Field>
+        <Field label="From">
           <Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="!w-auto" />
-        </div>
-        <div>
-          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">To</label>
+        </Field>
+        <Field label="To">
           <Input type="date" value={to} onChange={e => setTo(e.target.value)} className="!w-auto" />
-        </div>
+        </Field>
         {(crewId || status || from || to) && (
           <Button variant="ghost" icon="clear"
             onClick={() => { setCrewId(null); setStatus(''); setFrom(''); setTo(''); }}>
