@@ -911,7 +911,7 @@ export default function PartnerDashboard({ partner, onSignOut }:
   return (
     <div className="min-h-screen bg-bg text-ink">
       {/* ── Top bar ─────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-30 border-b border-white/6 bg-surface/80 backdrop-blur-xl">
+      <header className="sticky top-0 z-30 border-b border-white/6 bg-surface/80 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3 sm:px-6">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border"
             style={{ background: `${company.colour}1a`, borderColor: `${company.colour}40`, color: company.colour }}>

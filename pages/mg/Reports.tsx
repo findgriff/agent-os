@@ -102,7 +102,7 @@ function ExportButton({ report, label = 'CSV', range }:
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   return (
-    <Button variant="ghost" icon="download" loading={busy} className="!px-2.5 !py-1.5 !text-[12px]"
+    <Button variant="ghost" icon="download" loading={busy} className="!px-2.5 !py-1.5 !text-[12px] min-h-[38px]"
       onClick={async () => {
         setBusy(true);
         try {
@@ -212,7 +212,7 @@ function RangeBar({ value, onChange }:
         <Input type="date" value={to} min={from} max={today}
           onChange={e => setTo(e.target.value)} className="!w-auto !py-1.5 !text-[12px]" />
         <Button variant={dirty && validCustom ? 'primary' : 'secondary'} icon="check"
-          className="!px-2.5 !py-1.5 !text-[12px]"
+          className="!px-2.5 !py-1.5 !text-[12px] min-h-[38px]"
           disabled={!dirty || !validCustom}
           onClick={() => onChange({ from, to })}>
           Apply
