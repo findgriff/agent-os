@@ -28,6 +28,7 @@ const NAV = [
   { to: '/email', label: 'Email', icon: 'mail', colour: '#14B8A6' },
   { to: '/factory', label: 'Factory', icon: 'precision_manufacturing', colour: '#22C55E' },
   { to: '/apollo', label: 'Apollo', icon: 'mic', colour: '#EF4444' },
+  { to: '/hermes', label: 'Hermes', icon: 'smart_toy', colour: '#19C3E6', group: 'Intel' },
   { to: '/oracle', label: 'Oracle', icon: 'travel_explore', colour: '#A78BFA', group: 'Intel' },
   { to: '/search', label: 'Search', icon: 'search', colour: '#38BDF8', group: 'Intel' },
   { to: '/investments', label: 'Investments', icon: 'trending_up', colour: '#19C3E6', group: 'Intel' },

@@ -20,7 +20,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, parse_qs, unquote
 
 from server import db as db_module
-from server import auth, agents, vault, bridges, metrics, inference, studio, omi, features, oracle_search, apollo, video_editor, auto_caption, transitions, speed_change, clip_split, audio_track, overlay, video_effects, export_presets, suno_bridge, investments_api, partner, ks, ks_attendance, ks_progress, ks_billing, maxgleam_portal, maxgleam_invoicing, maxgleam_ops, maxgleam_crew, maxgleam_inventory, maxgleam_reports, maxgleam_activity, maxgleam_alerts, maxgleam_referrals, maxgleam_notify, maxgleam_accounting, maxgleam_commissions, maxgleam_booking, maxgleam_gps, maxgleam_marketing, maxgleam_reviews
+from server import auth, agents, vault, bridges, metrics, inference, studio, omi, features, oracle_search, apollo, video_editor, auto_caption, transitions, speed_change, clip_split, audio_track, overlay, video_effects, export_presets, suno_bridge, investments_api, partner, ks, ks_attendance, ks_progress, ks_billing, maxgleam_portal, maxgleam_invoicing, maxgleam_ops, maxgleam_crew, maxgleam_inventory, maxgleam_reports, maxgleam_activity, maxgleam_alerts, maxgleam_referrals, maxgleam_notify, maxgleam_accounting, maxgleam_commissions, maxgleam_booking, maxgleam_gps, maxgleam_marketing, maxgleam_reviews, hermes
 
 log = logging.getLogger("agentos")
 
@@ -2860,6 +2860,15 @@ def h_ks_sms_inbound(req: Request):
     return ks.sms_inbound(req.body, req.form())
 
 
+# ── Hermes in-browser chat ───────────────────────────────────────────
+def h_hermes_chat(req: Request):
+    return hermes.chat(_require(req), req.body.get("message"))
+
+
+def h_hermes_history(req: Request):
+    return hermes.history(_require(req))
+
+
 def h_ks_students(req: Request):
     return ks.students_list(_ks_coach(req))
 
@@ -3448,6 +3457,11 @@ ROUTES = [
     ("GET",  re.compile(r"^/api/ks/coach/availability$"), h_ks_coach_availability),
     ("POST", re.compile(r"^/api/ks/coach/availability$"), h_ks_coach_availability),
     ("POST", re.compile(r"^/api/ks/sms-inbound$"), h_ks_sms_inbound),
+
+    # ── Hermes in-browser chat ───────────────────────────────────────
+    ("POST", re.compile(r"^/api/hermes/chat$"), h_hermes_chat),
+    ("GET",  re.compile(r"^/api/hermes/history$"), h_hermes_history),
+
     ("GET",  re.compile(r"^/api/ks/students$"), h_ks_students),
     ("POST", re.compile(r"^/api/ks/students/add$"), h_ks_students_add),
     ("GET",  re.compile(r"^/api/ks/leads$"), h_ks_leads),

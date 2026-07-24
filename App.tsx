@@ -47,6 +47,7 @@ import Invoices from './pages/mg/Invoices';
 import TimeClock from './pages/mg/TimeClock';
 import BookOnline from './pages/mg/BookOnline';
 import CrewTracking from './pages/mg/CrewTracking';
+import HermesChat from './pages/HermesChat';
 
 // Redirect to the static ops board page (not a React component)
 function OpsBoardRedirect() {
@@ -103,6 +104,7 @@ function Shell() {
         <Route path="/voice" element={<Navigate to="/apollo" replace />} />
         <Route path="/voice-old" element={<VoiceOld />} />
         <Route path="/oracle" element={<Oracle />} />
+        <Route path="/hermes" element={<HermesChat />} />
         <Route path="/ops-board" element={<OpsBoardRedirect />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/investments" element={<Investments />} />

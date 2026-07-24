@@ -294,3 +294,16 @@ CREATE TABLE IF NOT EXISTS search_history (
   bookmarked INTEGER DEFAULT 0,
   created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
+
+-- In-browser Hermes chat transcript. One row per turn (user or hermes),
+-- scoped to the HQ user so each person has their own thread. The matching
+-- Hermes-side conversational memory is keyed by a per-user session name
+-- (agentos-web-<user_id>); this table is only what the web UI renders.
+CREATE TABLE IF NOT EXISTS hermes_chat (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER,
+  role       TEXT NOT NULL,               -- user | hermes
+  content    TEXT NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_hermes_chat_user ON hermes_chat(user_id, id);
