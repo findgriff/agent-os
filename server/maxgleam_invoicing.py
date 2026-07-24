@@ -207,7 +207,8 @@ def _send_email(to: str, subject: str, text: str, reply_to: str | None = None) -
 
 _JOB_FOR_INVOICE = """
   SELECT j.id, j.tenant_id, j.property_id, j.scheduled_date, j.status,
-         j.price_pence AS job_price, j.completed_at, j.partner_company_id,
+         j.price_pence AS job_price, j.notes AS job_notes,
+         j.completed_at, j.partner_company_id,
          p.price_pence AS property_price, p.address, p.postcode,
          p.partner_company_id AS prop_partner_id,
          c.id AS customer_id, c.name AS customer_name, c.email AS customer_email
@@ -237,8 +238,18 @@ def _invoice_amount(job: dict) -> int:
     The standing price on the property is the contracted rate, so it wins.
     Where a property has no price set (ad-hoc work), the price agreed on the
     job itself is used instead — invoicing £0 would be worse than either.
+
+    Exception: a first clean booked from a quote is a one-off carrying its own
+    agreed price (typically above the recurring rate). Left to the rule above it
+    would bill at the property's standing recurring price, silently under-charging
+    the customer, so the job's own price wins for it. Recurring jobs copy the
+    property price onto the job at creation, so they are unaffected either way.
     """
-    return int(job.get("property_price") or 0) or int(job.get("job_price") or 0)
+    job_price = int(job.get("job_price") or 0)
+    property_price = int(job.get("property_price") or 0)
+    if job_price > 0 and str(job.get("job_notes") or "").startswith("First clean"):
+        return job_price
+    return property_price or job_price
 
 
 def invoice_job(job_id: int, tenant_id: int = DEFAULT_TENANT_ID,
