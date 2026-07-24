@@ -45,6 +45,12 @@ CHANNELS = ("sms", "email")
 TRIGGERS = ("job_reminder_24h", "job_on_my_way", "job_completed")
 OPT_OUT_TAGS = {"sms_opt_out", "no_sms", "do_not_text"}
 
+# job_on_my_way fires on every crew START — a real per-event text — so it ships
+# opt-in: the office enables it deliberately rather than having it auto-send the
+# moment SMS goes live. The informational reminder/completed texts keep their
+# enabled-by-default seed.
+SEED_OPT_IN = {"job_on_my_way"}
+
 # Seeded once, then owned by the office through the settings endpoint.
 DEFAULT_TEMPLATES = {
     "job_reminder_24h": (
@@ -107,10 +113,11 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 def _seed_templates(conn: sqlite3.Connection,
                     tenant_id: int = DEFAULT_TENANT_ID) -> None:
     for trigger, (channel, body) in DEFAULT_TEMPLATES.items():
+        enabled = 0 if trigger in SEED_OPT_IN else 1
         conn.execute(
             "INSERT OR IGNORE INTO notification_templates "
-            " (tenant_id, trigger, channel, template, enabled) VALUES (?,?,?,?,1)",
-            (tenant_id, trigger, channel, body))
+            " (tenant_id, trigger, channel, template, enabled) VALUES (?,?,?,?,?)",
+            (tenant_id, trigger, channel, body, enabled))
     conn.commit()
 
 
