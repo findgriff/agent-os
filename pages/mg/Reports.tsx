@@ -795,7 +795,7 @@ function ActivityTab() {
       <Card className="flex flex-wrap items-end gap-3 p-3.5">
         <div className="min-w-[9rem] flex-1">
           <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">Who</label>
-          <Select value={actorType} onChange={e => setActorType(e.target.value)}>
+          <Select value={actorType} onChange={e => setActorType(e.target.value)} className="w-full">
             <option value="">Everyone</option>
             <option value="crew">Crew</option>
             <option value="user">Office</option>
@@ -806,7 +806,7 @@ function ActivityTab() {
         </div>
         <div className="min-w-[9rem] flex-1">
           <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">What</label>
-          <Select value={action} onChange={e => setAction(e.target.value)}>
+          <Select value={action} onChange={e => setAction(e.target.value)} className="w-full">
             <option value="">All actions</option>
             {(allActions.length ? allActions : feed?.actions || []).map(a => (
               <option key={a} value={a}>{actionStyle(a).label}</option>

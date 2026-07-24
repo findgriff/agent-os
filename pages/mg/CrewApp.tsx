@@ -285,7 +285,7 @@ function CrewRound({ crew, onSignOut }: { crew: Crew; onSignOut: () => void }) {
             <p className="text-sm text-slate-500">{prettyDate(data?.date || date)}</p>
           </div>
           <button onClick={onSignOut}
-            className="shrink-0 rounded-lg px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100 min-h-[40px]">
+            className="shrink-0 rounded-lg px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100 min-h-[44px]">
             Sign out
           </button>
         </div>
@@ -293,15 +293,17 @@ function CrewRound({ crew, onSignOut }: { crew: Crew; onSignOut: () => void }) {
         {/* Progress */}
         {summary && summary.total > 0 && (
           <MGCard className="mb-4 p-4">
-            <div className="mb-2.5 flex items-baseline justify-between">
-              <span className="text-sm font-bold">
+            <div className="mb-2.5 flex items-baseline justify-between gap-3">
+              <span className="shrink-0 text-sm font-bold tabular-nums">
                 {summary.done} of {summary.total} done
               </span>
-              <span className="text-sm font-semibold text-slate-500">
+              <span className="truncate text-sm font-semibold text-slate-500 tabular-nums">
                 {money(summary.value_pence)} on the round
               </span>
             </div>
-            <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-2.5 overflow-hidden rounded-full bg-slate-100"
+              role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}
+              aria-label={`${summary.done} of ${summary.total} jobs done`}>
               <div className="h-full rounded-full bg-[#19C3E6] transition-[width] duration-500"
                 style={{ width: `${progress}%` }} />
             </div>
@@ -395,7 +397,7 @@ function JobCard({ job, stop, onChanged }:
             : started
               ? <MGPill tone="amber">In progress</MGPill>
               : <MGPill tone="slate">To do</MGPill>}
-          <span className="ml-auto text-sm font-bold text-slate-500">
+          <span className="ml-auto shrink-0 text-sm font-bold text-slate-500 tabular-nums">
             {money(job.price_pence)}
           </span>
         </div>
@@ -466,7 +468,7 @@ function JobCard({ job, stop, onChanged }:
       <div className="space-y-2 border-t border-slate-100 bg-slate-50/60 p-4">
         {error && <MGAlert>{error}</MGAlert>}
         {notice && !done && (
-          <p className="flex items-center gap-1.5 text-center text-sm font-semibold text-[#0E9BB8]">
+          <p className="flex items-center justify-center gap-1.5 text-center text-sm font-semibold text-[#0E7C93]">
             <span aria-hidden>💬</span>{notice}
           </p>
         )}

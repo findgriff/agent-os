@@ -204,7 +204,7 @@ function QuoteRow({ q, busy, delay, onEdit, onSend, onAccept, onDecline, onReope
           )}
           {q.status === 'converted'
             ? <span className="flex items-center gap-1 text-xs text-emerald"><Icon name="check_circle" size={16} />Customer</span>
-            : <button onClick={onEdit} title="Edit"
+            : <button onClick={onEdit} title="Edit" aria-label="Edit quote"
                 className="grid h-8 w-8 place-items-center rounded-lg text-muted transition-colors hover:bg-white/6 hover:text-ink">
                 <Icon name="edit" size={17} />
               </button>}

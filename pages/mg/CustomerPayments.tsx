@@ -96,7 +96,15 @@ export default function CustomerPayments() {
           </div>
         )}
 
-        {error && <div className="mb-5"><MGAlert>{error}</MGAlert></div>}
+        {error && (
+          <div className="mb-5">
+            <MGAlert>{error}</MGAlert>
+            <button onClick={() => load()}
+              className="mt-2 inline-flex min-h-[44px] items-center rounded-lg px-3 text-sm font-semibold text-[#0E7C93] hover:bg-slate-100">
+              Try again
+            </button>
+          </div>
+        )}
 
         {loading && !data ? (
           <div className="flex justify-center py-20 text-slate-400">
