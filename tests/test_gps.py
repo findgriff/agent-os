@@ -103,3 +103,38 @@ def test_on_site_seconds_never_negative():
     # Clock skew (a fix stamped before the recorded start) must not read as a
     # negative dwell time.
     assert gps._on_site_seconds({"started_at": 2000}, 1000) == 0
+
+
+# ── _retention_report ───────────────────────────────────────────────
+
+_DAY = 86400
+
+
+def test_retention_report_empty_log_is_healthy():
+    # No points at all — nothing stale, so the prune has nothing to answer for.
+    r = gps._retention_report(now=10 * _DAY, count=0, oldest=None, newest=None, stale=0)
+    assert r["points"] == 0
+    assert r["oldest"] is None
+    assert r["oldest_age_days"] is None
+    assert r["healthy"] is True
+
+
+def test_retention_report_within_window_is_healthy():
+    now = 100 * _DAY
+    r = gps._retention_report(now=now, count=50, oldest=now - 3 * _DAY,
+                              newest=now, stale=0)
+    assert r["oldest_age_days"] == 3.0
+    assert r["retention_days"] == gps.RETENTION_DAYS
+    assert r["cutoff"] == now - gps.RETENTION_DAYS * _DAY
+    assert r["healthy"] is True
+
+
+def test_retention_report_stale_points_are_unhealthy():
+    # A point older than the window survives → the cron has been skipped or is
+    # failing, and the office must see that.
+    now = 100 * _DAY
+    r = gps._retention_report(now=now, count=50, oldest=now - 20 * _DAY,
+                              newest=now, stale=4)
+    assert r["oldest_age_days"] == 20.0
+    assert r["stale_points"] == 4
+    assert r["healthy"] is False

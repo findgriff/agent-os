@@ -3433,6 +3433,16 @@ def h_mg_gps_prune(req: Request):
     return 200, maxgleam_gps.prune()
 
 
+def h_mg_gps_retention(req: Request):
+    """GET /api/maxgleam/gps/retention — HQ health check on the retention
+    prune: is the 14-day window actually being kept? `healthy` goes False when
+    a point older than the window survives, surfacing a skipped or failing
+    cron from the app instead of only in a log file on the box. Estate-wide
+    like the prune it watches, so HQ only, never a partner's to read."""
+    _require(req)
+    return 200, maxgleam_gps.retention_status()
+
+
 # ── Max Gleam stock + comms log (HQ or partner token) ────────────────
 
 def h_mg_inventory(req: Request):
@@ -3717,6 +3727,7 @@ ROUTES = [
     ("GET",  re.compile(r"^/api/maxgleam/gps/crew/(\d+)$"), h_mg_gps_crew),
     ("GET",  re.compile(r"^/api/maxgleam/gps/history/(\d+)$"), h_mg_gps_history),
     ("POST", re.compile(r"^/api/maxgleam/gps/prune$"), h_mg_gps_prune),
+    ("GET",  re.compile(r"^/api/maxgleam/gps/retention$"), h_mg_gps_retention),
 
     # ── Max Gleam stock control + communications log ────────────────────
     ("GET",  re.compile(r"^/api/maxgleam/inventory$"), h_mg_inventory),

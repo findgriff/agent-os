@@ -183,6 +183,39 @@ def prune(now: int | None = None) -> dict:
     return {"deleted": cur.rowcount, "cutoff": cutoff, "retention_days": RETENTION_DAYS}
 
 
+def _retention_report(now: int, count: int, oldest: int | None,
+                      newest: int | None, stale: int) -> dict:
+    """Shape a retention health verdict. Pure (no DB) so it is unit-tested
+    directly. ``healthy`` is False when a point older than the window still
+    exists — the tell that a prune has been skipped or is failing."""
+    return {
+        "points": count,
+        "oldest": oldest,
+        "newest": newest,
+        "oldest_age_days": round((now - oldest) / 86400, 1) if oldest else None,
+        "retention_days": RETENTION_DAYS,
+        "cutoff": now - RETENTION_DAYS * 86400,
+        "stale_points": stale,
+        "healthy": stale == 0,
+    }
+
+
+def retention_status(now: int | None = None) -> dict:
+    """A read-only health check on the retention prune, for HQ observability.
+
+    prune() runs from cron and only writes a log file on the box; this lets the
+    office confirm from the app that the 14-day window is actually being kept.
+    Estate-wide, never a partner's to read — exactly as prune() is theirs to run.
+    """
+    now = now or int(time.time())
+    cutoff = now - RETENTION_DAYS * 86400
+    agg = _one("SELECT COUNT(*) AS n, MIN(timestamp) AS oldest, "
+               "MAX(timestamp) AS newest FROM gps_log") or {}
+    stale = _one("SELECT COUNT(*) AS n FROM gps_log WHERE timestamp < ?", (cutoff,)) or {}
+    return _retention_report(now, agg.get("n") or 0, agg.get("oldest"),
+                             agg.get("newest"), stale.get("n") or 0)
+
+
 # ── Reading ─────────────────────────────────────────────────────────
 
 def _crew_row(crew_id: int, tenant_id: int) -> dict | None:

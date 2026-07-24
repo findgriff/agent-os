@@ -55,7 +55,8 @@ PROTECTED = ["/api/me", "/api/agents", "/api/hermes/history", "/api/tenants",
              "/api/maxgleam/reports/profit",
              "/api/maxgleam/gps/active",
              "/api/maxgleam/gps/crew/1",
-             "/api/maxgleam/gps/history/1"]
+             "/api/maxgleam/gps/history/1",
+             "/api/maxgleam/gps/retention"]
 
 
 # ── liveness & routing ──────────────────────────────────────────────
