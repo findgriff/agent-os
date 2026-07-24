@@ -529,6 +529,33 @@ export const invoicesApi = {
     'GET', `/api/maxgleam/reports/tax?from=${from}&to=${to}`),
 };
 
+/**
+ * Download a single invoice as a PDF. Fetch-not-<a href>, same reasoning as
+ * downloadCsv: the Authorization header has to travel with the request, and a
+ * bare link would arrive unauthenticated and save the JSON error as a .pdf.
+ */
+export async function downloadInvoicePdf(id: number, number: string): Promise<void> {
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(`/api/maxgleam/invoices/${id}/pdf`, { headers });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = res.statusText;
+    try { msg = JSON.parse(text).error || msg; } catch { /* not JSON — keep statusText */ }
+    throw new ReportsApiError(res.status, msg);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${number || 'invoice'}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 /** Download the tax report CSV for a month range. */
 export async function downloadTaxCsv(from: string, to: string): Promise<void> {
   const headers: Record<string, string> = {};

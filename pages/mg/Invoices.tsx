@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Badge, Button, Card, EmptyState, Icon, Input, SkeletonList, useToast } from '../../components/ui';
 import {
-  invoicesApi, gbp, type InvoiceList, type MgInvoiceRow,
+  invoicesApi, downloadInvoicePdf, gbp, type InvoiceList, type MgInvoiceRow,
 } from '../../lib/reportsApi';
 
 const ACCENT = '#19C3E6';
@@ -46,8 +46,13 @@ function StatTile({ label, value, sub, icon, accent = ACCENT, delay = 0 }: {
   );
 }
 
-function InvoiceRow({ inv, onSend }: { inv: MgInvoiceRow; onSend: (i: MgInvoiceRow) => Promise<void> }) {
+function InvoiceRow({ inv, onSend, onPdf }: {
+  inv: MgInvoiceRow;
+  onSend: (i: MgInvoiceRow) => Promise<void>;
+  onPdf: (i: MgInvoiceRow) => Promise<void>;
+}) {
   const [busy, setBusy] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
   const tone = STATUS_TONE[inv.display_status] || 'neutral';
   const accent = inv.display_status === 'paid' ? '#22C55E'
     : inv.display_status === 'overdue' ? '#F43F5E' : '#F59E0B';
@@ -93,6 +98,9 @@ function InvoiceRow({ inv, onSend }: { inv: MgInvoiceRow; onSend: (i: MgInvoiceR
             <Button variant="ghost" icon="link" className="!px-2 !py-1.5" />
           </a>
         )}
+        <Button variant="ghost" icon="download" loading={pdfBusy} title="Download PDF"
+          className="!px-2 !py-1.5"
+          onClick={async () => { setPdfBusy(true); await onPdf(inv); setPdfBusy(false); }} />
         <Button variant="secondary" icon="mail" loading={busy}
           disabled={!inv.customer_email}
           title={inv.customer_email ? `Email ${inv.customer_email}` : 'No email address on file'}
@@ -173,6 +181,14 @@ export default function Invoices() {
       await load();
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not send that invoice', 'danger');
+    }
+  };
+
+  const pdf = async (inv: MgInvoiceRow) => {
+    try {
+      await downloadInvoicePdf(inv.id, inv.number);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not download that invoice', 'danger');
     }
   };
 
@@ -261,7 +277,7 @@ export default function Invoices() {
             : 'Try a different filter.'} />
       ) : (
         <div className="space-y-2">
-          {shown.map(inv => <InvoiceRow key={inv.id} inv={inv} onSend={send} />)}
+          {shown.map(inv => <InvoiceRow key={inv.id} inv={inv} onSend={send} onPdf={pdf} />)}
         </div>
       )}
     </div>

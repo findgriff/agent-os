@@ -2982,6 +2982,11 @@ def h_mg_invoice_send(req: Request, invoice_id: int):
     return maxgleam_invoicing.email_invoice(invoice_id)
 
 
+def h_mg_invoice_pdf(req: Request, invoice_id: int):
+    """GET /api/maxgleam/invoices/:id/pdf — the invoice as a downloadable PDF."""
+    return maxgleam_invoicing.invoice_pdf(invoice_id, company_id=_mg_scope(req))
+
+
 def h_mg_tax_report(req: Request):
     return maxgleam_invoicing.tax_report(
         req.query.get("from") or "", req.query.get("to") or "",
@@ -3431,6 +3436,7 @@ ROUTES = [
     ("GET",  re.compile(r"^/api/maxgleam/invoices$"), h_mg_invoices),
     ("POST", re.compile(r"^/api/maxgleam/invoices/auto-generate$"), h_mg_invoices_auto),
     ("POST", re.compile(r"^/api/maxgleam/invoices/(\d+)/send$"), h_mg_invoice_send),
+    ("GET",  re.compile(r"^/api/maxgleam/invoices/(\d+)/pdf$"), h_mg_invoice_pdf),
     ("GET",  re.compile(r"^/api/maxgleam/reports/tax$"), h_mg_tax_report),
     ("GET",  re.compile(r"^/api/maxgleam/reports/tax.csv$"), h_mg_tax_csv),
 

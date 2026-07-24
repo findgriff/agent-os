@@ -956,6 +956,156 @@ def reconcile_payments(tenant_id: int = DEFAULT_TENANT_ID,
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# Invoice PDF
+#
+# A downloadable A4 invoice, rendered by the stdlib PDF writer in server.pdf
+# (no reportlab/wkhtmltopdf on this box). Same data the email carries, so a
+# customer who wants "a proper invoice for my records" gets one that matches.
+# ─────────────────────────────────────────────────────────────────────────
+
+_PDF_SELECT = """
+  SELECT i.id, i.number, i.amount_pence, i.vat_pence, i.status, i.method,
+         i.issued_at, i.paid_at, i.items_json, i.sumup_checkout_url,
+         c.name AS customer_name, c.email AS customer_email,
+         p.address, p.postcode, p.partner_company_id
+    FROM invoices i
+    LEFT JOIN customers c ON c.id = i.customer_id
+    LEFT JOIN jobs j ON j.id = i.job_id
+    LEFT JOIN properties p ON p.id = j.property_id
+   WHERE i.id = ? AND i.tenant_id = ?
+"""
+
+
+def _money(pence: int | None) -> str:
+    return f"£{(pence or 0) / 100:,.2f}"
+
+
+def _date(ts: int | None) -> str:
+    return dt.datetime.fromtimestamp(ts).strftime("%d %b %Y") if ts else "-"
+
+
+def _render_invoice_pdf(row: dict, tenant: dict) -> bytes:
+    from server import pdf as pdfmod
+
+    doc = pdfmod.Pdf()
+    L, R = 56.0, doc.w - 56.0
+    ACCENT = (0.098, 0.765, 0.902)      # #19C3E6
+    PAID_GREEN = (0.133, 0.702, 0.290)
+    INK, MUTE, HAIR = 0.12, 0.45, 0.80
+
+    now = int(time.time())
+    issued = row.get("issued_at") or now
+    overdue = (row["status"] == "unpaid" and row.get("issued_at")
+               and now - row["issued_at"] > OVERDUE_DAYS * 86400)
+    status_label = ("Paid" if row["status"] == "paid"
+                    else "Void" if row["status"] == "void"
+                    else "Overdue" if overdue else "Unpaid")
+
+    # Header — company left, INVOICE + meta right.
+    doc.text(L, 74, tenant.get("name") or "Max Gleam", size=22, bold=True, rgb=ACCENT)
+    doc.text_right(R, 74, "INVOICE", size=22, bold=True, gray=INK)
+    if tenant.get("email"):
+        doc.text(L, 94, tenant["email"], size=9.5, gray=MUTE)
+    doc.text_right(R, 92, row["number"], size=11, bold=True, gray=INK)
+    doc.text_right(R, 107, "Issued " + _date(issued), size=9.5, gray=MUTE)
+    doc.text_right(R, 120, "Status: " + status_label, size=9.5,
+                   rgb=PAID_GREEN if status_label == "Paid" else None,
+                   gray=None if status_label == "Paid" else MUTE)
+    doc.line(L, 138, R, 138, width=1.2, rgb=ACCENT)
+
+    # Bill to.
+    y = 168
+    doc.text(L, y, "BILL TO", size=8.5, bold=True, gray=MUTE)
+    y += 16
+    doc.text(L, y, row.get("customer_name") or "Customer", size=11, bold=True, gray=INK)
+    for part in (row.get("address"), row.get("postcode"), row.get("customer_email")):
+        if part:
+            y += 13
+            doc.text(L, y, part, size=9.5, gray=MUTE)
+
+    # Line items.
+    y += 40
+    doc.text(L, y, "Description", size=8.5, bold=True, gray=MUTE)
+    doc.text_right(R, y, "Amount", size=8.5, bold=True, gray=MUTE)
+    y += 7
+    doc.line(L, y, R, y, width=0.6, gray=HAIR)
+    y += 20
+
+    try:
+        items = json.loads(row.get("items_json") or "[]")
+    except (json.JSONDecodeError, TypeError):
+        items = []
+    if not isinstance(items, list) or not items:
+        label = "Window cleaning"
+        if row.get("address"):
+            label += f" - {row['address']}"
+        items = [{"label": label, "amount_pence": row["amount_pence"]}]
+
+    for it in items:
+        desc = str(it.get("label") or it.get("description") or "Service")
+        if len(desc) > 78:
+            desc = desc[:75] + "..."
+        doc.text(L, y, desc, size=10, gray=INK)
+        doc.text_right(R, y, _money(it.get("amount_pence")), size=10, gray=INK)
+        y += 18
+
+    y += 4
+    doc.line(L, y, R, y, width=0.6, gray=HAIR)
+    y += 20
+
+    gross = row["amount_pence"] or 0
+    vat = row["vat_pence"] or 0
+    if vat:
+        doc.text_right(R - 96, y, "Subtotal", size=10, gray=MUTE)
+        doc.text_right(R, y, _money(gross - vat), size=10, gray=INK)
+        y += 17
+        doc.text_right(R - 96, y, "VAT", size=10, gray=MUTE)
+        doc.text_right(R, y, _money(vat), size=10, gray=INK)
+        y += 17
+    doc.text_right(R - 96, y, "Total", size=11, bold=True, gray=INK)
+    doc.text_right(R, y, _money(gross), size=11, bold=True, gray=INK)
+
+    # Payment status / call to action.
+    y += 40
+    if row["status"] == "paid":
+        note = "PAID" + (f" on {_date(row['paid_at'])}" if row.get("paid_at") else "")
+        if row.get("method"):
+            note += f"  ({str(row['method']).replace('_', ' ')})"
+        doc.text(L, y, note, size=11, bold=True, rgb=PAID_GREEN)
+    elif row["status"] == "void":
+        doc.text(L, y, "This invoice has been cancelled.", size=10, gray=MUTE)
+    else:
+        doc.text(L, y, f"Amount due: {_money(gross)}", size=11, bold=True, gray=INK)
+        if row.get("sumup_checkout_url"):
+            y += 16
+            doc.text(L, y, "Pay online:", size=9.5, gray=MUTE)
+            doc.text(L + doc.text_width("Pay online: ", 9.5), y,
+                     row["sumup_checkout_url"], size=9, rgb=ACCENT)
+
+    # Footer.
+    doc.line(L, doc.h - 60, R, doc.h - 60, width=0.5, gray=0.88)
+    doc.text(L, doc.h - 44, "Thank you for your business.", size=9, gray=MUTE)
+    doc.text_right(R, doc.h - 44, "Generated " + _date(now), size=8, gray=0.6)
+    return doc.build()
+
+
+def invoice_pdf(invoice_id: int, tenant_id: int = DEFAULT_TENANT_ID,
+                company_id: int | None = None):
+    """Return (200, pdf_bytes, 'application/pdf') for one invoice, or a JSON error.
+
+    company_id scopes a partner to their own company's invoices: a partner
+    token can never pull a PDF for a job that isn't theirs.
+    """
+    row = _one(_PDF_SELECT, (invoice_id, tenant_id))
+    if not row:
+        return 404, {"error": "invoice not found"}
+    if company_id is not None and row.get("partner_company_id") != company_id:
+        return 404, {"error": "invoice not found"}
+    tenant = _tenant(tenant_id) or {}
+    return 200, _render_invoice_pdf(row, tenant), "application/pdf"
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Recurring auto-send
 #
 # auto_generate() above invoices every completed-but-uninvoiced job. The
