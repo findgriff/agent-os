@@ -11,3 +11,6 @@ venv/
 # local sqlite artifacts and pre-edit backups
 *.db
 *.bak-*
+
+# personal tool with its own git history — keep out of this repo
+tools/yt-scraper/
