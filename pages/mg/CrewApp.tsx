@@ -97,7 +97,7 @@ function TrackingBar({ enabled, onToggle, state, lastFix, address }: {
               { hour: '2-digit', minute: '2-digit' })}` : ''}
           </p>
         </div>
-        <MGButton tone={enabled ? 'secondary' : 'primary'} className="shrink-0"
+        <MGButton tone={enabled ? 'secondary' : 'primary'} className="min-h-[44px] shrink-0"
           onClick={() => onToggle(!enabled)}>
           {enabled ? 'Stop' : 'Share'}
         </MGButton>
@@ -255,10 +255,17 @@ function CrewRound({ crew, onSignOut }: { crew: Crew; onSignOut: () => void }) {
   // open at once, follow the most recently started — the office map keys the
   // live pin and its on-site check off that same "latest started" job, so both
   // sides must agree or a fix logged for one job gets judged against another.
-  const activeJob = (data?.jobs ?? [])
-    .filter(j => j.started_at && !j.completed_at && j.status !== 'done')
-    .sort((a, b) => (b.started_at ?? 0) - (a.started_at ?? 0))[0]
-    ?? null;
+  //
+  // Only ever tracked for *today's* round: the office map reads today's started
+  // jobs alone (maxgleam_gps._current_job), so a crew browsing a past day with a
+  // job still open must not resume the watch — that would log this minute's fix
+  // against an old job the office is not even watching.
+  const viewingToday = isTodayIso(data?.date || date);
+  const activeJob = viewingToday
+    ? ((data?.jobs ?? [])
+        .filter(j => j.started_at && !j.completed_at && j.status !== 'done')
+        .sort((a, b) => (b.started_at ?? 0) - (a.started_at ?? 0))[0] ?? null)
+    : null;
   const [shareLocation, setShareLocation] = useState(
     () => localStorage.getItem(TRACKING_KEY) === '1');
   const setShare = useCallback((on: boolean) => {
@@ -660,4 +667,13 @@ function prettyDate(iso?: string): string {
 function clockOf(ts: number): string {
   return new Date(ts * 1000).toLocaleTimeString('en-GB',
     { hour: '2-digit', minute: '2-digit' });
+}
+
+// Is this the day the crew is actually working? An empty date means the round
+// hasn't loaded yet, which is today by default. Anchored at noon like
+// prettyDate so the comparison can't flip a day across a timezone edge.
+function isTodayIso(iso?: string): boolean {
+  if (!iso) return true;
+  const d = new Date(`${iso}T12:00:00`);
+  return !Number.isNaN(d.getTime()) && d.toDateString() === new Date().toDateString();
 }
