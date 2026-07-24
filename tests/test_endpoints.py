@@ -100,6 +100,50 @@ def test_gps_prune_requires_hq_session(client):
         "prune must reject an unauthenticated caller"
 
 
+# A *valid* partner token must never reach the HQ-only profit route. Partners
+# are a separate app: their users and sessions live in the maxgleam DB, while
+# _require reads the AGENT OS DB (get_db). So a genuine partner token resolves
+# to no AGENT OS user and is rejected — bare _require here is HQ-only, not a
+# leak. (A past review wrongly called this exploitable by misreading partner.py
+# as writing to the main users/sessions tables; it writes to maxgleam's own.)
+# This mints a real partner session in an isolated in-memory maxgleam DB, proves
+# partner_for_token accepts it, then proves the profit route + its CSV twin 401
+# it. Hermetic: the profit handler never touches the (patched) maxgleam DB.
+def test_partner_token_cannot_read_profit(client, monkeypatch):
+    import sqlite3
+    from server import auth, partner
+
+    mg = sqlite3.connect(":memory:")
+    mg.row_factory = sqlite3.Row
+    mg.executescript(
+        """CREATE TABLE partner_companies (id INTEGER PRIMARY KEY, name TEXT,
+               contact_email TEXT, active INTEGER DEFAULT 1);
+           CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT,
+               password_hash TEXT, partner_company_id INTEGER);
+           CREATE TABLE sessions (id INTEGER PRIMARY KEY AUTOINCREMENT,
+               token TEXT, user_id INTEGER, expires_at INTEGER);""")
+    mg.execute("INSERT INTO partner_companies (id, name, contact_email) "
+               "VALUES (1, 'Lees & Hendry', 'ops@leeshendry.example')")
+    mg.execute("INSERT INTO users (id, name, email, password_hash, "
+               "partner_company_id) VALUES (1, 'Partner', 'p@leeshendry.example', ?, 1)",
+               (auth.hash_password("partner-pw-12345"),))
+    mg.commit()
+    monkeypatch.setattr(partner, "_conn", lambda: mg)
+
+    status, body = partner.login("LEESHENDRY", "partner-pw-12345")
+    assert status == 200, f"partner login should succeed: {body}"
+    ptoken = body["token"]
+    # It genuinely is a valid partner credential in the maxgleam DB...
+    assert partner.partner_for_token(ptoken) is not None, \
+        "the minted token must be a real partner session"
+    # ...yet the HQ-only profit route (and its CSV twin) reject it, because
+    # _require resolves tokens against a different database entirely.
+    assert client.get("/api/maxgleam/reports/profit", token=ptoken)[0] == 401, \
+        "a partner token must not read estate-wide profit"
+    assert client.get("/api/maxgleam/reports/profit.csv", token=ptoken)[0] == 401, \
+        "a partner token must not read the profit CSV either"
+
+
 # The customer invoice-PDF route is gated by a signed capability token, not an
 # HQ session. A missing or malformed token is rejected before any maxgleam DB
 # access (bad tokens short-circuit in customer_for_token), so this stays inside
