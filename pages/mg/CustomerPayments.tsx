@@ -325,7 +325,7 @@ function InvoicePdfLink({ invoice, paid }: { invoice: MgInvoice; paid: boolean }
   return (
     <div className="mt-3">
       <button onClick={download} disabled={busy}
-        className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-60">
+        className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-60">
         {busy ? 'Preparing…' : paid ? 'Download receipt (PDF)' : 'Download invoice (PDF)'}
       </button>
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
