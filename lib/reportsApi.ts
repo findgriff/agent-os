@@ -483,10 +483,13 @@ export interface MgInvoiceRow {
   vat_pence: number;
   net_pence: number;
   status: string;
-  /** 'overdue' is derived from an unpaid invoice's age, never stored. */
+  /** 'overdue' and 'partial' are derived views, never stored. */
   display_status: string;
   is_overdue: boolean;
   days_outstanding: number | null;
+  /** Money actually received, and what's still owed (0 once paid). */
+  paid_pence: number;
+  outstanding_pence: number;
   method: string | null;
   issued_at: number;
   paid_at: number | null;
@@ -504,7 +507,7 @@ export interface MgInvoiceRow {
 export interface InvoiceList {
   invoices: MgInvoiceRow[];
   summary: {
-    total: number; paid: number; unpaid: number; overdue: number;
+    total: number; paid: number; unpaid: number; partial: number; overdue: number;
     paid_pence: number; unpaid_pence: number; overdue_pence: number;
     overdue_days: number;
   };
@@ -554,13 +557,14 @@ export const invoicesApi = {
   send: (id: number) => req<{ ok: boolean; status: string; to: string; checkout_url: string }>(
     'POST', `/api/maxgleam/invoices/${id}/send`),
 
-  /** Record an offline payment (cash / transfer / card reader) against an invoice. */
-  recordPayment: (id: number, method: PaymentMethod, paidAt?: number) =>
+  /** Record a payment (cash / transfer / card reader). Omit amountPence to
+   * settle the whole outstanding balance; pass a smaller sum for a part-payment. */
+  recordPayment: (id: number, method: PaymentMethod, amountPence?: number) =>
     req<{ ok: boolean; invoice: MgInvoiceRow }>(
       'POST', `/api/maxgleam/invoices/${id}/record-payment`,
-      paidAt ? { method, paid_at: paidAt } : { method }),
+      amountPence != null ? { method, amount_pence: amountPence } : { method }),
 
-  /** Revert a manually-recorded payment back to unpaid (keyed in by mistake). */
+  /** Reverse the most recent recorded payment (keyed in by mistake). */
   unmarkPayment: (id: number) => req<{ ok: boolean; invoice: MgInvoiceRow }>(
     'POST', `/api/maxgleam/invoices/${id}/unmark-payment`),
 

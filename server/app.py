@@ -3075,17 +3075,28 @@ def h_mg_invoice_pdf(req: Request, invoice_id: int):
 
 
 def h_mg_invoice_record_payment(req: Request, invoice_id: int):
-    """POST /api/maxgleam/invoices/:id/record-payment — mark paid offline."""
+    """POST /api/maxgleam/invoices/:id/record-payment — record a full or part payment.
+
+    Body: {method, amount_pence?, paid_at?, note?}. Omitting amount_pence
+    settles the whole outstanding balance."""
     company_id = _mg_scope(req)
     body = req.body or {}
+    amount = body.get("amount_pence")
     return maxgleam_invoicing.record_payment(
-        invoice_id, body.get("method") or "", body.get("paid_at"),
+        invoice_id, body.get("method") or "",
+        amount_pence=int(amount) if amount is not None else None,
+        paid_at=body.get("paid_at"), note=body.get("note"),
         company_id=company_id)
 
 
 def h_mg_invoice_unmark_payment(req: Request, invoice_id: int):
-    """POST /api/maxgleam/invoices/:id/unmark-payment — revert a manual payment."""
+    """POST /api/maxgleam/invoices/:id/unmark-payment — reverse the last payment."""
     return maxgleam_invoicing.unmark_payment(invoice_id, company_id=_mg_scope(req))
+
+
+def h_mg_invoice_payments(req: Request, invoice_id: int):
+    """GET /api/maxgleam/invoices/:id/payments — the payment ledger for one invoice."""
+    return maxgleam_invoicing.payment_history(invoice_id, company_id=_mg_scope(req))
 
 
 def h_mg_tax_report(req: Request):
@@ -3559,6 +3570,7 @@ ROUTES = [
     ("GET",  re.compile(r"^/api/maxgleam/invoices/(\d+)/pdf$"), h_mg_invoice_pdf),
     ("POST", re.compile(r"^/api/maxgleam/invoices/(\d+)/record-payment$"), h_mg_invoice_record_payment),
     ("POST", re.compile(r"^/api/maxgleam/invoices/(\d+)/unmark-payment$"), h_mg_invoice_unmark_payment),
+    ("GET",  re.compile(r"^/api/maxgleam/invoices/(\d+)/payments$"), h_mg_invoice_payments),
     ("GET",  re.compile(r"^/api/maxgleam/reports/tax$"), h_mg_tax_report),
     ("GET",  re.compile(r"^/api/maxgleam/reports/tax.csv$"), h_mg_tax_csv),
 

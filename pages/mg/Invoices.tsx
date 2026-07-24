@@ -22,7 +22,7 @@ const FILTERS: { id: Filter; label: string; icon: string }[] = [
 ];
 
 const STATUS_TONE: Record<string, 'ok' | 'warn' | 'danger' | 'neutral'> = {
-  paid: 'ok', unpaid: 'warn', overdue: 'danger', void: 'neutral',
+  paid: 'ok', unpaid: 'warn', partial: 'warn', overdue: 'danger', void: 'neutral',
 };
 
 function StatTile({ label, value, sub, icon, accent = ACCENT, delay = 0 }: {
@@ -51,17 +51,27 @@ function InvoiceRow({ inv, onSend, onPdf, onRecordPaid, onRevert }: {
   inv: MgInvoiceRow;
   onSend: (i: MgInvoiceRow) => Promise<void>;
   onPdf: (i: MgInvoiceRow) => Promise<void>;
-  onRecordPaid: (i: MgInvoiceRow, method: PaymentMethod) => Promise<void>;
+  onRecordPaid: (i: MgInvoiceRow, method: PaymentMethod, amountPence?: number) => Promise<void>;
   onRevert: (i: MgInvoiceRow) => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const [method, setMethod] = useState<PaymentMethod>('cash');
+  // Amount field, in pounds. Defaults to the full balance when the modal opens.
+  const [amount, setAmount] = useState('');
   const [saving, setSaving] = useState(false);
   const [reverting, setReverting] = useState(false);
-  // A manually-keyed payment can be undone here; an online SumUp one can't.
-  const canRevert = inv.status === 'paid' && !!inv.method && inv.method !== 'sumup_online';
+  // A manually-keyed payment (full or partial) can be undone; a SumUp one can't.
+  const canRevert = (inv.status === 'paid' || inv.status === 'partial')
+    && !!inv.method && inv.method !== 'sumup_online';
+  const outstanding = inv.outstanding_pence;
+  const openPay = () => { setAmount((outstanding / 100).toFixed(2)); setMethod('cash'); setPayOpen(true); };
+  // Parse the pounds input to whole pence; NaN/≤0/over-balance are caught here
+  // so Confirm can disable rather than round-trip a guaranteed 400.
+  const amountPence = Math.round(parseFloat(amount) * 100);
+  const amountValid = Number.isFinite(amountPence) && amountPence > 0 && amountPence <= outstanding;
+  const isPart = amountValid && amountPence < outstanding;
   const tone = STATUS_TONE[inv.display_status] || 'neutral';
   const accent = inv.display_status === 'paid' ? '#22C55E'
     : inv.display_status === 'overdue' ? '#F43F5E' : '#F59E0B';
@@ -94,24 +104,28 @@ function InvoiceRow({ inv, onSend, onPdf, onRecordPaid, onRevert }: {
       <div className="flex shrink-0 items-center gap-2 pl-2.5 sm:pl-0">
         <div className="text-right">
           <div className="text-sm font-semibold tabular-nums text-ink">{gbp(inv.amount_pence)}</div>
-          {inv.vat_pence > 0 && (
+          {inv.display_status === 'partial' || (inv.paid_pence > 0 && inv.outstanding_pence > 0) ? (
+            <div className="text-[10px] tabular-nums text-amber/90">
+              {gbp(inv.paid_pence)} paid · {gbp(inv.outstanding_pence)} due
+            </div>
+          ) : inv.vat_pence > 0 && (
             <div className="text-[10px] tabular-nums text-muted/70">inc. {gbp(inv.vat_pence)} VAT</div>
           )}
         </div>
         <Badge tone={tone}>
           {inv.display_status[0].toUpperCase() + inv.display_status.slice(1)}
         </Badge>
-        {inv.sumup_checkout_url && inv.status === 'unpaid' && (
+        {inv.sumup_checkout_url && inv.outstanding_pence > 0 && (
           <a href={inv.sumup_checkout_url} target="_blank" rel="noopener noreferrer"
             title="Open the SumUp pay-link">
             <Button variant="ghost" icon="link" className="!px-2 !py-1.5" />
           </a>
         )}
-        {inv.status === 'unpaid' && (
+        {inv.outstanding_pence > 0 && inv.status !== 'void' && (
           <Button variant="secondary" icon="payments" className="!px-2.5"
             title="Record a cash, transfer or card-reader payment"
-            onClick={() => setPayOpen(true)}>
-            Mark paid
+            onClick={openPay}>
+            {inv.paid_pence > 0 ? 'Add payment' : 'Mark paid'}
           </Button>
         )}
         {canRevert && (
@@ -134,9 +148,21 @@ function InvoiceRow({ inv, onSend, onPdf, onRecordPaid, onRevert }: {
         title={`Record payment — ${inv.number}`} width="max-w-sm">
         <div className="space-y-4">
           <div className="flex items-center justify-between rounded-xl border border-white/6 bg-white/[0.02] px-3 py-2.5">
-            <span className="text-sm text-muted">Amount</span>
-            <span className="text-base font-semibold tabular-nums text-ink">{gbp(inv.amount_pence)}</span>
+            <span className="text-sm text-muted">{inv.paid_pence > 0 ? 'Balance outstanding' : 'Invoice total'}</span>
+            <span className="text-base font-semibold tabular-nums text-ink">{gbp(outstanding)}</span>
           </div>
+          <label className="block space-y-1.5">
+            <span className="text-[12px] font-medium text-muted">Amount received (£)</span>
+            <Input type="number" inputMode="decimal" step="0.01" min="0"
+              max={(outstanding / 100).toFixed(2)} value={amount}
+              onChange={e => setAmount(e.target.value)}
+              className={amount && !amountValid ? '!border-rose/50' : ''} />
+            <span className="block text-[11px] text-muted/80">
+              {isPart
+                ? `Part payment — ${gbp(outstanding - amountPence)} will remain outstanding.`
+                : 'Leave as the full balance, or enter less to record a part payment.'}
+            </span>
+          </label>
           <label className="block space-y-1.5">
             <span className="text-[12px] font-medium text-muted">How was it paid?</span>
             <Select value={method} onChange={e => setMethod(e.target.value as PaymentMethod)}
@@ -148,14 +174,16 @@ function InvoiceRow({ inv, onSend, onPdf, onRecordPaid, onRevert }: {
           </label>
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="ghost" onClick={() => setPayOpen(false)}>Cancel</Button>
-            <Button variant="primary" icon="check" loading={saving}
+            <Button variant="primary" icon="check" loading={saving} disabled={!amountValid}
               onClick={async () => {
                 setSaving(true);
-                await onRecordPaid(inv, method);
+                // Send the amount only when it's a part payment; a full balance
+                // omits it so the server settles whatever is outstanding.
+                await onRecordPaid(inv, method, isPart ? amountPence : undefined);
                 setSaving(false);
                 setPayOpen(false);
               }}>
-              Confirm payment
+              {isPart ? `Record ${gbp(amountPence)}` : 'Confirm payment'}
             </Button>
           </div>
         </div>
@@ -244,10 +272,13 @@ export default function Invoices() {
     }
   };
 
-  const recordPaid = async (inv: MgInvoiceRow, method: PaymentMethod) => {
+  const recordPaid = async (inv: MgInvoiceRow, method: PaymentMethod, amountPence?: number) => {
     try {
-      await invoicesApi.recordPayment(inv.id, method);
-      toast(`${inv.number} marked paid — ${PAYMENT_METHOD_LABELS[method].toLowerCase()}`, 'ok');
+      const { invoice } = await invoicesApi.recordPayment(inv.id, method, amountPence);
+      const how = PAYMENT_METHOD_LABELS[method].toLowerCase();
+      toast(invoice.display_status === 'partial'
+        ? `${inv.number} part-paid by ${how} — ${gbp(invoice.outstanding_pence)} still due`
+        : `${inv.number} marked paid — ${how}`, 'ok');
       await load();
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not record that payment', 'danger');
@@ -256,8 +287,10 @@ export default function Invoices() {
 
   const revert = async (inv: MgInvoiceRow) => {
     try {
-      await invoicesApi.unmarkPayment(inv.id);
-      toast(`${inv.number} reverted to unpaid`, 'ok');
+      const { invoice } = await invoicesApi.unmarkPayment(inv.id);
+      toast(invoice.display_status === 'partial'
+        ? `${inv.number} — last payment reversed, ${gbp(invoice.outstanding_pence)} due`
+        : `${inv.number} reverted to unpaid`, 'ok');
       await load();
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not revert that payment', 'danger');

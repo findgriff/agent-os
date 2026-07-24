@@ -387,36 +387,61 @@ def email_invoice(invoice_id: int, tenant_id: int = DEFAULT_TENANT_ID) -> tuple[
 
 # ------------------------------------------------------------------- listing --
 
+# ledger_paid is the running total received against each invoice, summed from
+# the invoice_payments ledger (see the payments section below). Callers that
+# run this SELECT must ensure that table exists first via _payments_conn().
 _INVOICE_SELECT = """
   SELECT i.id, i.number, i.amount_pence, i.vat_pence, i.status, i.method,
          i.issued_at, i.paid_at, i.sumup_checkout_url, i.job_id, i.customer_id,
          c.name AS customer_name, c.email AS customer_email,
          j.scheduled_date, j.signoff_status,
-         p.address, p.postcode, p.partner_company_id
+         p.address, p.postcode, p.partner_company_id,
+         COALESCE(pay.paid, 0) AS ledger_paid
     FROM invoices i
     LEFT JOIN customers c ON c.id = i.customer_id
     LEFT JOIN jobs j ON j.id = i.job_id
     LEFT JOIN properties p ON p.id = j.property_id
+    LEFT JOIN (SELECT invoice_id, SUM(amount_pence) AS paid
+                 FROM invoice_payments GROUP BY invoice_id) pay ON pay.invoice_id = i.id
 """
 
 
 def _invoice_dto(r: dict, now: int) -> dict:
-    overdue = (r["status"] == "unpaid"
-               and r["issued_at"] and now - r["issued_at"] > OVERDUE_DAYS * 86400)
+    """Money view of an invoice, balance-aware for part-payments.
+
+    A 'paid' or 'void' invoice owes nothing; for 'unpaid'/'partial' the
+    outstanding balance is the gross less whatever the ledger has received.
+    """
+    amount = r["amount_pence"] or 0
+    status = r["status"]
+    if status in ("paid", "void"):
+        paid = amount if status == "paid" else 0
+    else:
+        paid = min(amount, r.get("ledger_paid") or 0)
+    outstanding = 0 if status in ("paid", "void") else max(0, amount - paid)
+    owes = outstanding > 0
+    overdue = (owes and r["issued_at"]
+               and now - r["issued_at"] > OVERDUE_DAYS * 86400)
+    # 'overdue' and 'partial' are derived views, never stored — the invoices
+    # table only knows unpaid/partial/paid/void.
+    disp = ("overdue" if overdue
+            else "partial" if (owes and paid > 0)
+            else status)
     return {
         **r,
-        "net_pence": (r["amount_pence"] or 0) - (r["vat_pence"] or 0),
+        "net_pence": amount - (r["vat_pence"] or 0),
+        "paid_pence": paid,
+        "outstanding_pence": outstanding,
         "is_overdue": bool(overdue),
-        # 'overdue' is a derived view of an unpaid invoice, never a stored
-        # status — the invoices table only knows paid/unpaid/void.
-        "display_status": "overdue" if overdue else r["status"],
+        "display_status": disp,
         "days_outstanding": (int((now - r["issued_at"]) / 86400)
-                             if r["status"] == "unpaid" and r["issued_at"] else None),
+                             if owes and r["issued_at"] else None),
     }
 
 
 def list_invoices(tenant_id: int = DEFAULT_TENANT_ID, company_id: int | None = None,
                   status: str = "", limit: int = 500) -> tuple[int, dict]:
+    _payments_conn()          # the ledger JOIN in _INVOICE_SELECT needs the table
     sql = _INVOICE_SELECT + " WHERE i.tenant_id = ?"
     args: list = [tenant_id]
     if company_id is not None:
@@ -429,7 +454,10 @@ def list_invoices(tenant_id: int = DEFAULT_TENANT_ID, company_id: int | None = N
     dtos = [_invoice_dto(r, now) for r in _rows(sql, tuple(args))]
 
     wanted = (status or "").strip().lower()
-    if wanted in ("paid", "unpaid", "void", "overdue"):
+    if wanted == "unpaid":
+        # 'Unpaid' means "still owes money" — part-paid invoices belong here too.
+        shown = [d for d in dtos if d["outstanding_pence"] > 0 and not d["is_overdue"]]
+    elif wanted in ("paid", "void", "overdue", "partial"):
         shown = [d for d in dtos if d["display_status"] == wanted]
     else:
         shown = dtos
@@ -439,11 +467,14 @@ def list_invoices(tenant_id: int = DEFAULT_TENANT_ID, company_id: int | None = N
         "summary": {
             "total": len(dtos),
             "paid": sum(1 for d in dtos if d["status"] == "paid"),
-            "unpaid": sum(1 for d in dtos if d["display_status"] == "unpaid"),
+            "unpaid": sum(1 for d in dtos if d["outstanding_pence"] > 0),
+            "partial": sum(1 for d in dtos if d["display_status"] == "partial"),
             "overdue": sum(1 for d in dtos if d["is_overdue"]),
-            "paid_pence": sum(d["amount_pence"] for d in dtos if d["status"] == "paid"),
-            "unpaid_pence": sum(d["amount_pence"] for d in dtos if d["status"] == "unpaid"),
-            "overdue_pence": sum(d["amount_pence"] for d in dtos if d["is_overdue"]),
+            # Money view: paid_pence is what's actually been received (part-
+            # payments included), unpaid_pence what is still outstanding.
+            "paid_pence": sum(d["paid_pence"] for d in dtos),
+            "unpaid_pence": sum(d["outstanding_pence"] for d in dtos),
+            "overdue_pence": sum(d["outstanding_pence"] for d in dtos if d["is_overdue"]),
             "overdue_days": OVERDUE_DAYS,
         },
         "uninvoiced_jobs": len(uninvoiced_jobs(tenant_id, company_id)),
@@ -650,16 +681,20 @@ def _sent_stages(invoice_id: int) -> set[int]:
                 (invoice_id,)).fetchall()]}
 
 
+# Part-paid invoices are chased too — a customer who paid half still owes the
+# rest — so 'partial' sits alongside 'unpaid' here. The outstanding balance
+# (not the gross) is what the summary and the reminder text below report.
 _OVERDUE_SELECT = _INVOICE_SELECT + """
-   WHERE i.tenant_id = ? AND i.status = 'unpaid'
+   WHERE i.tenant_id = ? AND i.status IN ('unpaid', 'partial')
      AND i.issued_at IS NOT NULL AND i.issued_at < ?
 """
 
 
 def overdue_invoices(tenant_id: int = DEFAULT_TENANT_ID,
                      company_id: int | None = None) -> tuple[int, dict]:
-    """Unpaid invoices past the overdue threshold, with chase history."""
+    """Unpaid or part-paid invoices past the overdue threshold, with chase history."""
     _reminder_conn()          # create the log table up front, not per-row
+    _payments_conn()          # the ledger JOIN in _INVOICE_SELECT needs the table
     now = int(time.time())
     cutoff = now - REMINDER_STAGES[0] * 86400
 
@@ -693,9 +728,9 @@ def overdue_invoices(tenant_id: int = DEFAULT_TENANT_ID,
         "invoices": rows,
         "summary": {
             "count": len(rows),
-            "total_pence": sum(r["amount_pence"] for r in rows),
+            "total_pence": sum(r["outstanding_pence"] for r in rows),
             "due_now": len(due),
-            "due_now_pence": sum(r["amount_pence"] for r in due),
+            "due_now_pence": sum(r["outstanding_pence"] for r in due),
             "at_30": sum(1 for r in rows if r["stage_due"] == 30),
             "at_60": sum(1 for r in rows if r["stage_due"] == 60),
             "no_phone": sum(1 for r in rows if not r["can_text"]),
@@ -749,9 +784,14 @@ def _pay_link(invoice: dict) -> str:
 
 def _reminder_body(invoice: dict, link: str) -> str:
     name = (invoice.get("customer_name") or "there").split(" ")[0] or "there"
+    # Chase the balance still owed, not the gross — a customer who part-paid
+    # would otherwise be asked for money they've already handed over.
+    owed = invoice.get("outstanding_pence")
+    if owed is None:
+        owed = invoice.get("amount_pence") or 0
     return REMINDER_TEMPLATE.format(
         name=name, number=invoice.get("number") or "",
-        amount=f"£{(invoice.get('amount_pence') or 0) / 100:.2f}", link=link)
+        amount=f"£{owed / 100:.2f}", link=link)
 
 
 def _send_reminder_sms(to_number: str, body: str) -> tuple[str, str | None]:
@@ -970,43 +1010,106 @@ def reconcile_payments(tenant_id: int = DEFAULT_TENANT_ID,
 # never typed in, so it also cannot be reverted by the office action below.
 OFFLINE_METHODS = ("cash", "transfer", "sumup_reader")
 
+_payments_local = threading.local()
 
-def record_payment(invoice_id: int, method: str, paid_at: int | None = None,
+
+def _payments_conn() -> sqlite3.Connection:
+    """The maxgleam connection, with the invoice_payments ledger guaranteed.
+
+    Each recorded payment (part or full) is one append-only row; the invoice's
+    stored status is a rollup of them — unpaid → partial → paid. Created lazily
+    like invoice_reminders so no schema.sql migration is needed on the live DB.
+    """
+    conn = _conn()
+    if not getattr(_payments_local, "ready", False):
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS invoice_payments (
+              id           INTEGER PRIMARY KEY AUTOINCREMENT,
+              tenant_id    INTEGER NOT NULL,
+              invoice_id   INTEGER NOT NULL REFERENCES invoices(id),
+              amount_pence INTEGER NOT NULL,
+              method       TEXT NOT NULL,      -- cash | transfer | sumup_reader
+              note         TEXT,
+              paid_at      INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+              created_at   INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+            )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_invoice_payments_inv "
+                     "ON invoice_payments(invoice_id)")
+        conn.commit()
+        _payments_local.ready = True
+    return conn
+
+
+def _ledger_total(invoice_id: int) -> int:
+    row = _one("SELECT COALESCE(SUM(amount_pence), 0) AS p "
+               "FROM invoice_payments WHERE invoice_id = ?", (invoice_id,))
+    return int((row or {}).get("p") or 0)
+
+
+def _outstanding(row: dict) -> int:
+    """Pence still owed on a fetched invoice row (0 for paid/void)."""
+    if row["status"] in ("paid", "void"):
+        return 0
+    return max(0, (row["amount_pence"] or 0) - (row.get("ledger_paid") or 0))
+
+
+def record_payment(invoice_id: int, method: str, amount_pence: int | None = None,
+                   paid_at: int | None = None, note: str | None = None,
                    tenant_id: int = DEFAULT_TENANT_ID,
                    company_id: int | None = None) -> tuple[int, dict]:
-    """Mark an invoice paid by an offline method (cash / transfer / card reader)."""
+    """Record a payment against an invoice: cash / transfer / card reader.
+
+    amount_pence omitted settles the whole outstanding balance (the common
+    case); a smaller amount is a part-payment that moves the invoice to
+    'partial' and leaves the remainder owing. Overpayment is refused.
+    """
     method = (method or "").strip().lower()
     if method not in OFFLINE_METHODS:
         return 400, {"error": "method must be one of " + ", ".join(OFFLINE_METHODS)}
+    conn = _payments_conn()
     row = _one(_INVOICE_SELECT + " WHERE i.id = ? AND i.tenant_id = ?",
                (invoice_id, tenant_id))
     if not row:
         return 404, {"error": "invoice not found"}
     if company_id is not None and row.get("partner_company_id") != company_id:
         return 404, {"error": "invoice not found"}
-    if row["status"] == "paid":
-        return 409, {"error": "this invoice is already marked paid"}
     if row["status"] == "void":
         return 409, {"error": "this invoice has been cancelled"}
 
+    outstanding = _outstanding(row)
+    if outstanding <= 0:
+        return 409, {"error": "this invoice is already paid in full"}
+
+    amt = outstanding if amount_pence is None else int(amount_pence)
+    if amt <= 0:
+        return 400, {"error": "payment amount must be more than zero"}
+    if amt > outstanding:
+        return 400, {"error": f"that's more than the £{outstanding / 100:.2f} still outstanding"}
+
     when = int(paid_at) if paid_at else int(time.time())
-    conn = _conn()
-    # The status guard keeps this idempotent against a concurrent SumUp
-    # reconcile: whichever marks it paid first wins, the other is a no-op.
-    cur = conn.execute(
-        "UPDATE invoices SET status = 'paid', method = ?, paid_at = ? "
-        "WHERE id = ? AND status = 'unpaid'", (method, when, invoice_id))
-    if not cur.rowcount:
-        return 409, {"error": "this invoice was just settled elsewhere"}
+    conn.execute(
+        "INSERT INTO invoice_payments (tenant_id, invoice_id, amount_pence, method, note, paid_at) "
+        "VALUES (?,?,?,?,?,?)",
+        (tenant_id, invoice_id, amt, method, (note or None), when))
+    # Recompute the rollup from the ledger itself — authoritative even if two
+    # payments raced — and flip status accordingly. reconcile_payments only
+    # touches status='unpaid', so it never fights a partial invoice.
+    received = _ledger_total(invoice_id)
+    fully = received >= (row["amount_pence"] or 0)
+    conn.execute("UPDATE invoices SET status = ?, method = ?, paid_at = ? WHERE id = ?",
+                 ("paid" if fully else "partial", method, when if fully else None, invoice_id))
     try:
+        remaining = max(0, (row["amount_pence"] or 0) - received)
+        tail = "paid in full" if fully else f"£{remaining / 100:.2f} still due"
         conn.execute(
             "INSERT INTO comms_log (tenant_id, customer_id, kind, content) VALUES (?,?,?,?)",
             (tenant_id, row["customer_id"], "payment_recorded",
-             f"Invoice {row['number']} marked paid ({method.replace('_', ' ')})"))
+             f"Invoice {row['number']}: £{amt / 100:.2f} by {method.replace('_', ' ')} — {tail}"))
     except Exception:                                          # noqa: BLE001
         log.exception("comms_log write failed")
     conn.commit()
-    log.info("maxgleam: invoice %s marked paid by %s", row["number"], method)
+    log.info("maxgleam: invoice %s +£%.2f by %s (%s)", row["number"], amt / 100, method,
+             "paid" if fully else "partial")
 
     fresh = _one(_INVOICE_SELECT + " WHERE i.id = ?", (invoice_id,))
     return 200, {"ok": True, "invoice": _invoice_dto(fresh, int(time.time()))}
@@ -1014,30 +1117,69 @@ def record_payment(invoice_id: int, method: str, paid_at: int | None = None,
 
 def unmark_payment(invoice_id: int, tenant_id: int = DEFAULT_TENANT_ID,
                    company_id: int | None = None) -> tuple[int, dict]:
-    """Revert a manually-recorded payment (keyed in by mistake) back to unpaid.
+    """Reverse the most recent recorded payment (keyed in by mistake).
 
-    An online SumUp payment reflects money SumUp has actually taken, so it is
-    never un-settled from here — only offline methods can be reversed.
+    Removing the last part-payment drops the invoice back to 'partial' if money
+    remains, or 'unpaid' if that was the only one. An online SumUp payment
+    reflects money SumUp has actually taken, so it is never un-settled here.
     """
+    conn = _payments_conn()
     row = _one(_INVOICE_SELECT + " WHERE i.id = ? AND i.tenant_id = ?",
                (invoice_id, tenant_id))
     if not row:
         return 404, {"error": "invoice not found"}
     if company_id is not None and row.get("partner_company_id") != company_id:
         return 404, {"error": "invoice not found"}
-    if row["status"] != "paid":
-        return 409, {"error": "this invoice is not marked paid"}
     if row["method"] == "sumup_online":
         return 409, {"error": "an online card payment can't be reversed here"}
 
-    conn = _conn()
-    conn.execute("UPDATE invoices SET status = 'unpaid', method = NULL, paid_at = NULL "
-                 "WHERE id = ?", (invoice_id,))
-    conn.commit()
-    log.info("maxgleam: invoice %s payment reverted to unpaid", row["number"])
+    last = _one("SELECT id FROM invoice_payments WHERE invoice_id = ? "
+                "ORDER BY paid_at DESC, id DESC LIMIT 1", (invoice_id,))
+    if not last:
+        # A legacy full mark (status 'paid', no ledger rows) reverts wholesale.
+        if row["status"] != "paid":
+            return 409, {"error": "there's no recorded payment to reverse"}
+        conn.execute("UPDATE invoices SET status = 'unpaid', method = NULL, paid_at = NULL "
+                     "WHERE id = ?", (invoice_id,))
+        conn.commit()
+    else:
+        conn.execute("DELETE FROM invoice_payments WHERE id = ?", (last["id"],))
+        received = _ledger_total(invoice_id)
+        if received <= 0:
+            conn.execute("UPDATE invoices SET status = 'unpaid', method = NULL, paid_at = NULL "
+                         "WHERE id = ?", (invoice_id,))
+        else:
+            recent = _one("SELECT method FROM invoice_payments WHERE invoice_id = ? "
+                          "ORDER BY paid_at DESC, id DESC LIMIT 1", (invoice_id,))
+            conn.execute("UPDATE invoices SET status = 'partial', method = ?, paid_at = NULL "
+                         "WHERE id = ?", ((recent or {}).get("method"), invoice_id))
+        conn.commit()
+    log.info("maxgleam: invoice %s — last payment reversed", row["number"])
 
     fresh = _one(_INVOICE_SELECT + " WHERE i.id = ?", (invoice_id,))
     return 200, {"ok": True, "invoice": _invoice_dto(fresh, int(time.time()))}
+
+
+def payment_history(invoice_id: int, tenant_id: int = DEFAULT_TENANT_ID,
+                    company_id: int | None = None) -> tuple[int, dict]:
+    """The ledger of payments recorded against one invoice, newest first."""
+    _payments_conn()
+    row = _one(_INVOICE_SELECT + " WHERE i.id = ? AND i.tenant_id = ?",
+               (invoice_id, tenant_id))
+    if not row:
+        return 404, {"error": "invoice not found"}
+    if company_id is not None and row.get("partner_company_id") != company_id:
+        return 404, {"error": "invoice not found"}
+    payments = [dict(r) for r in _conn().execute(
+        "SELECT id, amount_pence, method, note, paid_at FROM invoice_payments "
+        "WHERE invoice_id = ? ORDER BY paid_at DESC, id DESC", (invoice_id,)).fetchall()]
+    dto = _invoice_dto(row, int(time.time()))
+    return 200, {
+        "invoice": dto,
+        "payments": payments,
+        "paid_pence": dto["paid_pence"],
+        "outstanding_pence": dto["outstanding_pence"],
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -1052,11 +1194,14 @@ _PDF_SELECT = """
   SELECT i.id, i.number, i.amount_pence, i.vat_pence, i.status, i.method,
          i.issued_at, i.paid_at, i.items_json, i.sumup_checkout_url,
          c.name AS customer_name, c.email AS customer_email,
-         p.address, p.postcode, p.partner_company_id
+         p.address, p.postcode, p.partner_company_id,
+         COALESCE(pay.paid, 0) AS ledger_paid
     FROM invoices i
     LEFT JOIN customers c ON c.id = i.customer_id
     LEFT JOIN jobs j ON j.id = i.job_id
     LEFT JOIN properties p ON p.id = j.property_id
+    LEFT JOIN (SELECT invoice_id, SUM(amount_pence) AS paid
+                 FROM invoice_payments GROUP BY invoice_id) pay ON pay.invoice_id = i.id
    WHERE i.id = ? AND i.tenant_id = ?
 """
 
@@ -1080,10 +1225,16 @@ def _render_invoice_pdf(row: dict, tenant: dict) -> bytes:
 
     now = int(time.time())
     issued = row.get("issued_at") or now
-    overdue = (row["status"] == "unpaid" and row.get("issued_at")
+    gross = row["amount_pence"] or 0
+    paid_pence = gross if row["status"] == "paid" else (
+        0 if row["status"] == "void" else min(gross, row.get("ledger_paid") or 0))
+    outstanding = 0 if row["status"] in ("paid", "void") else max(0, gross - paid_pence)
+    part_paid = outstanding > 0 and paid_pence > 0
+    overdue = (outstanding > 0 and row.get("issued_at")
                and now - row["issued_at"] > OVERDUE_DAYS * 86400)
     status_label = ("Paid" if row["status"] == "paid"
                     else "Void" if row["status"] == "void"
+                    else "Part-paid" if part_paid
                     else "Overdue" if overdue else "Unpaid")
 
     # Header — company left, INVOICE + meta right.
@@ -1138,7 +1289,6 @@ def _render_invoice_pdf(row: dict, tenant: dict) -> bytes:
     doc.line(L, y, R, y, width=0.6, gray=HAIR)
     y += 20
 
-    gross = row["amount_pence"] or 0
     vat = row["vat_pence"] or 0
     if vat:
         doc.text_right(R - 96, y, "Subtotal", size=10, gray=MUTE)
@@ -1149,6 +1299,13 @@ def _render_invoice_pdf(row: dict, tenant: dict) -> bytes:
         y += 17
     doc.text_right(R - 96, y, "Total", size=11, bold=True, gray=INK)
     doc.text_right(R, y, _money(gross), size=11, bold=True, gray=INK)
+    if part_paid:
+        y += 17
+        doc.text_right(R - 96, y, "Paid", size=10, gray=MUTE)
+        doc.text_right(R, y, "-" + _money(paid_pence), size=10, rgb=PAID_GREEN)
+        y += 17
+        doc.text_right(R - 96, y, "Balance due", size=11, bold=True, gray=INK)
+        doc.text_right(R, y, _money(outstanding), size=11, bold=True, gray=INK)
 
     # Payment status / call to action.
     y += 40
@@ -1160,7 +1317,8 @@ def _render_invoice_pdf(row: dict, tenant: dict) -> bytes:
     elif row["status"] == "void":
         doc.text(L, y, "This invoice has been cancelled.", size=10, gray=MUTE)
     else:
-        doc.text(L, y, f"Amount due: {_money(gross)}", size=11, bold=True, gray=INK)
+        due = outstanding if part_paid else gross
+        doc.text(L, y, f"Amount due: {_money(due)}", size=11, bold=True, gray=INK)
         if row.get("sumup_checkout_url"):
             y += 16
             doc.text(L, y, "Pay online:", size=9.5, gray=MUTE)
@@ -1181,6 +1339,7 @@ def invoice_pdf(invoice_id: int, tenant_id: int = DEFAULT_TENANT_ID,
     company_id scopes a partner to their own company's invoices: a partner
     token can never pull a PDF for a job that isn't theirs.
     """
+    _payments_conn()          # the ledger JOIN in _PDF_SELECT needs the table
     row = _one(_PDF_SELECT, (invoice_id, tenant_id))
     if not row:
         return 404, {"error": "invoice not found"}
