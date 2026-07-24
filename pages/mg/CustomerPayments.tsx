@@ -285,7 +285,7 @@ function InvoiceCard({ invoice, children }:
       </div>
       {partPaid && (
         <p className="mt-1 text-xs text-slate-400">
-          {gbp(invoice.paid_pence)} of {gbp(invoice.amount_pence)} already paid
+          {gbp(invoice.paid_pence ?? 0)} of {gbp(invoice.amount_pence)} already paid
         </p>
       )}
       {invoice.vat_pence > 0 && (
@@ -294,7 +294,42 @@ function InvoiceCard({ invoice, children }:
         </p>
       )}
       {children}
+      <InvoicePdfLink invoice={invoice} paid={paid} />
     </MGCard>
+  );
+}
+
+/** Downloads the invoice PDF (a receipt once paid) via an authenticated blob
+ *  fetch, then hands it to the browser as a file — no token ever hits the URL. */
+function InvoicePdfLink({ invoice, paid }: { invoice: MgInvoice; paid: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function download() {
+    setBusy(true); setError(null);
+    try {
+      const blob = await mgApi.invoicePdf(invoice.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${invoice.number}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not open the PDF');
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="mt-3">
+      <button onClick={download} disabled={busy}
+        className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-60">
+        {busy ? 'Preparing…' : paid ? 'Download receipt (PDF)' : 'Download invoice (PDF)'}
+      </button>
+      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+    </div>
   );
 }
 
