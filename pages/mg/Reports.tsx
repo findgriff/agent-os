@@ -70,8 +70,12 @@ function StatTile({ label, value, sub, trend, icon, accent = ACCENT, delay = 0 }
         <div className="min-w-0">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-muted">{label}</div>
           <div className="mt-1 truncate text-xl font-bold tabular-nums text-ink sm:text-2xl">{value}</div>
-          {trend ? <div className="mt-1">{trend}</div>
-            : sub ? <div className="mt-0.5 truncate text-[11px] text-muted/70">{sub}</div> : null}
+          {trend ? (
+            <div className="mt-1">
+              {trend}
+              {sub && <div className="mt-0.5 truncate text-[11px] text-muted/70">{sub}</div>}
+            </div>
+          ) : sub ? <div className="mt-0.5 truncate text-[11px] text-muted/70">{sub}</div> : null}
         </div>
         <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl transition-transform duration-200 group-hover:scale-110 group-hover:-rotate-6"
           style={{ background: `${accent}1a`, color: accent, boxShadow: `0 0 20px -10px ${accent}66` }}>
@@ -123,17 +127,25 @@ function ExportButton({ report, label = 'CSV', range }:
 
 // ── Period-over-period delta ────────────────────────────────────────────
 // A coloured ▲/▼ against the equal-length window before this one. `pct` for
-// percentage metrics, `points` for the rating (a raw point move). Higher is
-// better for every figure we show one against, so up is always green.
-function DeltaBadge({ pct, points }: { pct?: number | null; points?: number | null }) {
-  const v = pct ?? points ?? null;
+// percentage metrics, `points` for a raw point move (rating, margin), `pence`
+// for an absolute money move (net profit, where a percentage off a figure that
+// can cross zero misleads). Up is the win for most figures, so up is green;
+// `invert` flips that for a cost, where a fall is the win — the arrow still
+// points the way the number actually moved.
+function DeltaBadge({ pct, points, pence, invert = false }:
+  { pct?: number | null; points?: number | null; pence?: number | null; invert?: boolean }) {
+  const v = pct ?? points ?? pence ?? null;
   if (v === null || v === undefined) {
     return <span className="text-[11px] text-muted/50">no prior period</span>;
   }
   const flat = v === 0;
-  const colour = flat ? '#8B96A8' : v > 0 ? '#22C55E' : '#F43F5E';
+  const good = invert ? v < 0 : v > 0;
+  const colour = flat ? '#8B96A8' : good ? '#22C55E' : '#F43F5E';
   const icon = flat ? 'remove' : v > 0 ? 'arrow_upward' : 'arrow_downward';
-  const num = pct != null ? `${v > 0 ? '+' : ''}${v}%` : `${v > 0 ? '+' : ''}${v}`;
+  const sign = v > 0 ? '+' : v < 0 ? '-' : '';
+  const num = pct != null ? `${sign}${Math.abs(v)}%`
+    : pence != null ? `${sign}${gbp(Math.abs(v))}`
+    : `${sign}${Math.abs(v)}`;
   return (
     <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold tabular-nums"
       style={{ color: colour }}>
@@ -450,13 +462,17 @@ function ProfitTab({ range }: { range: DateRange | null }) {
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile label="Revenue" value={gbp(data.revenue_pence)}
+          trend={<DeltaBadge pct={data.deltas.revenue_pct} />}
           sub={`${data.jobs} completed job${data.jobs === 1 ? '' : 's'}`}
           icon="payments" accent="#22C55E" delay={0} />
         <StatTile label="Crew pay" value={gbp(data.cost_pence)}
+          trend={<DeltaBadge pct={data.deltas.cost_pct} invert />}
           sub="commission on those jobs" icon="engineering" accent="#F59E0B" delay={60} />
         <StatTile label="Net profit" value={gbp(net)}
+          trend={<DeltaBadge pence={data.deltas.net_delta_pence} />}
           sub={`${data.margin_pct}% margin`} icon="savings" accent={netColour} delay={120} />
         <StatTile label="Margin" value={`${data.margin_pct}%`}
+          trend={<DeltaBadge points={data.deltas.margin_delta} />}
           sub={net >= 0 ? 'after crew pay' : 'crew pay exceeds turnover'}
           icon="percent" accent={netColour} delay={180} />
       </div>
