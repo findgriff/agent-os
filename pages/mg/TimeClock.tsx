@@ -5,7 +5,7 @@
 // No AGENT OS chrome and no HQ login — crews authenticate with the shared crew
 // code (see MAXGLEAM_CREW_CODE), or an office user's existing HQ token.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Badge, Button, Card, EmptyState, Icon, Input, useToast } from '../../components/ui';
+import { Badge, Button, Card, EmptyState, Field, Icon, Input, useToast } from '../../components/ui';
 import {
   reportsApi, getCrewCode, setCrewCode, clearCrewCode, ReportsApiError,
   gbp, hoursMins, clockTime, dayLabel,
@@ -49,11 +49,10 @@ function CodeGate({ onDone }: { onDone: () => void }) {
           </div>
         </div>
         <form onSubmit={e => { e.preventDefault(); if (code.trim()) { setCrewCode(code.trim()); onDone(); } }}>
-          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted">
-            Crew code
-          </label>
-          <Input value={code} onChange={e => setCode(e.target.value)} autoFocus
-            placeholder="Enter your crew code" type="password" />
+          <Field label="Crew code">
+            <Input value={code} onChange={e => setCode(e.target.value)} autoFocus
+              placeholder="Enter your crew code" type="password" />
+          </Field>
           <Button variant="primary" className="mt-4 w-full min-h-[44px]" type="submit" disabled={!code.trim()}>
             Continue
           </Button>

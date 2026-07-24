@@ -5,7 +5,7 @@
 // confirm: this mails real customers, and an undo does not exist.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Badge, Button, Card, EmptyState, Icon, Input, Select, SkeletonList, Textarea, useToast,
+  Badge, Button, Card, EmptyState, Field, Icon, Input, Select, SkeletonList, Textarea, useToast,
 } from '../../components/ui';
 import {
   marketingApi, recurringApi, gbp, timeAgo, clockTime,
@@ -139,27 +139,18 @@ function Compose({ meta, onCreated }: { meta: CampaignList | null; onCreated: ()
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
       <Card className="space-y-4 p-4 sm:p-5">
-        <div>
-          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted">
-            Campaign name <span className="text-muted/50">(internal)</span>
-          </label>
+        <Field label={<>Campaign name <span className="text-muted/50">(internal)</span></>}>
           <Input value={name} onChange={e => setName(e.target.value)}
             placeholder="Spring win-back" />
-        </div>
-        <div>
-          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted">
-            Subject line
-          </label>
+        </Field>
+        <Field label="Subject line">
           <Input value={subject} onChange={e => setSubject(e.target.value)}
             placeholder="{first_name}, ready for your next clean?" />
-        </div>
-        <div>
-          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted">
-            Body <span className="text-muted/50">(plain text)</span>
-          </label>
+        </Field>
+        <Field label={<>Body <span className="text-muted/50">(plain text)</span></>}>
           <Textarea value={body} onChange={e => setBody(e.target.value)} rows={12}
             placeholder={'Hi {first_name},\n\nYour last clean was {last_clean}…'} />
-        </div>
+        </Field>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="primary" icon="save" loading={busy}
             disabled={!name.trim() || !subject.trim() || !body.trim()}
@@ -179,10 +170,9 @@ function Compose({ meta, onCreated }: { meta: CampaignList | null; onCreated: ()
             ))}
           </Select>
           {needsDate && (
-            <div>
-              <label className="mb-1 block text-[11px] text-muted">Date</label>
+            <Field label="Date" labelClassName="mb-1 block text-[11px] text-muted">
               <Input type="date" value={since} onChange={e => setSince(e.target.value)} />
-            </div>
+            </Field>
           )}
           <AudienceMeter summary={summary} />
         </Card>
@@ -374,12 +364,9 @@ function Newsletter({ onChanged }: { onChanged: () => void }) {
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">
-              Month <span className="text-muted/50">(blank = last month)</span>
-            </label>
+          <Field label={<>Month <span className="text-muted/50">(blank = last month)</span></>}>
             <Input type="month" value={month} onChange={e => setMonth(e.target.value)} />
-          </div>
+          </Field>
           <Button variant="secondary" icon="drafts" loading={busy === 'draft'}
             onClick={() => run(false)}>Create draft</Button>
           <Button variant="secondary" icon="science" loading={busy === 'dry'}

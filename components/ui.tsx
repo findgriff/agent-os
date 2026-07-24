@@ -1,5 +1,5 @@
 // AGENT OS design system — glassy dark UI primitives.
-import React, { createContext, useContext, useCallback, useState } from 'react';
+import React, { cloneElement, createContext, useContext, useCallback, useId, useState } from 'react';
 
 // ── Icon (Material Symbols Rounded) ─────────────────────────────────────
 export function Icon({ name, className = '', size = 20, fill = false, style }:
@@ -113,6 +113,25 @@ export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return <select {...props}
     className={`rounded-xl bg-black/30 border border-white/10 px-2.5 py-1.5 text-base text-ink
       focus:outline-none focus:border-accent/50 ${props.className || ''}`} />;
+}
+
+// ── Field (label ↔ control association) ─────────────────────────────────
+// Generates a stable id and wires it to both the label and the control, so
+// clicking the label focuses the field and screen readers announce it. The
+// single child must forward an `id` prop (Input / Select / Textarea / raw
+// <input> all do). `label` is a ReactNode so it can carry inline hint spans.
+const FIELD_LABEL = 'mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted';
+export function Field({ label, htmlFor, className = '', labelClassName, children }:
+  { label: React.ReactNode; htmlFor?: string; className?: string;
+    labelClassName?: string; children: React.ReactElement }) {
+  const auto = useId();
+  const id = htmlFor ?? auto;
+  return (
+    <div className={className}>
+      <label htmlFor={id} className={labelClassName ?? FIELD_LABEL}>{label}</label>
+      {cloneElement(children, { id })}
+    </div>
+  );
 }
 
 // ── Modal ───────────────────────────────────────────────────────────────
