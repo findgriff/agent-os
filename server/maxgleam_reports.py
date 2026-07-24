@@ -633,10 +633,16 @@ def export_csv(report: str, tenant_id: int = DEFAULT_TENANT_ID,
 def _profit(tenant_id: int, start: str | None, end: str | None) -> dict:
     from server import maxgleam_commissions as commissions
     rng = _parse_range(start, end)
-    jobs = [j for j in _done_jobs(tenant_id, None, _midnight(rng["start"]))
-            if rng["start"] <= _revenue_day(j) <= rng["end"]]
+    # Pull from the prior window's start so both windows come out of one fetch,
+    # then split in Python on the effective revenue day — the same shape
+    # reports() uses to compute its period-over-period figures.
+    all_jobs = _done_jobs(tenant_id, None, _midnight(rng["prev_start"]))
+    jobs = [j for j in all_jobs if rng["start"] <= _revenue_day(j) <= rng["end"]]
+    prev_jobs = [j for j in all_jobs
+                 if rng["prev_start"] <= _revenue_day(j) <= rng["prev_end"]]
 
-    ids = [j["id"] for j in jobs]
+    # Commission rows and crew rates cover both windows in one lookup each.
+    ids = [j["id"] for j in jobs] + [j["id"] for j in prev_jobs]
     comm: dict[int, dict] = {}
     if ids:
         qs = ",".join("?" * len(ids))
@@ -650,59 +656,106 @@ def _profit(tenant_id: int, start: str | None, end: str | None) -> dict:
         "SELECT id, name, rate_per_clean FROM subcontractors WHERE tenant_id = ?",
         (tenant_id,))}
 
-    total_rev = total_cost = paid = pending = estimated = 0
-    unassigned_jobs = unassigned_rev = 0
-    by_crew: dict[int, dict] = {}
-    for j in jobs:
-        price = j["price_pence"] or 0
-        total_rev += price
-        cid = j["subcontractor_id"]
-        if not cid:                         # office/owner did it — no crew cost
-            unassigned_jobs += 1
-            unassigned_rev += price
-            continue
-        row = comm.get(j["id"])
+    def _job_cost(job: dict) -> tuple[int, str]:
+        """(crew_pay_pence, bucket) for one job. bucket is paid/pending when a
+        commission has accrued, else estimated from the crew's current rate via
+        the same calculate() the accrual uses."""
+        row = comm.get(job["id"])
         if row:
             cost = row["amount_pence"] or 0
-            if row["status"] == "paid":
-                paid += cost
+            return cost, ("paid" if row["status"] == "paid" else "pending")
+        rate = (rates.get(job["subcontractor_id"]) or {}).get("rate_per_clean") or 0
+        cost, _basis = commissions.calculate(job["price_pence"] or 0, rate)
+        return cost, "estimated"
+
+    def _totals(jobset: list[dict]) -> dict:
+        """Headline profit figures for a set of jobs, plus per-crew rollup.
+        Run over both windows so the two can never be measured differently."""
+        rev = cost = paid = pending = estimated = 0
+        un_jobs = un_rev = 0
+        by_crew: dict[int, dict] = {}
+        for j in jobset:
+            price = j["price_pence"] or 0
+            rev += price
+            cid = j["subcontractor_id"]
+            if not cid:                     # office/owner did it — no crew cost
+                un_jobs += 1
+                un_rev += price
+                continue
+            c, bucket = _job_cost(j)
+            if bucket == "paid":
+                paid += c
+            elif bucket == "pending":
+                pending += c
             else:
-                pending += cost
-        else:
-            rate = (rates.get(cid) or {}).get("rate_per_clean") or 0
-            cost, _basis = commissions.calculate(price, rate)
-            estimated += cost
-        total_cost += cost
-        cr = by_crew.setdefault(cid, {
-            "crew_id": cid,
-            "name": j.get("crew_name") or (rates.get(cid) or {}).get("name") or f"Crew #{cid}",
-            "jobs": 0, "revenue_pence": 0, "cost_pence": 0,
-        })
-        cr["jobs"] += 1
-        cr["revenue_pence"] += price
-        cr["cost_pence"] += cost
+                estimated += c
+            cost += c
+            cr = by_crew.setdefault(cid, {
+                "crew_id": cid,
+                "name": j.get("crew_name") or (rates.get(cid) or {}).get("name") or f"Crew #{cid}",
+                "jobs": 0, "revenue_pence": 0, "cost_pence": 0,
+            })
+            cr["jobs"] += 1
+            cr["revenue_pence"] += price
+            cr["cost_pence"] += c
+        net = rev - cost
+        return {
+            "jobs": len(jobset), "revenue": rev, "cost": cost, "net": net,
+            "margin": round(100.0 * net / rev, 1) if rev else 0.0,
+            "paid": paid, "pending": pending, "estimated": estimated,
+            "unassigned_jobs": un_jobs, "unassigned_rev": un_rev,
+            "by_crew": by_crew,
+        }
+
+    cur = _totals(jobs)
+    prev = _totals(prev_jobs)
 
     crew = []
-    for c in by_crew.values():
+    for c in cur["by_crew"].values():
         c["net_pence"] = c["revenue_pence"] - c["cost_pence"]
         c["margin_pct"] = (round(100.0 * c["net_pence"] / c["revenue_pence"], 1)
                            if c["revenue_pence"] else 0.0)
         crew.append(c)
     crew.sort(key=lambda c: c["net_pence"], reverse=True)
 
-    net = total_rev - total_cost
+    # A prior window with no completed jobs is "no prior period" — every delta
+    # stays null so the UI says so uniformly. Without this guard net/margin
+    # would report a move against an empty baseline while revenue/cost (via
+    # _pct_change) correctly showed nothing to compare against.
+    has_prev = prev["jobs"] > 0
+    deltas = {
+        "revenue_pct": _pct_change(cur["revenue"], prev["revenue"]),
+        # Crew pay is a cost, so the UI reads a fall as the win — but the raw
+        # percentage is reported the same way; the sign is interpreted there.
+        "cost_pct": _pct_change(cur["cost"], prev["cost"]),
+        # Net can be negative or straddle zero, where a percentage misleads —
+        # report the absolute pound move and let the UI format it.
+        "net_delta_pence": (cur["net"] - prev["net"]) if has_prev else None,
+        # Margin is already a percentage; its change is a point move.
+        "margin_delta": round(cur["margin"] - prev["margin"], 1) if has_prev else None,
+    }
+
     return {
         "generated_at": int(time.time()),
         "tenant_id": tenant_id,
         "range": {"start": rng["start"], "end": rng["end"],
                   "days": rng["days"], "is_default": rng["is_default"]},
-        "jobs": len(jobs),
-        "revenue_pence": total_rev,
-        "cost_pence": total_cost,
-        "net_pence": net,
-        "margin_pct": round(100.0 * net / total_rev, 1) if total_rev else 0.0,
-        "cost_breakdown": {"paid": paid, "pending": pending, "estimated": estimated},
-        "unassigned": {"jobs": unassigned_jobs, "revenue_pence": unassigned_rev},
+        "jobs": cur["jobs"],
+        "revenue_pence": cur["revenue"],
+        "cost_pence": cur["cost"],
+        "net_pence": cur["net"],
+        "margin_pct": cur["margin"],
+        "cost_breakdown": {"paid": cur["paid"], "pending": cur["pending"],
+                           "estimated": cur["estimated"]},
+        "unassigned": {"jobs": cur["unassigned_jobs"],
+                       "revenue_pence": cur["unassigned_rev"]},
+        "previous": {
+            "start": rng["prev_start"], "end": rng["prev_end"],
+            "jobs": prev["jobs"], "revenue_pence": prev["revenue"],
+            "cost_pence": prev["cost"], "net_pence": prev["net"],
+            "margin_pct": prev["margin"],
+        },
+        "deltas": deltas,
         "crew": crew,
     }
 

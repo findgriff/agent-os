@@ -431,6 +431,26 @@ export interface ProfitData {
   margin_pct: number;
   cost_breakdown: { paid: number; pending: number; estimated: number };
   unassigned: { jobs: number; revenue_pence: number };
+  // The equal-length window immediately before this one, for period-over-period.
+  previous: {
+    start: string;
+    end: string;
+    jobs: number;
+    revenue_pence: number;
+    cost_pence: number;
+    net_pence: number;
+    margin_pct: number;
+  };
+  // Change vs that prior window. revenue_pct/cost_pct are percentage changes;
+  // net is the absolute pound move (net can be negative, where a percentage
+  // misleads); margin_delta is a percentage-point move. All are null when the
+  // prior window had no completed jobs — nothing to compare against.
+  deltas: {
+    revenue_pct: number | null;
+    cost_pct: number | null;
+    net_delta_pence: number | null;
+    margin_delta: number | null;
+  };
   crew: CrewMargin[];
 }
 
