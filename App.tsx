@@ -49,7 +49,6 @@ import Customers from './pages/mg/Customers';
 import CrewManage from './pages/mg/CrewManage';
 import TimeClock from './pages/mg/TimeClock';
 import BookOnline from './pages/mg/BookOnline';
-import CrewTracking from './pages/mg/CrewTracking';
 import HermesChat from './pages/HermesChat';
 
 // Redirect to the static ops board page (not a React component)
@@ -118,7 +117,6 @@ function Shell() {
         <Route path="/maxgleam/quotes" element={<Quotes />} />
         <Route path="/maxgleam/customers" element={<Customers />} />
         <Route path="/maxgleam/crew" element={<CrewManage />} />
-        <Route path="/tracking" element={<CrewTracking />} />
         <Route path="/inventory" element={<Inventory />} />
         <Route path="/comms" element={<Comms />} />
         <Route path="/integrations" element={<Integrations />} />
