@@ -1,7 +1,7 @@
 // Leads — a sales cockpit. Generate + enrich prospects, work them through a
 // coloured status pipeline in a data table, and track outreach campaigns with
 // funnel charts + an email preview. Talks to /api/leads + /api/campaigns.
-import { useState, useEffect, useMemo, type ReactNode } from 'react';
+import { useState, useEffect, useMemo, useId, cloneElement, isValidElement, type ReactNode } from 'react';
 import {
   Icon, Button, Card, Badge, Textarea, Input, Select,
   Modal, Drawer, EmptyState, SkeletonList, useToast, Stat, useCountUp,
@@ -51,10 +51,11 @@ function CountStat({ label, value, icon, accent, delay, suffix }:
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
+  const id = useId();
   return (
     <div>
-      <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">{label}</label>
-      {children}
+      <label htmlFor={id} className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">{label}</label>
+      {isValidElement(children) ? cloneElement(children, { id } as { id: string }) : children}
     </div>
   );
 }

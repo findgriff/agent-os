@@ -2,7 +2,7 @@
 // saved pipelines; the main stage is a connected-step flow you can run on demand;
 // the bottom holds a run-history table with per-step drill-down. Talks to
 // /api/pipelines (+ /run, /runs) and /api/agents for the agent-step picker.
-import { useState, useEffect, useMemo, useCallback, Fragment } from 'react';
+import { useState, useEffect, useMemo, useCallback, useId, cloneElement, isValidElement, Fragment } from 'react';
 import type { ReactNode } from 'react';
 import {
   Icon, Button, Card, Badge, Toggle, Textarea, Input, Select,
@@ -787,10 +787,11 @@ function StepEditor({ mode, initial, agents, onSave, onClose }: {
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
+  const id = useId();
   return (
     <div>
-      <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">{label}</label>
-      {children}
+      <label htmlFor={id} className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">{label}</label>
+      {isValidElement(children) ? cloneElement(children, { id } as { id: string }) : children}
     </div>
   );
 }

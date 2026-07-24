@@ -453,10 +453,11 @@ function BoardSkeleton() {
 
 // ── Reusable labelled field ─────────────────────────────────────────────────
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  const id = React.useId();
   return (
     <div>
-      <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">{label}</label>
-      {children}
+      <label htmlFor={id} className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">{label}</label>
+      {React.isValidElement(children) ? React.cloneElement(children, { id } as { id: string }) : children}
     </div>
   );
 }
