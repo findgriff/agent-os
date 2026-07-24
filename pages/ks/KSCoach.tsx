@@ -1831,6 +1831,18 @@ function RouteTab() {
       : { stops: routeForDate(dateISO), unmapped: [] as KsRouteStop[] }),
     [real, route, dateISO]);
 
+  // Where the day starts and ends. Real routes carry the backend's home base
+  // (it becomes a coach setting later); the seeded sample uses the local
+  // constant. Using this everywhere keeps the map marker, the polyline and the
+  // drive-leg maths on one source of truth — realToStops already measures the
+  // first leg from route.home, so the map must draw from the same point.
+  const homeBase = useMemo<RouteVenue>(
+    () => (real && route
+      ? { venue: route.home.venue, postcode: route.home.postcode,
+          coords: [route.home.lat, route.home.lng] }
+      : ROUTE_HOME),
+    [real, route]);
+
   const isToday = dateISO === isoDate(0);
   const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
   const nextStop = isToday ? stops.find(s => toMins(s.end) > nowMins) : stops[0];
@@ -1888,8 +1900,8 @@ function RouteTab() {
       iconSize: [size, size], iconAnchor: [size / 2, size / 2], popupAnchor: [0, -size / 2 - 2],
     });
 
-    L.marker(ROUTE_HOME.coords, { icon: pin('⌂', '#16A34A', 32) })
-      .bindPopup(`<b>Start / finish</b><br>${ROUTE_HOME.venue} · ${ROUTE_HOME.postcode}`)
+    L.marker(homeBase.coords, { icon: pin('⌂', '#16A34A', 32) })
+      .bindPopup(`<b>Start / finish</b><br>${homeBase.venue} · ${homeBase.postcode}`)
       .addTo(lg);
 
     stops.forEach(s => {
@@ -1901,14 +1913,14 @@ function RouteTab() {
         .addTo(lg);
     });
 
-    const pts = [ROUTE_HOME.coords, ...stops.map(s => s.coords)];
+    const pts = [homeBase.coords, ...stops.map(s => s.coords)];
     if (pts.length > 1) {
       L.polyline(pts, { color: ORANGE, weight: 3, opacity: 0.75, dashArray: '7 9' }).addTo(lg);
     }
     mapRef.current.fitBounds(L.latLngBounds(pts).pad(0.25));
     // The container can settle a frame after the tab animates in.
     setTimeout(() => mapRef.current?.invalidateSize(), 150);
-  }, [lib, stops]);
+  }, [lib, stops, homeBase]);
 
   const dayLabel = (iso: string, i: number) => {
     if (i === 0) return 'Today';
@@ -2005,7 +2017,7 @@ function RouteTab() {
                 </span>
                 <div>
                   <div className="text-sm font-extrabold text-slate-900">Start from home</div>
-                  <div className="text-xs text-slate-500">{ROUTE_HOME.postcode}</div>
+                  <div className="text-xs text-slate-500">{homeBase.postcode}</div>
                 </div>
               </div>
 
@@ -2041,7 +2053,7 @@ function RouteTab() {
                     {i === stops.length - 1 && (
                       <div className="ml-4 flex items-center gap-2 border-l-2 border-dashed border-slate-200 py-1.5 pl-4 text-[11px] font-semibold text-slate-400">
                         <Icon name="home" size={13} />
-                        head home · {driveMins(kmBetween(s.coords, ROUTE_HOME.coords))} min
+                        head home · {driveMins(kmBetween(s.coords, homeBase.coords))} min
                       </div>
                     )}
                   </div>
