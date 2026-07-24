@@ -240,7 +240,7 @@ export default function SignOff() {
                   className="h-16 w-16 shrink-0 rounded-lg object-cover" />
                 <span className="min-w-0 flex-1 truncate text-sm text-slate-600">{photoName}</span>
                 <button onClick={() => { setPhoto(null); setPhotoName(''); if (fileRef.current) fileRef.current.value = ''; }}
-                  className="shrink-0 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-400 hover:bg-red-50 hover:text-red-600">
+                  className="shrink-0 rounded-lg px-2.5 py-2 text-xs font-bold text-slate-400 hover:bg-red-50 hover:text-red-600">
                   Remove
                 </button>
               </div>

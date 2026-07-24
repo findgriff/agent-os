@@ -246,7 +246,7 @@ export default function TimeClock() {
 
   return (
     <div className="min-h-screen bg-bg pb-10">
-      <header className="sticky top-0 z-10 border-b border-white/6 bg-bg/85 px-4 py-3 backdrop-blur-xl">
+      <header className="sticky top-0 z-10 border-b border-white/6 bg-bg/85 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur-xl">
         <div className="mx-auto flex max-w-md items-center gap-3">
           <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent/10 text-accent">
             <Icon name="schedule" size={21} />
@@ -255,7 +255,7 @@ export default function TimeClock() {
             <div className="truncate font-display text-base font-bold text-ink">{crew.name}</div>
             <div className="text-[11px] text-muted">{board ? dayLabel(board.day) : ''}</div>
           </div>
-          <Button variant="ghost" icon="swap_horiz" className="!px-2.5 !py-1.5 !text-[12px]"
+          <Button variant="ghost" icon="swap_horiz" className="!px-2.5 !py-1.5 !text-[12px] min-h-[40px]"
             onClick={() => { localStorage.removeItem(CREW_ID_KEY); setCrewId(null); }}>
             Not you?
           </Button>
@@ -299,7 +299,7 @@ export default function TimeClock() {
           <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] tabular-nums text-muted">
             {jobs.length}
           </span>
-          <Button variant="ghost" icon="refresh" className="ml-auto !px-2 !py-1 !text-[12px]"
+          <Button variant="ghost" icon="refresh" className="ml-auto !px-2 !py-1 !text-[12px] min-h-[40px]"
             onClick={load}>Refresh</Button>
         </div>
 

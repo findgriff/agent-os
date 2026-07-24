@@ -275,7 +275,7 @@ function CampaignCard({ campaign, onChanged }: { campaign: Campaign; onChanged: 
         )}
         <Badge tone={sent ? 'ok' : 'neutral'}>{campaign.status}</Badge>
         <Button variant="ghost" icon="visibility" loading={busy === 'preview'}
-          className="!px-2.5 !py-1.5 !text-[12px]" onClick={loadPreview}>Preview</Button>
+          className="!px-2.5 !py-1.5 !text-[12px] min-h-[38px]" onClick={loadPreview}>Preview</Button>
       </div>
 
       {open && preview && (
@@ -300,7 +300,7 @@ function CampaignCard({ campaign, onChanged }: { campaign: Campaign; onChanged: 
                 To {s.name} &lt;{s.email || 'no email'}&gt;
               </div>
               <div className="mt-1 text-sm font-semibold text-ink">{s.subject}</div>
-              <pre className="mt-2 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted">
+              <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted">
 {s.body}
               </pre>
             </div>

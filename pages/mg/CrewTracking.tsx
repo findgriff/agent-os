@@ -281,14 +281,14 @@ export default function CrewTracking() {
         {/* Map */}
         <Card className="overflow-hidden p-0">
           {!leafletReady ? (
-            <div className="grid h-[540px] place-items-center text-sm text-muted">
+            <div className="grid h-[60vh] min-h-[360px] place-items-center text-sm text-muted lg:h-[540px]">
               <div className="text-center">
                 <Icon name="map" size={30} className="mb-2 animate-pulse text-accent" />
                 <p>Loading map…</p>
               </div>
             </div>
           ) : (
-            <div ref={mapEl} className="h-[540px] w-full" />
+            <div ref={mapEl} className="h-[60vh] min-h-[360px] w-full lg:h-[540px]" />
           )}
           <div className="flex flex-wrap items-center gap-4 border-t border-white/8 px-4 py-2.5 text-[11px] text-muted">
             <span className="flex items-center gap-1.5">

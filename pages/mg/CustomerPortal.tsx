@@ -240,15 +240,17 @@ export default function CustomerPortal() {
         {tab === 'payments' && (
           <div className="mt-6 space-y-5">
             <div className="grid grid-cols-2 gap-3">
-              <MGCard className="p-4">
+              <MGCard className="min-w-0 p-4">
                 <div className="text-xs font-bold uppercase tracking-wider text-slate-500">Paid</div>
-                <div className="mt-1 text-2xl font-extrabold text-green-600">
+                <div className="mt-1 truncate text-xl font-extrabold text-green-600 sm:text-2xl"
+                  title={gbp(paySummary?.paid_pence || 0)}>
                   {gbp(paySummary?.paid_pence || 0)}
                 </div>
               </MGCard>
-              <MGCard className="p-4">
+              <MGCard className="min-w-0 p-4">
                 <div className="text-xs font-bold uppercase tracking-wider text-slate-500">Outstanding</div>
-                <div className="mt-1 text-2xl font-extrabold text-amber-600">
+                <div className="mt-1 truncate text-xl font-extrabold text-amber-600 sm:text-2xl"
+                  title={gbp(paySummary?.unpaid_pence || 0)}>
                   {gbp(paySummary?.unpaid_pence || 0)}
                 </div>
               </MGCard>

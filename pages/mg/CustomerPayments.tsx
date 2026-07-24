@@ -64,7 +64,7 @@ export default function CustomerPayments() {
             </p>
           </div>
           <Link to="/customer/login"
-            className="rounded-lg px-2.5 py-1.5 text-sm font-semibold text-slate-500 hover:bg-slate-100">
+            className="rounded-lg px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100">
             Back to my account
           </Link>
         </header>
@@ -83,7 +83,7 @@ export default function CustomerPayments() {
               </MGAlert>
             )}
             <button onClick={() => { params.delete('paid'); setParams(params, { replace: true }); }}
-              className="mt-2 text-xs font-semibold text-slate-400 hover:text-slate-600">
+              className="-mx-2 mt-2 rounded px-2 py-1 text-xs font-semibold text-slate-400 hover:text-slate-600">
               Dismiss
             </button>
           </div>
@@ -230,11 +230,12 @@ function Total({ label, value, tone }:
   { label: string; value: string; tone: 'amber' | 'green' | 'slate' }) {
   const colour = { amber: 'text-amber-600', green: 'text-green-600', slate: 'text-slate-700' }[tone];
   return (
-    <MGCard className="p-3.5">
+    <MGCard className="min-w-0 p-3.5">
       <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
         {label}
       </div>
-      <div className={`mt-1 text-xl font-extrabold tabular-nums ${colour}`}>{value}</div>
+      <div className={`mt-1 truncate text-base font-extrabold tabular-nums sm:text-xl ${colour}`}
+        title={value}>{value}</div>
     </MGCard>
   );
 }

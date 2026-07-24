@@ -1530,7 +1530,7 @@ function CommissionsTab() {
                     ? <Badge tone="ok">paid</Badge>
                     : (
                       <Button variant="primary" icon="check" loading={paying === r.id}
-                        className="!px-2.5 !py-1.5 !text-[12px]"
+                        className="!px-2.5 !py-1.5 !text-[12px] min-h-[40px]"
                         onClick={() => pay(r)}>
                         Mark paid
                       </Button>
@@ -1691,7 +1691,7 @@ function ReviewsTab() {
         <SectionTitle count={list?.count}
           action={
             <Select value={minRating} onChange={e => setMinRating(e.target.value)}
-              className="!py-1 !text-[12px]">
+              className="!py-2 !text-[12px]">
               <option value="">All ratings</option>
               <option value="5">5 stars only</option>
               <option value="4">4 stars and up</option>
