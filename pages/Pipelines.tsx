@@ -627,6 +627,7 @@ function StepEditor({ mode, initial, agents, onSave, onClose }: {
   onSave: (s: PipelineStep) => void; onClose: () => void;
 }) {
   const toast = useToast();
+  const modelFieldId = useId();
   const initAgent = initial?.config?.agent_id;
   const [type, setType] = useState<string>(String(initial?.type ?? 'agent'));
   const [label, setLabel] = useState<string>(String(initial?.label ?? initial?.config?.label ?? ''));
@@ -667,7 +668,7 @@ function StepEditor({ mode, initial, agents, onSave, onClose }: {
       {/* Type picker */}
       <div>
         <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-muted">Step type</label>
-        <div className="grid grid-cols-3 gap-2">
+        <div role="group" aria-label="Step type" className="grid grid-cols-3 gap-2">
           {STEP_TYPES.map(t => {
             const active = type === t.type;
             return (
@@ -722,10 +723,11 @@ function StepEditor({ mode, initial, agents, onSave, onClose }: {
       {/* Model selector — shown for agent and generate steps */}
       {(type === 'agent' || type === 'generate') && (
         <div className="mt-3">
-          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">
+          <label htmlFor={modelFieldId} className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">
             Brain <span className="font-normal text-muted/60">(LLM)</span>
           </label>
           <select
+            id={modelFieldId}
             value={model}
             onChange={e => setModel(e.target.value)}
             className="block w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-base text-ink outline-none transition focus:border-accent focus:ring-1 focus:ring-accent [&>option]:bg-[#0B1826]">
