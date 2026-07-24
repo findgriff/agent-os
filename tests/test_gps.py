@@ -5,6 +5,8 @@ and the geofence — so the correctness-critical maths is pinned without standin
 up the (separate, absent-in-this-suite) maxgleam database. Anything that opens a
 connection lives in the endpoint suite instead; nothing here calls ``_conn()``.
 """
+import math
+
 from server import maxgleam_gps as gps
 
 
@@ -163,3 +165,60 @@ def test_route_distance_matches_single_haversine_leg():
     a, b = _pt(51.50, -0.10), _pt(51.52, -0.12)
     assert abs(gps._route_distance_m([a, b])
                - gps.haversine_m(51.50, -0.10, 51.52, -0.12)) < 1e-9
+
+
+# ── _bearing ────────────────────────────────────────────────────────
+
+def test_bearing_cardinal_directions():
+    # Small steps from a base point so the initial bearing reads cleanly.
+    base = (51.5, -0.1)
+    assert abs(gps._bearing(*base, 51.6, -0.1) - 0) < 1      # due north
+    assert abs(gps._bearing(*base, 51.5, 0.0) - 90) < 1      # due east
+    assert abs(gps._bearing(*base, 51.4, -0.1) - 180) < 1    # due south
+    assert abs(gps._bearing(*base, 51.5, -0.2) - 270) < 1    # due west
+
+
+# ── _movement ───────────────────────────────────────────────────────
+
+def _mpt(lat, lng, ts):
+    return {"lat": lat, "lng": lng, "timestamp": ts, "job_id": 1}
+
+
+def test_movement_none_without_two_fixes():
+    assert gps._movement(None, _mpt(51.5, -0.1, 100)) is None
+    assert gps._movement(_mpt(51.5, -0.1, 100), None) is None
+
+
+def test_movement_none_when_out_of_order():
+    # last no newer than prev — can't derive a speed, don't invent one.
+    prev = _mpt(51.5, -0.1, 200)
+    last = _mpt(51.6, -0.1, 200)
+    assert gps._movement(prev, last) is None
+    assert gps._movement(prev, _mpt(51.6, -0.1, 100)) is None
+
+
+def test_movement_none_when_gap_too_large():
+    # Two fixes MOVEMENT_MAX_GAP + apart: the crew was offline between them, so
+    # the average speed says nothing about now.
+    prev = _mpt(51.5, -0.1, 0)
+    last = _mpt(51.51, -0.1, gps.MOVEMENT_MAX_GAP + 1)
+    assert gps._movement(prev, last) is None
+
+
+def test_movement_parked_jitter_reads_as_stopped():
+    # ~3 m of wander over 20 s (~0.3 mph) is a parked phone, not a moving van.
+    prev = _mpt(51.5, -0.1, 1000)
+    last = _mpt(51.50003, -0.1, 1020)
+    m = gps._movement(prev, last)
+    assert m["moving"] is False
+    assert m["speed_mph"] < gps.MOVING_MPH
+
+
+def test_movement_driving_reports_speed_and_heading():
+    # ~200 m east over 20 s ≈ 22 mph, heading ~90°.
+    prev = _mpt(51.5, -0.1, 1000)
+    last = _mpt(51.5, -0.1 + 200 / (111320 * math.cos(math.radians(51.5))), 1020)
+    m = gps._movement(prev, last)
+    assert m["moving"] is True
+    assert 20 <= m["speed_mph"] <= 25
+    assert 80 <= m["heading"] <= 100

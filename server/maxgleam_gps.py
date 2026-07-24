@@ -52,6 +52,13 @@ UK_BOUNDS = {"lat": (49.0, 61.5), "lng": (-9.0, 2.5)}
 # the office actually wants.
 GEOFENCE_M = 150
 
+# Movement, read from the two most recent fixes. Below MOVING_MPH a "speed" is
+# just GPS jitter on a parked van, so it reads as stopped. If the two fixes are
+# more than MOVEMENT_MAX_GAP apart the crew was offline between them and their
+# average speed says nothing about now, so movement is left unknown.
+MOVING_MPH = 3.0
+MOVEMENT_MAX_GAP = 5 * 60
+
 _local = threading.local()
 _last_write: dict[int, float] = {}
 _last_write_lock = threading.Lock()
@@ -271,14 +278,47 @@ def _on_site_seconds(job: dict | None, now: int) -> int | None:
     return max(0, now - int(job["started_at"]))
 
 
+def _bearing(a_lat: float, a_lng: float, b_lat: float, b_lng: float) -> float:
+    """Initial compass bearing from a to b, degrees clockwise from north."""
+    p1, p2 = math.radians(a_lat), math.radians(b_lat)
+    dl = math.radians(b_lng - a_lng)
+    y = math.sin(dl) * math.cos(p2)
+    x = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)
+    return (math.degrees(math.atan2(y, x)) + 360) % 360
+
+
+def _movement(prev: dict | None, last: dict | None) -> dict | None:
+    """Speed and heading from the two most recent fixes — is this van driving
+    between jobs or parked on one?
+
+    None when it can't be told: fewer than two fixes, the fixes out of order,
+    or a gap so long the average speed across it is meaningless. ``moving``
+    filters out the sub-MOVING_MPH wander a parked phone reports as motion.
+    """
+    if not prev or not last:
+        return None
+    dt = last["timestamp"] - prev["timestamp"]
+    if dt <= 0 or dt > MOVEMENT_MAX_GAP:
+        return None
+    metres = haversine_m(prev["lat"], prev["lng"], last["lat"], last["lng"])
+    speed_mph = (metres / dt) * 3600 / METRES_PER_MILE
+    return {
+        "speed_mph": round(speed_mph, 1),
+        "heading": round(_bearing(prev["lat"], prev["lng"], last["lat"], last["lng"])),
+        "moving": speed_mph >= MOVING_MPH,
+    }
+
+
 def crew_position(crew_id: int, tenant_id: int = DEFAULT_TENANT_ID) -> tuple[int, dict]:
     """GET /api/maxgleam/gps/crew/:id — where this crew was last seen."""
     crew = _crew_row(crew_id, tenant_id)
     if not crew:
         return 404, {"error": "no such crew"}
 
-    last = _one("SELECT * FROM gps_log WHERE subcontractor_id = ? "
-                "ORDER BY timestamp DESC LIMIT 1", (crew_id,))
+    recent = _rows("SELECT * FROM gps_log WHERE subcontractor_id = ? "
+                   "ORDER BY timestamp DESC LIMIT 2", (crew_id,))
+    last = recent[0] if recent else None
+    prev = recent[1] if len(recent) > 1 else None
     now = int(time.time())
     position = _point_dto(last) if last else None
     job = _current_job(crew_id)
@@ -291,6 +331,7 @@ def crew_position(crew_id: int, tenant_id: int = DEFAULT_TENANT_ID) -> tuple[int
         "job": job,
         "geofence": _geofence(position, job),
         "on_site_seconds": _on_site_seconds(job, now),
+        "movement": _movement(_point_dto(prev), position) if prev else None,
     }
 
 
@@ -408,6 +449,13 @@ def active_crews(tenant_id: int = DEFAULT_TENANT_ID) -> tuple[int, dict]:
         job = _current_job(r["subcontractor_id"])
         position = {"lat": r["lat"], "lng": r["lng"], "timestamp": r["timestamp"],
                     "job_id": r["job_id"]}
+        # The fix just before the latest lets the map say driving-vs-parked, the
+        # same read crew_position gives; the gap cap in _movement drops a stale
+        # pairing on its own.
+        prev = _one("SELECT lat, lng, timestamp, job_id FROM gps_log "
+                    " WHERE subcontractor_id = ? AND timestamp >= ? AND timestamp < ? "
+                    " ORDER BY timestamp DESC LIMIT 1",
+                    (r["subcontractor_id"], start, r["timestamp"]))
         crews.append({
             "crew_id": r["subcontractor_id"],
             "name": r["name"],
@@ -419,6 +467,7 @@ def active_crews(tenant_id: int = DEFAULT_TENANT_ID) -> tuple[int, dict]:
             "job": job,
             "geofence": _geofence(position, job),
             "on_site_seconds": _on_site_seconds(job, now),
+            "movement": _movement(prev, position) if prev else None,
         })
 
     # Today's stops give the map something to show before anyone clocks on.

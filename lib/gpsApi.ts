@@ -47,6 +47,14 @@ export interface GpsGeofence {
   on_site: boolean;
 }
 
+/** Speed/heading from the two most recent fixes — driving vs parked. null when
+ * unknowable (fewer than two fixes, or too big a gap between them). */
+export interface GpsMovement {
+  speed_mph: number;
+  heading: number;
+  moving: boolean;
+}
+
 export interface GpsCrew {
   crew_id: number;
   name: string;
@@ -58,6 +66,7 @@ export interface GpsCrew {
   job: GpsJob | null;
   geofence: GpsGeofence | null;
   on_site_seconds: number | null;
+  movement: GpsMovement | null;
 }
 
 /** Today's stops, drawn on the map whether or not anyone is tracking. */
@@ -97,6 +106,7 @@ export interface GpsPosition {
   job: GpsJob | null;
   geofence: GpsGeofence | null;
   on_site_seconds: number | null;
+  movement: GpsMovement | null;
 }
 
 export interface GpsHistory {
