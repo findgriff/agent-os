@@ -899,9 +899,17 @@ def clock_out(body: dict, tenant_id: int = DEFAULT_TENANT_ID,
     log = None
     if body.get("log_id"):
         try:
-            log = _one("SELECT * FROM time_logs WHERE id = ?", (int(body["log_id"]),))
+            log_id = int(body["log_id"])
         except (TypeError, ValueError):
             return 400, {"error": "log_id must be a number"}
+        # Scope the lookup to the caller's tenant. A time log is only ever
+        # reachable through its crew, so join to subcontractors and match the
+        # tenant — otherwise a valid crew code for one tenant could clock out
+        # another tenant's log by guessing an id. A miss falls through to the
+        # 404 below without revealing that the id exists elsewhere.
+        log = _one("SELECT t.* FROM time_logs t"
+                   " JOIN subcontractors s ON s.id = t.subcontractor_id"
+                   " WHERE t.id = ? AND s.tenant_id = ?", (log_id, tenant_id))
     else:
         try:
             crew_id = int(body.get("crew_id") or body.get("subcontractor_id") or 0)
