@@ -13,7 +13,7 @@ import {
   invoicesApi, downloadTaxCsv, type TaxReport,
   reviewsApi, type ReviewList, type ReviewAverage,
   exportsApi, downloadExport, commissionsApi,
-  type ReportsData, type ReportKind, type TimeHistory,
+  type ReportsData, type ReportKind, type TimeHistory, type DateRange,
   type ActivityFeed, type ActorType, type AlertPreview, type AlertLogRow,
   type TaxSummary, type ExportKind, type CommissionList, type CommissionSummary,
   type CommissionRow,
@@ -56,8 +56,9 @@ const ACCENT = '#19C3E6';
 
 // ── Building blocks ─────────────────────────────────────────────────────
 
-function StatTile({ label, value, sub, icon, accent = ACCENT, delay = 0 }: {
-  label: string; value: string; sub?: string; icon: string; accent?: string; delay?: number;
+function StatTile({ label, value, sub, trend, icon, accent = ACCENT, delay = 0 }: {
+  label: string; value: string; sub?: string; trend?: React.ReactNode;
+  icon: string; accent?: string; delay?: number;
 }) {
   return (
     <Card className="group p-3.5 sm:p-4 animate-fadeInUp transition-all duration-200 ease-out
@@ -67,7 +68,8 @@ function StatTile({ label, value, sub, icon, accent = ACCENT, delay = 0 }: {
         <div className="min-w-0">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-muted">{label}</div>
           <div className="mt-1 truncate text-xl font-bold tabular-nums text-ink sm:text-2xl">{value}</div>
-          {sub && <div className="mt-0.5 truncate text-[11px] text-muted/70">{sub}</div>}
+          {trend ? <div className="mt-1">{trend}</div>
+            : sub ? <div className="mt-0.5 truncate text-[11px] text-muted/70">{sub}</div> : null}
         </div>
         <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl transition-transform duration-200 group-hover:scale-110 group-hover:-rotate-6"
           style={{ background: `${accent}1a`, color: accent, boxShadow: `0 0 20px -10px ${accent}66` }}>
@@ -95,7 +97,8 @@ function SectionTitle({ children, count, accent = ACCENT, action }: {
   );
 }
 
-function ExportButton({ report, label = 'CSV' }: { report: ReportKind; label?: string }) {
+function ExportButton({ report, label = 'CSV', range }:
+  { report: ReportKind; label?: string; range?: DateRange }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   return (
@@ -103,7 +106,7 @@ function ExportButton({ report, label = 'CSV' }: { report: ReportKind; label?: s
       onClick={async () => {
         setBusy(true);
         try {
-          await downloadCsv(report);
+          await downloadCsv(report, range);
           toast(`${report} report downloaded`, 'ok');
         } catch (e) {
           toast(e instanceof Error ? e.message : 'Export failed', 'danger');
@@ -113,6 +116,112 @@ function ExportButton({ report, label = 'CSV' }: { report: ReportKind; label?: s
       }}>
       {label}
     </Button>
+  );
+}
+
+// ── Period-over-period delta ────────────────────────────────────────────
+// A coloured ▲/▼ against the equal-length window before this one. `pct` for
+// percentage metrics, `points` for the rating (a raw point move). Higher is
+// better for every figure we show one against, so up is always green.
+function DeltaBadge({ pct, points }: { pct?: number | null; points?: number | null }) {
+  const v = pct ?? points ?? null;
+  if (v === null || v === undefined) {
+    return <span className="text-[11px] text-muted/50">no prior period</span>;
+  }
+  const flat = v === 0;
+  const colour = flat ? '#8B96A8' : v > 0 ? '#22C55E' : '#F43F5E';
+  const icon = flat ? 'remove' : v > 0 ? 'arrow_upward' : 'arrow_downward';
+  const num = pct != null ? `${v > 0 ? '+' : ''}${v}%` : `${v > 0 ? '+' : ''}${v}`;
+  return (
+    <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold tabular-nums"
+      style={{ color: colour }}>
+      <Icon name={icon} size={12} />{num}
+      <span className="font-normal text-muted/60"> vs prev</span>
+    </span>
+  );
+}
+
+// ── Date-range picker ───────────────────────────────────────────────────
+// Local-time day arithmetic. toISOString() is UTC and rounds onto the wrong
+// day for anyone west of Greenwich late in the evening, so format by hand.
+function isoDay(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function daysAgo(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return isoDay(d);
+}
+function monthStart(): string {
+  const d = new Date();
+  return isoDay(new Date(d.getFullYear(), d.getMonth(), 1));
+}
+
+const PRESETS: { id: string; label: string; range: () => DateRange }[] = [
+  { id: '7d', label: '7 days', range: () => ({ from: daysAgo(6), to: isoDay(new Date()) }) },
+  { id: '30d', label: '30 days', range: () => ({ from: daysAgo(29), to: isoDay(new Date()) }) },
+  { id: '90d', label: '90 days', range: () => ({ from: daysAgo(89), to: isoDay(new Date()) }) },
+  { id: 'month', label: 'This month', range: () => ({ from: monthStart(), to: isoDay(new Date()) }) },
+];
+
+function fmtRange(from: string, to: string): string {
+  return from === to ? dayLabel(from) : `${dayLabel(from)} – ${dayLabel(to)}`;
+}
+
+function RangeBar({ value, onChange }:
+  { value: DateRange | null; onChange: (r: DateRange | null) => void }) {
+  // Which preset the current value matches (if any) — highlights the chip and
+  // tells custom-range mode apart from a preset.
+  const activeId = useMemo(() => {
+    const v = value ?? PRESETS[1].range();          // null == the default 30 days
+    const hit = PRESETS.find(p => {
+      const r = p.range();
+      return r.from === v.from && r.to === v.to;
+    });
+    return hit?.id ?? 'custom';
+  }, [value]);
+
+  const cur = value ?? PRESETS[1].range();
+  const [from, setFrom] = useState(cur.from);
+  const [to, setTo] = useState(cur.to);
+  // Keep the custom inputs in step when a preset is clicked.
+  useEffect(() => { setFrom(cur.from); setTo(cur.to); }, [cur.from, cur.to]);
+
+  const today = isoDay(new Date());
+  const dirty = from !== cur.from || to !== cur.to;
+  const validCustom = !!from && !!to && from <= to;
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/6 bg-white/[0.02] p-2">
+      <span className="pl-1 text-[11px] font-semibold uppercase tracking-wider text-muted">Range</span>
+      <div className="flex flex-wrap gap-1">
+        {PRESETS.map(p => (
+          <button key={p.id} type="button"
+            onClick={() => onChange(p.id === '30d' ? null : p.range())}
+            className={`rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition-all
+              ${activeId === p.id ? 'bg-accent/15 text-accent shadow-[0_0_14px_-8px_rgba(25,195,230,0.9)]'
+                                  : 'text-muted hover:bg-white/5 hover:text-ink'}`}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+      <div className="ml-auto flex flex-wrap items-end gap-1.5">
+        <Input type="date" value={from} max={to || today}
+          onChange={e => setFrom(e.target.value)} className="!w-auto !py-1.5 !text-[12px]" />
+        <span className="pb-2 text-muted/50">→</span>
+        <Input type="date" value={to} min={from} max={today}
+          onChange={e => setTo(e.target.value)} className="!w-auto !py-1.5 !text-[12px]" />
+        <Button variant={dirty && validCustom ? 'primary' : 'secondary'} icon="check"
+          className="!px-2.5 !py-1.5 !text-[12px]"
+          disabled={!dirty || !validCustom}
+          onClick={() => onChange({ from, to })}>
+          Apply
+        </Button>
+        {activeId === 'custom' && (
+          <span className="pb-1.5 pl-0.5 text-[11px] text-muted/70">{fmtRange(cur.from, cur.to)}</span>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -129,7 +238,8 @@ function RevenueChart({ data }: { data: ReportsData }) {
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-wider text-muted">
-            Revenue · last {data.window_days} days
+            Revenue · {data.range.is_default ? `last ${data.window_days} days`
+                                             : fmtRange(data.range.start, data.range.end)}
           </div>
           <div className="mt-1 text-2xl font-bold tabular-nums text-ink">
             {gbp(data.revenue.total_pence)}
@@ -185,23 +295,28 @@ function RevenueChart({ data }: { data: ReportsData }) {
 function Overview({ data }: { data: ReportsData }) {
   const r = data.retention;
   const overdue = data.overdue_signoffs;
+  const range: DateRange = { from: data.range.start, to: data.range.end };
+  const d = data.deltas;
   return (
     <div className="space-y-5">
+      {/* Headline figures for the selected window, each against the equal
+          window before it. */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile label="Completed this week" value={String(data.jobs.completed_week)}
-          sub={`since ${dayLabel(data.jobs.week_start)}`} icon="task_alt" accent="#22C55E" delay={0} />
-        <StatTile label="Completed this month" value={String(data.jobs.completed_month)}
-          sub={gbp(data.revenue.month_pence)} icon="calendar_month" accent={ACCENT} delay={60} />
+        <StatTile label="Revenue" value={gbp(data.revenue.total_pence)}
+          trend={<DeltaBadge pct={d.revenue_pct} />} icon="payments" accent="#22C55E" delay={0} />
+        <StatTile label="Jobs completed" value={String(data.jobs.completed_window)}
+          trend={<DeltaBadge pct={d.jobs_pct} />} icon="task_alt" accent={ACCENT} delay={60} />
         <StatTile label="Average job value" value={gbp(data.jobs.avg_value_pence)}
-          sub={`${data.jobs.completed_window} jobs in ${data.window_days}d`} icon="payments"
-          accent="#A78BFA" delay={120} />
-        <StatTile label="Overdue sign-offs" value={String(overdue.count)}
-          sub={`past ${overdue.auto_approve_hours}h window`} icon="draw"
-          accent={overdue.count ? '#F43F5E' : '#22C55E'} delay={180} />
+          trend={<DeltaBadge pct={d.avg_value_pct} />} icon="trending_up" accent="#A78BFA" delay={120} />
+        <StatTile label="Average rating"
+          value={data.ratings.average !== null ? `${data.ratings.average} / 5` : '—'}
+          trend={<DeltaBadge points={d.rating_delta} />} icon="star" accent="#F59E0B" delay={180} />
       </div>
 
       <div>
-        <SectionTitle action={<ExportButton report="revenue" label="Revenue CSV" />}>Revenue</SectionTitle>
+        <SectionTitle action={<ExportButton report="revenue" label="Revenue CSV" range={range} />}>
+          Revenue
+        </SectionTitle>
         <RevenueChart data={data} />
       </div>
 
@@ -289,7 +404,9 @@ function CrewTab({ data }: { data: ReportsData }) {
       </div>
 
       <div>
-        <SectionTitle count={data.crew.length} action={<ExportButton report="crew" />}>
+        <SectionTitle count={data.crew.length}
+          action={<ExportButton report="crew"
+            range={{ from: data.range.start, to: data.range.end }} />}>
           Crew performance
         </SectionTitle>
         <Card className="p-2">
@@ -1617,10 +1734,15 @@ function ReviewsTab() {
 
 // ── Page ────────────────────────────────────────────────────────────────
 
+// The range control only steers the tabs built from the shared reports
+// payload; the rest fetch their own data on their own terms.
+const RANGE_TABS: Tab[] = ['overview', 'crew', 'time'];
+
 export default function Reports() {
   const toast = useToast();
   const [tab, setTab] = useState<Tab>('overview');
   const [data, setData] = useState<ReportsData | null>(null);
+  const [range, setRange] = useState<DateRange | null>(null);   // null → default 30d
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
@@ -1628,7 +1750,7 @@ export default function Reports() {
   const load = useCallback(async (quiet = false) => {
     if (quiet) setRefreshing(true);
     try {
-      setData(await reportsApi.reports());
+      setData(await reportsApi.reports(range ?? undefined));
       setError('');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load reports');
@@ -1636,9 +1758,10 @@ export default function Reports() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [range]);
 
-  useEffect(() => { load(); }, [load]);
+  // Reloads on mount and whenever the range changes (load's identity tracks it).
+  useEffect(() => { load(true); }, [load]);
 
   return (
     <div className="mx-auto max-w-6xl space-y-5 p-4 sm:p-6">
@@ -1650,7 +1773,10 @@ export default function Reports() {
         <div className="min-w-0">
           <h1 className="font-display text-xl font-bold text-ink sm:text-2xl">Max Gleam reports</h1>
           <p className="text-[12px] text-muted">
-            {data ? `Last ${data.window_days} days · updated ${clockTime(data.generated_at)}` : 'Loading…'}
+            {data
+              ? `${data.range.is_default ? `Last ${data.window_days} days`
+                    : fmtRange(data.range.start, data.range.end)} · updated ${clockTime(data.generated_at)}`
+              : 'Loading…'}
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -1672,9 +1798,16 @@ export default function Reports() {
           </button>
         ))}
         <div className="ml-auto hidden shrink-0 items-center pr-1 sm:flex">
-          <ExportButton report="jobs" label="Jobs CSV" />
+          <ExportButton report="jobs" label="Jobs CSV"
+            range={data ? { from: data.range.start, to: data.range.end } : undefined} />
         </div>
       </div>
+
+      {/* Custom window + trend comparison, for the tabs drawn from the shared
+          payload. The self-fetching tabs manage their own periods. */}
+      {RANGE_TABS.includes(tab) && (
+        <RangeBar value={range} onChange={setRange} />
+      )}
 
       {/* Tax, exports and commissions each fetch their own data, so they stay
           available even if the main reports payload fails to load. */}

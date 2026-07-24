@@ -44,7 +44,8 @@ MAXGLEAM_DB = os.environ.get("MAXGLEAM_DB", "/var/lib/maxgleam/app.db")
 # A sign-off not returned within this window is overdue. Mirrors
 # maxgleam_portal.AUTO_APPROVE_HOURS — imported lazily to avoid a cycle.
 RETENTION_WEEKS = 4          # "cleaned recently" window for the retention rate
-REVENUE_DAYS = 30            # revenue chart span
+REVENUE_DAYS = 30            # default report span when no range is given
+MAX_RANGE_DAYS = 366         # cap an arbitrary custom range to a year + a day
 DAY = 86400
 
 _local = threading.local()
@@ -115,6 +116,79 @@ def _day_start(epoch: int | None = None) -> int:
     return int(time.mktime((t.tm_year, t.tm_mon, t.tm_mday, 0, 0, 0, 0, 0, -1)))
 
 
+# ── date-range helpers ───────────────────────────────────────────────────
+# All range arithmetic goes through these rather than raw `epoch ± n*DAY`.
+# Stepping by 86400s from a local midnight drifts an hour across a DST change
+# and, over a long span, can skip or repeat a day; normalising the calendar
+# fields through mktime (which handles out-of-range mday) never does.
+
+_DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _valid_day(s) -> str | None:
+    """A real YYYY-MM-DD date, or None. Rejects 2026-13-40 as well as junk."""
+    s = (str(s or "")).strip()
+    if not _DAY_RE.match(s):
+        return None
+    try:
+        time.strptime(s, "%Y-%m-%d")
+    except ValueError:
+        return None
+    return s
+
+
+def _midnight(day: str) -> int:
+    """Local-midnight epoch at the start of `day` (YYYY-MM-DD)."""
+    t = time.strptime(day, "%Y-%m-%d")
+    return int(time.mktime((t.tm_year, t.tm_mon, t.tm_mday, 0, 0, 0, 0, 0, -1)))
+
+
+def _day_add(day: str, n: int) -> str:
+    """`day` shifted by n calendar days. Anchored at noon so a DST midnight
+    can never round the result onto the wrong side of the day boundary."""
+    t = time.strptime(day, "%Y-%m-%d")
+    return time.strftime("%Y-%m-%d", time.localtime(
+        time.mktime((t.tm_year, t.tm_mon, t.tm_mday + n, 12, 0, 0, 0, 0, -1))))
+
+
+def _days_between(a: str, b: str) -> int:
+    """Inclusive day count from a to b (>= 1 when a <= b)."""
+    span = (_midnight(b) - _midnight(a)) / DAY
+    return int(round(span)) + 1
+
+
+def _parse_range(start, end) -> dict:
+    """Resolve a requested window into a concrete, sane day range.
+
+    No start/end → the default last-REVENUE_DAYS window ending today. A lone
+    end anchors that window elsewhere; a lone start runs to today. A reversed
+    pair is swapped, and anything longer than MAX_RANGE_DAYS is clamped from
+    the end so a five-year request cannot build a 1,800-bar chart.
+    """
+    s = _valid_day(start)
+    e = _valid_day(end)
+    is_default = s is None and e is None
+
+    end_day = e or _today()
+    start_day = s or _day_add(end_day, -(REVENUE_DAYS - 1))
+    if start_day > end_day:
+        start_day, end_day = end_day, start_day
+
+    days = _days_between(start_day, end_day)
+    if days > MAX_RANGE_DAYS:
+        start_day = _day_add(end_day, -(MAX_RANGE_DAYS - 1))
+        days = MAX_RANGE_DAYS
+
+    # The equal-length window immediately before, for period-over-period.
+    prev_end = _day_add(start_day, -1)
+    prev_start = _day_add(start_day, -days)
+    return {
+        "start": start_day, "end": end_day, "days": days,
+        "prev_start": prev_start, "prev_end": prev_end,
+        "is_default": is_default,
+    }
+
+
 def _scope(tenant_id: int, company_id: int | None,
            alias: str = "j") -> tuple[str, list]:
     """WHERE fragment + args restricting to a tenant and, for a partner
@@ -177,6 +251,46 @@ def _revenue_series(jobs: list[dict], days: int = REVENUE_DAYS) -> list[dict]:
     return list(buckets.values())
 
 
+def _series_range(jobs: list[dict], start_day: str, days: int) -> list[dict]:
+    """One bucket per day across an explicit [start_day, start_day+days)
+    window, oldest first. Empty days are kept at zero for the same reason
+    _revenue_series keeps them — a chart with quiet days dropped reads busier
+    than the round really was."""
+    buckets: dict[str, dict] = {}
+    for i in range(days):
+        day = _day_add(start_day, i)
+        buckets[day] = {"date": day, "revenue_pence": 0, "jobs": 0}
+    for j in jobs:
+        b = buckets.get(_revenue_day(j))
+        if b:
+            b["revenue_pence"] += j["price_pence"] or 0
+            b["jobs"] += 1
+    return list(buckets.values())
+
+
+def _metrics(jobs: list[dict]) -> dict:
+    """Headline figures for a set of completed jobs — used for both the
+    current window and the prior one, so the two can never be measured
+    differently."""
+    revenue = sum(j["price_pence"] or 0 for j in jobs)
+    ratings = [r for r in (_rating_of(j["signoff_note"]) for j in jobs) if r]
+    return {
+        "revenue_pence": revenue,
+        "jobs": len(jobs),
+        "avg_value_pence": round(revenue / len(jobs)) if jobs else 0,
+        "avg_rating": round(sum(ratings) / len(ratings), 2) if ratings else None,
+        "rated": len(ratings),
+    }
+
+
+def _pct_change(cur, prev) -> float | None:
+    """Percentage change cur vs prev, or None when there is no prior base to
+    compare against (a jump from zero is not a meaningful percentage)."""
+    if not prev:
+        return None
+    return round(100.0 * (cur - prev) / prev, 1)
+
+
 def _retention(tenant_id: int, company_id: int | None) -> dict:
     """Share of active recurring properties cleaned in the last N weeks.
 
@@ -216,11 +330,13 @@ def _retention(tenant_id: int, company_id: int | None) -> dict:
 
 
 def _crew_performance(tenant_id: int, company_id: int | None,
-                      jobs: list[dict]) -> list[dict]:
+                      jobs: list[dict], since_epoch: int,
+                      until_epoch: int | None = None) -> list[dict]:
     """Per-crew completed jobs, revenue, average rating and actual minutes.
 
-    Built from the same 30-day job set the rest of the page uses, so the crew
-    table and the headline numbers can never disagree.
+    Built from the same job set the rest of the page uses, so the crew table
+    and the headline numbers can never disagree. `since_epoch`/`until_epoch`
+    bound the time-logs half to the selected report window.
     """
     by_crew: dict[int, dict] = {}
     for j in jobs:
@@ -241,13 +357,16 @@ def _crew_performance(tenant_id: int, company_id: int | None,
             row["_ratings"].append(rating)
 
     # Actual time on site, from any log closed in the same window.
-    since = _day_start() - REVENUE_DAYS * DAY
+    clause = "clock_out IS NOT NULL AND clock_in >= ? AND subcontractor_id IS NOT NULL"
+    targs: list = [since_epoch]
+    if until_epoch is not None:
+        clause += " AND clock_in < ?"
+        targs.append(until_epoch)
     for t in _rows("""SELECT subcontractor_id AS cid,
                              COUNT(*) AS logs, SUM(total_minutes) AS mins
                         FROM time_logs
-                       WHERE clock_out IS NOT NULL AND clock_in >= ?
-                         AND subcontractor_id IS NOT NULL
-                    GROUP BY subcontractor_id""", (since,)):
+                       WHERE """ + clause
+                   + " GROUP BY subcontractor_id", tuple(targs)):
         row = by_crew.get(t["cid"])
         if row and t["logs"]:
             row["logged_jobs"] = t["logs"]
@@ -298,55 +417,92 @@ def _overdue_signoffs(tenant_id: int, company_id: int | None) -> dict:
 
 
 def reports(tenant_id: int = DEFAULT_TENANT_ID,
-            company_id: int | None = None) -> tuple[int, dict]:
-    """Every figure the reporting dashboard shows, in one round trip."""
+            company_id: int | None = None,
+            start: str | None = None, end: str | None = None) -> tuple[int, dict]:
+    """Every figure the reporting dashboard shows, in one round trip.
+
+    `start`/`end` (YYYY-MM-DD) select the window; omit both for the default
+    last-REVENUE_DAYS view. Headline figures come with the equal-length prior
+    window and its percentage change, so the page can show a trend rather than
+    a bare number.
+    """
     now = int(time.time())
+    rng = _parse_range(start, end)
+    span_start, span_end = rng["start"], rng["end"]
+    prev_start, prev_end = rng["prev_start"], rng["prev_end"]
+
+    # One fetch covers both windows: pull everything from the prior window's
+    # start, then split in Python on the effective revenue day.
+    all_jobs = _done_jobs(tenant_id, company_id, _midnight(prev_start))
+    jobs = [j for j in all_jobs if span_start <= _revenue_day(j) <= span_end]
+    prev_jobs = [j for j in all_jobs if prev_start <= _revenue_day(j) <= prev_end]
+
+    cur = _metrics(jobs)
+    prev = _metrics(prev_jobs)
+    deltas = {
+        "revenue_pct": _pct_change(cur["revenue_pence"], prev["revenue_pence"]),
+        "jobs_pct": _pct_change(cur["jobs"], prev["jobs"]),
+        "avg_value_pct": _pct_change(cur["avg_value_pence"], prev["avg_value_pence"]),
+        "rating_delta": (round(cur["avg_rating"] - prev["avg_rating"], 2)
+                         if cur["avg_rating"] is not None
+                         and prev["avg_rating"] is not None else None),
+    }
+
+    # Week/month totals stay absolute (this week, this month to date) — they
+    # are "where are we now" figures, independent of the chosen window.
     today0 = _day_start()
-    since30 = today0 - (REVENUE_DAYS - 1) * DAY
-    jobs = _done_jobs(tenant_id, company_id, since30)
-
-    # This week runs Mon–today; this month runs from the 1st.
-    lt = time.localtime()
-    week_start = _day_of(today0 - lt.tm_wday * DAY)
+    week_start = _day_of(today0 - time.localtime().tm_wday * DAY)
     month_start = time.strftime("%Y-%m-01")
+    week_jobs = [j for j in all_jobs if _revenue_day(j) >= week_start]
+    month_jobs = [j for j in all_jobs if _revenue_day(j) >= month_start]
 
-    week_jobs = [j for j in jobs if _revenue_day(j) >= week_start]
-    month_jobs = [j for j in jobs if _revenue_day(j) >= month_start]
-    revenue_30 = sum(j["price_pence"] or 0 for j in jobs)
+    series = _series_range(jobs, span_start, rng["days"])
 
-    series = _revenue_series(jobs)
-    ratings = [r for r in (_rating_of(j["signoff_note"]) for j in jobs) if r]
-
-    # Actual vs estimated time, from closed logs in the same 30-day window.
+    # Actual vs estimated time, from logs closed inside the window.
+    win_start_e = _midnight(span_start)
+    win_end_e = _midnight(_day_add(span_end, 1))            # exclusive
     tl = _one("""SELECT COUNT(*) AS n, SUM(total_minutes) AS mins
                    FROM time_logs
-                  WHERE clock_out IS NOT NULL AND clock_in >= ?""", (since30,))
+                  WHERE clock_out IS NOT NULL
+                    AND clock_in >= ? AND clock_in < ?""",
+              (win_start_e, win_end_e))
     logged_n = (tl or {}).get("n") or 0
     logged_mins = (tl or {}).get("mins") or 0
 
-    crew = _crew_performance(tenant_id, company_id, jobs)
+    crew = _crew_performance(tenant_id, company_id, jobs, win_start_e, win_end_e)
     return 200, {
         "generated_at": now,
         "tenant_id": tenant_id,
-        "window_days": REVENUE_DAYS,
+        "window_days": rng["days"],
+        "range": {
+            "start": span_start, "end": span_end,
+            "days": rng["days"], "is_default": rng["is_default"],
+        },
+        "previous": {
+            "start": prev_start, "end": prev_end,
+            "revenue_pence": prev["revenue_pence"], "jobs": prev["jobs"],
+            "avg_value_pence": prev["avg_value_pence"],
+            "avg_rating": prev["avg_rating"],
+        },
+        "deltas": deltas,
         "revenue": {
             "series": series,
-            "total_pence": revenue_30,
+            "total_pence": cur["revenue_pence"],
             "peak_pence": max((d["revenue_pence"] for d in series), default=0),
             "week_pence": sum(j["price_pence"] or 0 for j in week_jobs),
             "month_pence": sum(j["price_pence"] or 0 for j in month_jobs),
         },
         "jobs": {
-            "completed_window": len(jobs),
+            "completed_window": cur["jobs"],
             "completed_week": len(week_jobs),
             "completed_month": len(month_jobs),
             "week_start": week_start,
             "month_start": month_start,
-            "avg_value_pence": round(revenue_30 / len(jobs)) if jobs else 0,
+            "avg_value_pence": cur["avg_value_pence"],
         },
         "ratings": {
-            "average": round(sum(ratings) / len(ratings), 2) if ratings else None,
-            "rated": len(ratings),
+            "average": cur["avg_rating"],
+            "rated": cur["rated"],
         },
         "retention": _retention(tenant_id, company_id),
         "crew": crew,
@@ -379,20 +535,25 @@ EXPORTS = ("revenue", "jobs", "crew", "retention", "overdue", "time")
 
 
 def export_csv(report: str, tenant_id: int = DEFAULT_TENANT_ID,
-               company_id: int | None = None) -> tuple[int, str, str] | tuple[int, dict]:
-    """One CSV per report. Returns a 3-tuple (status, body, content_type),
-    which app.py sends raw."""
+               company_id: int | None = None,
+               start: str | None = None,
+               end: str | None = None) -> tuple[int, str, str] | tuple[int, dict]:
+    """One CSV per report, matching the window shown on screen. Returns a
+    3-tuple (status, body, content_type), which app.py sends raw."""
     if report not in EXPORTS:
         return 400, {"error": f"report must be one of: {', '.join(EXPORTS)}"}
 
-    _status, data = reports(tenant_id, company_id)
+    rng = _parse_range(start, end)
+    _status, data = reports(tenant_id, company_id, rng["start"], rng["end"])
 
     if report == "revenue":
         body = _csv(["date", "revenue_gbp", "jobs_completed"],
                     [[d["date"], _pounds(d["revenue_pence"]), d["jobs"]]
                      for d in data["revenue"]["series"]])
     elif report == "jobs":
-        since30 = _day_start() - (REVENUE_DAYS - 1) * DAY
+        in_range = [j for j in _done_jobs(tenant_id, company_id,
+                                          _midnight(rng["start"]))
+                    if rng["start"] <= _revenue_day(j) <= rng["end"]]
         body = _csv(
             ["job_id", "completed_day", "scheduled_date", "address", "postcode",
              "customer", "crew", "value_gbp", "signoff_status", "rating"],
@@ -400,7 +561,7 @@ def export_csv(report: str, tenant_id: int = DEFAULT_TENANT_ID,
               j["postcode"] or "", j["customer_name"] or "", j["crew_name"] or "",
               _pounds(j["price_pence"]), j["signoff_status"] or "pending",
               _rating_of(j["signoff_note"]) or ""]
-             for j in _done_jobs(tenant_id, company_id, since30)])
+             for j in in_range])
     elif report == "crew":
         body = _csv(
             ["crew_id", "name", "jobs_completed", "revenue_gbp", "avg_rating",
@@ -432,7 +593,8 @@ def export_csv(report: str, tenant_id: int = DEFAULT_TENANT_ID,
               t["total_minutes"] if t["total_minutes"] is not None else "",
               SERVICE_MINUTES, t["notes"] or ""]
              for t in _time_logs(tenant_id, company_id,
-                                 since=_day_start() - (REVENUE_DAYS - 1) * DAY)])
+                                 since=_midnight(rng["start"]),
+                                 until=_midnight(_day_add(rng["end"], 1)))])
     return 200, body, "text/csv"
 
 

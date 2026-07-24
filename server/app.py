@@ -2481,16 +2481,22 @@ def h_maxgleam_generate_schedules(req: Request):
 # partner token sees only that partner's properties.
 
 def h_maxgleam_reports(req: Request):
-    """GET /api/maxgleam/reports — every dashboard metric in one call."""
+    """GET /api/maxgleam/reports[?from=YYYY-MM-DD&to=YYYY-MM-DD] — every
+    dashboard metric in one call, over the default window or a custom range."""
     company_id, tenant_id = _maxgleam_scope(req)
-    return maxgleam_reports.reports(tenant_id, company_id)
+    return maxgleam_reports.reports(
+        tenant_id, company_id,
+        start=req.query.get("from"), end=req.query.get("to"))
 
 
 def h_maxgleam_reports_export(req: Request):
-    """GET /api/maxgleam/reports/export?report=revenue — CSV download."""
+    """GET /api/maxgleam/reports/export?report=revenue[&from=&to=] — CSV
+    download matching the on-screen window."""
     company_id, tenant_id = _maxgleam_scope(req)
     report = (req.query.get("report") or "revenue").strip().lower()
-    return maxgleam_reports.export_csv(report, tenant_id, company_id)
+    return maxgleam_reports.export_csv(
+        report, tenant_id, company_id,
+        start=req.query.get("from"), end=req.query.get("to"))
 
 
 # The time clock is a crew surface: subcontractors have no accounts in this

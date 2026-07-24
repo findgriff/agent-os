@@ -58,10 +58,35 @@ export interface OverdueSignoff {
   days_overdue: number;
 }
 
+export interface DateRange { from: string; to: string }
+
 export interface ReportsData {
   generated_at: number;
   tenant_id: number;
   window_days: number;
+  range: {
+    start: string;
+    end: string;
+    days: number;
+    // true when the caller passed no explicit range (the default window).
+    is_default: boolean;
+  };
+  previous: {
+    start: string;
+    end: string;
+    revenue_pence: number;
+    jobs: number;
+    avg_value_pence: number;
+    avg_rating: number | null;
+  };
+  // Percentage change vs the equal-length prior window; null when the prior
+  // window had nothing to compare against. rating_delta is a raw point change.
+  deltas: {
+    revenue_pct: number | null;
+    jobs_pct: number | null;
+    avg_value_pct: number | null;
+    rating_delta: number | null;
+  };
   revenue: {
     series: RevenueDay[];
     total_pence: number;
@@ -384,7 +409,10 @@ export interface AutoSendResult {
 
 // ── Calls ───────────────────────────────────────────────────────────────
 export const reportsApi = {
-  reports: () => req<ReportsData>('GET', '/api/maxgleam/reports'),
+  reports: (range?: DateRange) => {
+    const qs = range ? `?from=${range.from}&to=${range.to}` : '';
+    return req<ReportsData>('GET', `/api/maxgleam/reports${qs}`);
+  },
 
   board: (day?: string) => req<ClockBoard>(
     'GET', `/api/maxgleam/timeclock/board${day ? `?day=${day}` : ''}`),
@@ -423,11 +451,12 @@ export const reportsApi = {
  * Authorization header travels with it — an <a href> would arrive unauthenticated
  * and hand the user a JSON error page named .csv.
  */
-export async function downloadCsv(report: ReportKind): Promise<void> {
+export async function downloadCsv(report: ReportKind, range?: DateRange): Promise<void> {
   const headers: Record<string, string> = {};
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`/api/maxgleam/reports/export?report=${report}`, { headers });
+  const q = range ? `&from=${range.from}&to=${range.to}` : '';
+  const res = await fetch(`/api/maxgleam/reports/export?report=${report}${q}`, { headers });
   if (!res.ok) {
     const text = await res.text();
     let msg = res.statusText;
