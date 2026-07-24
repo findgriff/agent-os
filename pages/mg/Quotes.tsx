@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Icon, Button, Card, Badge, Input, Select, Textarea, Modal,
-  EmptyState, SkeletonList, useToast, Stat,
+  EmptyState, SkeletonList, useToast, Stat, Field,
 } from '../../components/ui';
 import { quotesApi } from '../../lib/quotesApi';
 import type { Quote, QuoteStatus, QuoteSummary, NewQuote } from '../../lib/quotesApi';
@@ -36,16 +36,6 @@ const FREQ_OPTS = [
 ];
 
 const perYear = (q: Quote) => (q.frequency_weeks ? Math.floor(52 / q.frequency_weeks) : 0);
-
-// Small labelled-field wrapper — the ui Input/Select/Textarea are raw controls.
-function Field({ label, children, className = '' }: { label: string; children: React.ReactNode; className?: string }) {
-  return (
-    <label className={`block ${className}`}>
-      <span className="mb-1 block text-xs font-medium text-muted">{label}</span>
-      {children}
-    </label>
-  );
-}
 
 export default function Quotes() {
   const toast = useToast();

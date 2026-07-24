@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import {
   Icon, Button, Card, Badge, Input, Select, Textarea, Modal, Drawer,
-  EmptyState, SkeletonList, useToast, Stat, Toggle,
+  EmptyState, SkeletonList, useToast, Stat, Toggle, Field,
 } from '../../components/ui';
 import { crewAdminApi } from '../../lib/crewAdminApi';
 import type {
@@ -24,15 +24,6 @@ const LEAVE_TONE: Record<string, 'info' | 'danger' | 'neutral'> = {
 const JOB_TONE: Record<string, 'ok' | 'warn' | 'danger' | 'info' | 'neutral'> = {
   done: 'ok', scheduled: 'info', skipped: 'warn', missed: 'danger',
 };
-
-function Field({ label, children, className = '' }: { label: React.ReactNode; children: React.ReactNode; className?: string }) {
-  return (
-    <label className={`block ${className}`}>
-      <span className="mb-1 block text-xs font-medium text-muted">{label}</span>
-      {children}
-    </label>
-  );
-}
 
 export default function CrewManage() {
   const toast = useToast();

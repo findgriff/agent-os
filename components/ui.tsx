@@ -271,6 +271,39 @@ export function Stat({ label, value, icon, accent = '#19C3E6', delay = 0 }:
   );
 }
 
+// ── StatTile — compact metric card (label top, big value, corner icon) ──
+// The dense HQ variant used across the Max Gleam surfaces (Reports, Invoices,
+// Marketing) and the partner dashboard. Distinct from Stat above: this one
+// leads with the label, supports an optional trend badge + sub-line, and packs
+// tighter for multi-tile rows. `accent` colours the icon chip.
+export function StatTile({ label, value, sub, trend, icon, accent = '#19C3E6', delay = 0 }: {
+  label: string; value: string; sub?: string; trend?: React.ReactNode;
+  icon: string; accent?: string; delay?: number;
+}) {
+  return (
+    <Card className="group p-3.5 sm:p-4 animate-fadeInUp transition-all duration-200 ease-out
+        hover:-translate-y-0.5 hover:border-white/12 hover:shadow-[0_10px_32px_-10px_rgba(25,195,230,0.25)]"
+      style={{ animationDelay: `${delay}ms` }}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted">{label}</div>
+          <div className="mt-1 truncate text-xl font-bold tabular-nums text-ink sm:text-2xl">{value}</div>
+          {trend ? (
+            <div className="mt-1">
+              {trend}
+              {sub && <div className="mt-0.5 truncate text-[11px] text-muted/70">{sub}</div>}
+            </div>
+          ) : sub ? <div className="mt-0.5 truncate text-[11px] text-muted/70">{sub}</div> : null}
+        </div>
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl transition-transform duration-200 group-hover:scale-110 group-hover:-rotate-6"
+          style={{ background: `${accent}1a`, color: accent, boxShadow: `0 0 20px -10px ${accent}66` }}>
+          <Icon name={icon} size={19} />
+        </span>
+      </div>
+    </Card>
+  );
+}
+
 // ── useCountUp — eased count-up for stat numbers ────────────────────────
 export function useCountUp(target: number, ms = 700): number {
   const [v, setV] = useState(0);

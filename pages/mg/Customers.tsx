@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Icon, Button, Card, Badge, Input, Textarea, Modal, Drawer,
-  EmptyState, SkeletonList, useToast, Stat, Toggle,
+  EmptyState, SkeletonList, useToast, Stat, Toggle, Field,
 } from '../../components/ui';
 import { customersApi } from '../../lib/customersApi';
 import type {
@@ -25,15 +25,6 @@ const JOB_TONE: Record<string, 'ok' | 'warn' | 'danger' | 'info' | 'neutral'> = 
 const INV_TONE: Record<string, 'ok' | 'warn' | 'danger' | 'neutral'> = {
   paid: 'ok', unpaid: 'warn', void: 'neutral',
 };
-
-function Field({ label, children, className = '' }: { label: string; children: React.ReactNode; className?: string }) {
-  return (
-    <label className={`block ${className}`}>
-      <span className="mb-1 block text-xs font-medium text-muted">{label}</span>
-      {children}
-    </label>
-  );
-}
 
 export default function Customers() {
   const toast = useToast();

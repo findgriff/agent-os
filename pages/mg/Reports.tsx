@@ -5,7 +5,7 @@
 // 30 buckets, and a charting dependency would cost more than it earns.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Badge, Button, Card, EmptyState, Field, Icon, Input, Select, SkeletonList, useToast,
+  Badge, Button, Card, EmptyState, Field, Icon, Input, Select, SkeletonList, StatTile, useToast,
 } from '../../components/ui';
 import {
   reportsApi, downloadCsv, downloadActivityCsv, gbp, gbpShort, hoursMins,
@@ -57,34 +57,6 @@ const ACTOR_TONE: Record<ActorType, 'ok' | 'info' | 'violet' | 'warn' | 'neutral
 const ACCENT = '#19C3E6';
 
 // ── Building blocks ─────────────────────────────────────────────────────
-
-function StatTile({ label, value, sub, trend, icon, accent = ACCENT, delay = 0 }: {
-  label: string; value: string; sub?: string; trend?: React.ReactNode;
-  icon: string; accent?: string; delay?: number;
-}) {
-  return (
-    <Card className="group p-3.5 sm:p-4 animate-fadeInUp transition-all duration-200 ease-out
-        hover:-translate-y-0.5 hover:border-white/12 hover:shadow-[0_10px_32px_-10px_rgba(25,195,230,0.25)]"
-      style={{ animationDelay: `${delay}ms` }}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted">{label}</div>
-          <div className="mt-1 truncate text-xl font-bold tabular-nums text-ink sm:text-2xl">{value}</div>
-          {trend ? (
-            <div className="mt-1">
-              {trend}
-              {sub && <div className="mt-0.5 truncate text-[11px] text-muted/70">{sub}</div>}
-            </div>
-          ) : sub ? <div className="mt-0.5 truncate text-[11px] text-muted/70">{sub}</div> : null}
-        </div>
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl transition-transform duration-200 group-hover:scale-110 group-hover:-rotate-6"
-          style={{ background: `${accent}1a`, color: accent, boxShadow: `0 0 20px -10px ${accent}66` }}>
-          <Icon name={icon} size={19} />
-        </span>
-      </div>
-    </Card>
-  );
-}
 
 function SectionTitle({ children, count, accent = ACCENT, action }: {
   children: React.ReactNode; count?: number; accent?: string; action?: React.ReactNode;

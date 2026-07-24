@@ -5,7 +5,7 @@
 // confirm: this mails real customers, and an undo does not exist.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Badge, Button, Card, EmptyState, Field, Icon, Input, Select, SkeletonList, Textarea, useToast,
+  Badge, Button, Card, EmptyState, Field, Icon, Input, Select, SkeletonList, StatTile, Textarea, useToast,
 } from '../../components/ui';
 import {
   marketingApi, recurringApi, gbp, timeAgo,
@@ -31,28 +31,6 @@ const AUDIENCE_LABEL: Record<AudienceKind, string> = {
   never_cleaned: 'Never cleaned yet',
   unpaid_invoices: 'Has unpaid invoices',
 };
-
-function StatTile({ label, value, sub, icon, accent = ACCENT, delay = 0 }: {
-  label: string; value: string; sub?: string; icon: string; accent?: string; delay?: number;
-}) {
-  return (
-    <Card className="group p-3.5 sm:p-4 animate-fadeInUp transition-all duration-200
-        hover:-translate-y-0.5 hover:border-white/12"
-      style={{ animationDelay: `${delay}ms` }}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted">{label}</div>
-          <div className="mt-1 truncate text-xl font-bold tabular-nums text-ink sm:text-2xl">{value}</div>
-          {sub && <div className="mt-0.5 truncate text-[11px] text-muted/70">{sub}</div>}
-        </div>
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl"
-          style={{ background: `${accent}1a`, color: accent }}>
-          <Icon name={icon} size={19} />
-        </span>
-      </div>
-    </Card>
-  );
-}
 
 function SectionTitle({ children, count, accent = ACCENT, action }: {
   children: React.ReactNode; count?: number; accent?: string; action?: React.ReactNode;
