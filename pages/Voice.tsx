@@ -5,7 +5,7 @@
 // web — every command runs through /api/apollo/command and streams back an
 // action result rendered inline. Switching tabs auto-stops the mic and shows
 // "Tap to resume" (never auto-restarts). Collapses to a floating panel.
-import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useState, useEffect, useId, useMemo, useRef, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon, Button, Card, Badge, Toggle, Input, Modal, EmptyState, useToast } from '../components/ui';
 import { api, timeAgo } from '../lib/api';
@@ -82,6 +82,9 @@ export default function Voice() {
   const [showSettings, setShowSettings] = useState(false);
   const [voices, setVoices] = useState<any[]>([]);
   const [audioDevices, setAudioDevices] = useState<{ id: string; label: string }[]>([]);
+  const voiceFieldId = useId();
+  const micFieldId = useId();
+  const langFieldId = useId();
   const [selectedMicId, setSelectedMicId] = useState<string>(() => {
     try { return localStorage.getItem(MIC_KEY) || ''; } catch { return ''; }
   });
@@ -690,8 +693,8 @@ export default function Voice() {
       <Modal open={showSettings} onClose={() => setShowSettings(false)} title="Apollo settings">
         <div className="space-y-5">
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Voice</label>
-            <select value={settings.voiceUri}
+            <label htmlFor={voiceFieldId} className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Voice</label>
+            <select id={voiceFieldId} value={settings.voiceUri}
               onChange={e => setSettings(s => ({ ...s, voiceUri: e.target.value }))}
               className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-base text-ink focus:border-amber/50 focus:outline-none">
               {renderVoiceOptions()}
@@ -699,8 +702,8 @@ export default function Voice() {
             <p className="mt-1 text-[11px] text-muted/70">Apollo speaks with natural OpenAI voices; browser voices are also available.</p>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Microphone</label>
-            <select value={selectedMicId}
+            <label htmlFor={micFieldId} className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Microphone</label>
+            <select id={micFieldId} value={selectedMicId}
               onChange={e => setSelectedMicId(e.target.value)}
               className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-base text-ink focus:border-amber/50 focus:outline-none">
               <option value="">System default microphone</option>
@@ -715,8 +718,8 @@ export default function Voice() {
             </p>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Recognition language</label>
-            <select value={settings.lang}
+            <label htmlFor={langFieldId} className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Recognition language</label>
+            <select id={langFieldId} value={settings.lang}
               onChange={e => setSettings(s => ({ ...s, lang: e.target.value }))}
               className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-base text-ink focus:border-amber/50 focus:outline-none">
               {LANGS.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}

@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Avatar } from '../components/Avatar';
 import {
-  Badge, Button, EmptyState, Icon, Input, Modal, SkeletonList, useToast,
+  Badge, Button, EmptyState, Field, Icon, Input, Modal, SkeletonList, useToast,
 } from '../components/ui';
 import { api, timeAgo } from '../lib/api';
 import { useApp } from '../lib/store';
@@ -486,12 +486,11 @@ export default function WarRoom() {
       {/* New room modal */}
       <Modal open={newOpen} onClose={() => setNewOpen(false)} title="New war room">
         <div className="space-y-3">
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Room name</label>
+          <Field label="Room name">
             <Input autoFocus value={newName} placeholder="e.g. Q3 Launch War Room"
               onChange={e => setNewName(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void createRoom(); } }} />
-          </div>
+          </Field>
           <p className="text-[11px] text-muted/70">
             Agents join automatically the first time you @mention them here.
           </p>

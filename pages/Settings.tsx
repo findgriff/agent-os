@@ -68,6 +68,7 @@ export default function Settings() {
   const [syncing, setSyncing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [importText, setImportText] = useState('');
+  const importFieldId = React.useId();
 
   const syncVault = async () => {
     setSyncing(true);
@@ -197,11 +198,11 @@ export default function Settings() {
             </Button>
           </div>
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-ink">Import memories</label>
+            <label htmlFor={importFieldId} className="mb-1.5 block text-sm font-medium text-ink">Import memories</label>
             <p className="mb-2 text-xs text-muted">
               Paste memory JSON to preview. Import is advisory — add memories individually via the agent drawer.
             </p>
-            <Textarea rows={4} placeholder='[{"topic":"...","fact":"..."}]'
+            <Textarea id={importFieldId} rows={4} placeholder='[{"topic":"...","fact":"..."}]'
               value={importText} onChange={e => setImportText(e.target.value)} />
             <div className="mt-2">
               <Button variant="ghost" icon="upload" onClick={importMemories}

@@ -1,12 +1,13 @@
 // Partner portal sign-in — company code + password.
 // Standalone shell: no AGENT OS sidebar, no HQ session.
-import { useState } from 'react';
-import { Button, Icon, Input } from '../components/ui';
+import { useId, useState } from 'react';
+import { Button, Field, Icon, Input } from '../components/ui';
 import { partnerApi, setPartnerToken, type Partner } from '../lib/partnerApi';
 
 export default function PartnerLogin({ onAuthed }: { onAuthed: (p: Partner) => void }) {
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
+  const passwordId = useId();
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -53,25 +54,25 @@ export default function PartnerLogin({ onAuthed }: { onAuthed: (p: Partner) => v
 
         <form onSubmit={submit}
           className="glass rounded-2xl border border-white/10 p-6 shadow-2xl backdrop-blur-xl animate-fadeInUp">
-          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-muted">
-            Company code
-          </label>
-          <Input
-            value={code}
-            onChange={e => setCode(e.target.value)}
-            placeholder="e.g. LEESHENDRY"
-            autoCapitalize="characters"
-            autoCorrect="off"
-            spellCheck={false}
-            autoComplete="username"
-            className="tracking-wider"
-          />
+          <Field label="Company code" labelClassName="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-muted">
+            <Input
+              value={code}
+              onChange={e => setCode(e.target.value)}
+              placeholder="e.g. LEESHENDRY"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+              autoComplete="username"
+              className="tracking-wider"
+            />
+          </Field>
 
-          <label className="mb-1.5 mt-4 block text-xs font-semibold uppercase tracking-wider text-muted">
+          <label htmlFor={passwordId} className="mb-1.5 mt-4 block text-xs font-semibold uppercase tracking-wider text-muted">
             Password
           </label>
           <div className="relative">
             <Input
+              id={passwordId}
               type={show ? 'text' : 'password'}
               value={password}
               onChange={e => setPassword(e.target.value)}
