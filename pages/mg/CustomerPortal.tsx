@@ -83,6 +83,7 @@ export default function CustomerPortal() {
   const [past, setPast] = useState<MgJob[]>([]);
   const [invoices, setInvoices] = useState<MgInvoice[]>([]);
   const [paySummary, setPaySummary] = useState<{ paid_pence: number; unpaid_pence: number; count: number } | null>(null);
+  const [canPayOnline, setCanPayOnline] = useState(false);
   const [company, setCompany] = useState<MgCompany | null>(null);
 
   const loadAll = useCallback(async () => {
@@ -92,7 +93,11 @@ export default function CustomerPortal() {
       setPast(j.value.past);
       setCustomer(j.value.customer);
     }
-    if (p.status === 'fulfilled') { setInvoices(p.value.invoices); setPaySummary(p.value.summary); }
+    if (p.status === 'fulfilled') {
+      setInvoices(p.value.invoices);
+      setPaySummary(p.value.summary);
+      setCanPayOnline(p.value.can_pay_online);
+    }
     if (c.status === 'fulfilled') setCompany(c.value.company);
   }, []);
 
@@ -123,7 +128,7 @@ export default function CustomerPortal() {
   const signOut = () => {
     clearCustomerToken();
     setCustomer(null);
-    setUpcoming([]); setPast([]); setInvoices([]); setCompany(null);
+    setUpcoming([]); setPast([]); setInvoices([]); setCanPayOnline(false); setCompany(null);
     setIdentifier(''); setRef('');
   };
 
@@ -278,10 +283,25 @@ export default function CustomerPortal() {
                         </MGPill>
                       </div>
                     </div>
+                    {inv.vat_pence > 0 && (
+                      <p className="mt-1 text-xs text-slate-400">
+                        Includes {gbp(inv.vat_pence)} VAT
+                      </p>
+                    )}
                     {/* Shared with /customer/payments — creates the SumUp
                         checkout on demand rather than only showing a button
-                        when a link already happens to be stored. */}
-                    {inv.status === 'unpaid' && <PayButton invoice={inv} />}
+                        when a link already happens to be stored. Only offer
+                        card payment when the company has SumUp connected. */}
+                    {inv.status === 'unpaid' && (
+                      canPayOnline ? (
+                        <PayButton invoice={inv} />
+                      ) : (
+                        <p className="mt-3 text-sm text-slate-500">
+                          Card payment isn't available right now — please pay by
+                          bank transfer or speak to the office.
+                        </p>
+                      )
+                    )}
                   </MGCard>
                 ))}
               </div>
