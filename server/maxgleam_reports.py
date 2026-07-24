@@ -356,17 +356,27 @@ def _crew_performance(tenant_id: int, company_id: int | None,
         if rating:
             row["_ratings"].append(rating)
 
-    # Actual time on site, from any log closed in the same window.
-    clause = "clock_out IS NOT NULL AND clock_in >= ? AND subcontractor_id IS NOT NULL"
-    targs: list = [since_epoch]
+    # Actual time on site, from any log closed in the same window. Scoped to
+    # this tenant/company via crew and job (mirrors _time_logs) so a crew that
+    # also works for another company doesn't have those minutes summed in here.
+    clause = ("t.clock_out IS NOT NULL AND t.clock_in >= ?"
+              " AND t.subcontractor_id IS NOT NULL"
+              " AND (s.tenant_id = ? OR j.tenant_id = ?)")
+    targs: list = [since_epoch, tenant_id, tenant_id]
     if until_epoch is not None:
-        clause += " AND clock_in < ?"
+        clause += " AND t.clock_in < ?"
         targs.append(until_epoch)
-    for t in _rows("""SELECT subcontractor_id AS cid,
-                             COUNT(*) AS logs, SUM(total_minutes) AS mins
-                        FROM time_logs
+    if company_id is not None:
+        clause += " AND (j.partner_company_id = ? OR p.partner_company_id = ?)"
+        targs += [company_id, company_id]
+    for t in _rows("""SELECT t.subcontractor_id AS cid,
+                             COUNT(*) AS logs, SUM(t.total_minutes) AS mins
+                        FROM time_logs t
+                        LEFT JOIN subcontractors s ON s.id = t.subcontractor_id
+                        LEFT JOIN jobs j ON j.id = t.job_id
+                        LEFT JOIN properties p ON p.id = j.property_id
                        WHERE """ + clause
-                   + " GROUP BY subcontractor_id", tuple(targs)):
+                   + " GROUP BY t.subcontractor_id", tuple(targs)):
         row = by_crew.get(t["cid"])
         if row and t["logs"]:
             row["logged_jobs"] = t["logs"]
