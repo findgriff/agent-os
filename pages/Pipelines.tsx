@@ -350,7 +350,7 @@ export default function Pipelines() {
                         </div>
                       </div>
                       <div onClick={e => e.stopPropagation()}>
-                        <Toggle checked={p.enabled} onChange={() => toggleEnabled(p)} />
+                        <Toggle ariaLabel={p.name} checked={p.enabled} onChange={() => toggleEnabled(p)} />
                       </div>
                     </div>
                     <div className="mt-2 flex items-center justify-between gap-2">
@@ -396,7 +396,7 @@ export default function Pipelines() {
                     </div>
                     <div className="flex shrink-0 items-center gap-3">
                       <div className="flex items-center gap-2 text-xs text-muted">
-                        <Toggle checked={detail.enabled} onChange={() => toggleEnabled(detail)} />
+                        <Toggle ariaLabel={detail.name} checked={detail.enabled} onChange={() => toggleEnabled(detail)} />
                         {detail.enabled ? 'Enabled' : 'Disabled'}
                       </div>
                       <button onClick={() => setConfirmDelete(detail)} title="Delete pipeline"

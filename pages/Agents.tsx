@@ -251,7 +251,7 @@ export default function Agents() {
                   ) : <span className="text-[11px] text-muted/60">No generation</span>}
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] text-muted">{isOn(a) ? 'Enabled' : 'Disabled'}</span>
-                    <Toggle checked={isOn(a)} onChange={() => toggle(a)} disabled={!!toggling[a.id]} />
+                    <Toggle ariaLabel={a.real_name || a.name} checked={isOn(a)} onChange={() => toggle(a)} disabled={!!toggling[a.id]} />
                   </div>
                 </div>
               </Card>

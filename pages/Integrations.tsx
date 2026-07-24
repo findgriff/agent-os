@@ -255,7 +255,7 @@ export default function Integrations() {
 
                       <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-3">
                         <div className="flex items-center gap-2 text-xs text-muted">
-                          <Toggle checked={c.enabled} disabled={locked}
+                          <Toggle ariaLabel={c.label || c.meta.label} checked={c.enabled} disabled={locked}
                             onChange={() => toggleEnabled(c)} />
                           {c.enabled ? 'Enabled' : 'Disabled'}
                         </div>
