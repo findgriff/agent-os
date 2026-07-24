@@ -279,18 +279,52 @@ def _already_sent(job_id: int, trigger: str) -> bool:
                      (job_id, trigger)))
 
 
-def _log(job: dict, trigger: str, channel: str, to_addr: str, body: str,
-         status: str, error: str | None) -> None:
+def _claim(job: dict, trigger: str) -> bool:
+    """Reserve the (job_id, trigger) slot *before* sending. The UNIQUE index on
+    (job_id, trigger) makes this INSERT the concurrency lock: when two calls
+    race — a double-tapped START arriving on two threads — only one insert
+    wins. The loser gets IntegrityError and sends nothing, so the customer
+    never receives a duplicate text. Returns False when the slot is taken.
+
+    The row lands as 'pending'; _finalize fills in the real outcome. If the
+    process dies between the two, a stale 'pending' blocks a resend — a fair
+    trade against double-texting a real customer.
+    """
     conn = _conn()
     try:
         conn.execute(
             "INSERT INTO notification_log (tenant_id, job_id, customer_id, trigger, "
             " channel, to_addr, body, status, error) VALUES (?,?,?,?,?,?,?,?,?)",
             (job.get("tenant_id") or DEFAULT_TENANT_ID, job.get("job_id"),
-             job.get("customer_id"), trigger, channel, to_addr, body, status, error))
+             job.get("customer_id"), trigger, "", "", "", "pending", None))
+        conn.commit()
+        return True
     except sqlite3.IntegrityError:
-        # Lost a race with a concurrent sweep — the other one sent it.
-        return
+        return False
+
+
+def _finalize(job: dict, trigger: str, channel: str, to_addr: str, body: str,
+              status: str, error: str | None) -> None:
+    """Record the outcome on the row _claim reserved. Falls back to a plain
+    insert when there is no claim (a job_id-less notification, or a forced
+    re-send that never had one) so the send is still logged."""
+    conn = _conn()
+    row = (_one("SELECT id FROM notification_log WHERE job_id = ? AND trigger = ?",
+                (job.get("job_id"), trigger)) if job.get("job_id") else None)
+    if row:
+        conn.execute(
+            "UPDATE notification_log SET channel = ?, to_addr = ?, body = ?, "
+            " status = ?, error = ? WHERE id = ?",
+            (channel, to_addr, body, status, error, row["id"]))
+    else:
+        try:
+            conn.execute(
+                "INSERT INTO notification_log (tenant_id, job_id, customer_id, trigger, "
+                " channel, to_addr, body, status, error) VALUES (?,?,?,?,?,?,?,?,?)",
+                (job.get("tenant_id") or DEFAULT_TENANT_ID, job.get("job_id"),
+                 job.get("customer_id"), trigger, channel, to_addr, body, status, error))
+        except sqlite3.IntegrityError:
+            return
     if status in ("sent", "dry_run"):
         conn.execute(
             "INSERT INTO comms_log (tenant_id, customer_id, kind, content) VALUES (?,?,?,?)",
@@ -314,9 +348,15 @@ def notify_job(job: dict, trigger: str, tenant_id: int = DEFAULT_TENANT_ID,
     body = render(tpl["template"], job)
     channel = tpl["channel"]
 
+    # Claim the slot before sending so a concurrent double-tap can't slip past
+    # the _already_sent check above and fire a second real text. A forced
+    # re-send deliberately bypasses the lock and updates the existing row.
+    if not force and job_id and not _claim(job, trigger):
+        return {"job_id": job_id, "trigger": trigger, "status": "duplicate"}
+
     if _opted_out(job.get("customer_tags")):
-        _log(job, trigger, channel, job.get("customer_phone") or "", body,
-             "skipped_opt_out", None)
+        _finalize(job, trigger, channel, job.get("customer_phone") or "", body,
+                  "skipped_opt_out", None)
         return {"job_id": job_id, "trigger": trigger, "status": "skipped_opt_out"}
 
     if channel == "sms":
@@ -328,7 +368,7 @@ def notify_job(job: dict, trigger: str, tenant_id: int = DEFAULT_TENANT_ID,
         to_addr = (job.get("customer_email") or "").strip()
         status, error = "failed", "email channel not implemented"
 
-    _log(job, trigger, channel, to_addr, body, status, error)
+    _finalize(job, trigger, channel, to_addr, body, status, error)
     return {"job_id": job_id, "trigger": trigger, "status": status,
             "to": to_addr, "body": body, "error": error}
 

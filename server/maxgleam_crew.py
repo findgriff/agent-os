@@ -285,7 +285,10 @@ def start_job(crew: dict, body: dict) -> tuple[int, dict]:
         return 409, {"error": "that clean is already marked complete"}
     now = int(time.time())
     conn = _conn()
-    conn.execute("UPDATE jobs SET started_at = ? WHERE id = ?", (now, job["id"]))
+    # Only stamp the first START — a re-tap must not reset the on-site clock.
+    # (The on-my-way text below is idempotent per (job, trigger) regardless.)
+    conn.execute("UPDATE jobs SET started_at = ? WHERE id = ? AND started_at IS NULL",
+                 (now, job["id"]))
     conn.commit()
 
     # Tapping START is the crew saying "I'm on my way", so this is where the
