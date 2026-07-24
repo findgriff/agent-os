@@ -166,7 +166,7 @@ export default function SignOff() {
               <p className="mt-6 text-sm text-slate-500">
                 Something not right?{' '}
                 <a href={`tel:${job.company_phone.replace(/\s/g, '')}`}
-                  className="font-bold text-accent hover:underline">Call {job.company_name}</a>
+                  className="font-bold text-[#0E7C93] hover:underline">Call {job.company_name}</a>
               </p>
             )}
           </MGCard>
@@ -240,7 +240,8 @@ export default function SignOff() {
                   className="h-16 w-16 shrink-0 rounded-lg object-cover" />
                 <span className="min-w-0 flex-1 truncate text-sm text-slate-600">{photoName}</span>
                 <button onClick={() => { setPhoto(null); setPhotoName(''); if (fileRef.current) fileRef.current.value = ''; }}
-                  className="shrink-0 rounded-lg px-2.5 py-2 text-xs font-bold text-slate-400 hover:bg-red-50 hover:text-red-600">
+                  aria-label="Remove photo"
+                  className="inline-flex min-h-[44px] shrink-0 items-center rounded-lg px-3 text-xs font-bold text-slate-400 hover:bg-red-50 hover:text-red-600">
                   Remove
                 </button>
               </div>
