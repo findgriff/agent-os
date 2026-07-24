@@ -265,7 +265,14 @@ export default function CustomerPortal() {
               <MGCard className="p-6 text-center text-slate-500">No invoices yet.</MGCard>
             ) : (
               <div className="space-y-3">
-                {invoices.map(inv => (
+                {invoices.map(inv => {
+                  // Balance-aware, matching CustomerPayments' InvoiceCard: a
+                  // part-paid invoice must show what's still owed, not the full
+                  // face value, and stay payable until the balance clears.
+                  const paid = inv.status === 'paid';
+                  const partPaid = !paid && (inv.paid_pence ?? 0) > 0;
+                  const owed = inv.outstanding_pence ?? inv.amount_pence;
+                  return (
                   <MGCard key={inv.id} className="p-4">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -277,12 +284,17 @@ export default function CustomerPortal() {
                         </div>
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-1.5">
-                        <span className="font-bold tabular-nums text-slate-900">{gbp(inv.amount_pence)}</span>
-                        <MGPill tone={inv.status === 'paid' ? 'green' : 'amber'}>
-                          {inv.status === 'paid' ? 'Paid' : 'Unpaid'}
+                        <span className="font-bold tabular-nums text-slate-900">{gbp(paid ? inv.amount_pence : owed)}</span>
+                        <MGPill tone={paid ? 'green' : 'amber'}>
+                          {paid ? 'Paid' : partPaid ? 'Part-paid' : 'Unpaid'}
                         </MGPill>
                       </div>
                     </div>
+                    {partPaid && (
+                      <p className="mt-1 text-xs text-slate-400">
+                        {gbp(inv.paid_pence ?? 0)} of {gbp(inv.amount_pence)} already paid
+                      </p>
+                    )}
                     {inv.vat_pence > 0 && (
                       <p className="mt-1 text-xs text-slate-400">
                         Includes {gbp(inv.vat_pence)} VAT
@@ -291,8 +303,10 @@ export default function CustomerPortal() {
                     {/* Shared with /customer/payments — creates the SumUp
                         checkout on demand rather than only showing a button
                         when a link already happens to be stored. Only offer
-                        card payment when the company has SumUp connected. */}
-                    {inv.status === 'unpaid' && (
+                        card payment when the company has SumUp connected. Gate on
+                        the balance, not status === 'unpaid', so a part-paid
+                        invoice (status may be 'partial') stays payable. */}
+                    {!paid && owed > 0 && (
                       canPayOnline ? (
                         <PayButton invoice={inv} />
                       ) : (
@@ -303,7 +317,8 @@ export default function CustomerPortal() {
                       )
                     )}
                   </MGCard>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

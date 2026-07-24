@@ -659,7 +659,7 @@ function TimeTab({ data }: { data: ReportsData }) {
   }, [history?.open_count, load]);
 
   const variance = useMemo(() => {
-    if (!data.time.avg_minutes) return null;
+    if (data.time.avg_minutes == null) return null;
     return Math.round(data.time.avg_minutes - data.time.estimated_minutes);
   }, [data.time]);
 
@@ -1106,14 +1106,20 @@ function AlertsTab() {
 
 
 // ── Tax ─────────────────────────────────────────────────────────────────
+// Same reason as isoDay above: toISOString() is UTC, so just after midnight
+// local time it can report the previous month. Build YYYY-MM from local parts,
+// and back-date by constructing day-1 of the target month (setMonth on a 31st
+// overflows into the wrong month).
+function isoMonth(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
 /** Current month as YYYY-MM. */
-const thisMonth = () => new Date().toISOString().slice(0, 7);
+const thisMonth = () => isoMonth(new Date());
 
 /** N months back from now as YYYY-MM. */
 function monthsAgo(n: number): string {
-  const d = new Date();
-  d.setMonth(d.getMonth() - n);
-  return d.toISOString().slice(0, 7);
+  const now = new Date();
+  return isoMonth(new Date(now.getFullYear(), now.getMonth() - n, 1));
 }
 
 const RANGE_PRESETS: { label: string; from: () => string; to: () => string }[] = [
