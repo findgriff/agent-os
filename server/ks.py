@@ -620,7 +620,7 @@ def create_booking(body: dict, parent: dict | None = None) -> tuple[int, dict]:
     except (TypeError, ValueError):
         return 400, {"error": "invalid age"}
     if age is not None and not (3 <= age <= 18):
-        return 400, {"error": "we coach players aged 5-16 (3-18 accepted for enquiries)"}
+        return 400, {"error": "we coach players aged 3 to 18"}
 
     # Re-check the slot is genuinely free rather than trusting the client.
     code, avail = slots(svc["key"], date_str)
@@ -996,7 +996,7 @@ def students_add(coach: dict, body: dict) -> tuple[int, dict]:
     if age is None:
         return 400, {"error": "the child's age or date of birth is required"}
     if not (3 <= age <= 18):
-        return 400, {"error": "we coach players aged 5-16 (3-18 accepted)"}
+        return 400, {"error": "we coach players aged 3 to 18"}
     if not parent_name:
         return 400, {"error": "the parent's name is required"}
     if not auth.valid_email(parent_email):
@@ -1673,11 +1673,22 @@ def sms_inbound(body: dict, form: dict) -> tuple[int, dict]:
     if not frm:
         return 400, {"error": "missing sender"}
     if text.split()[:1] == ["STOP"]:
-        conn = _conn()
+        # Match on the last 10 digits (a full UK subscriber number) so the
+        # same parent is found whether their number is stored as 07… or
+        # +447…. Compare that suffix *exactly* rather than with a trailing
+        # wildcard: a bare "%digits" would also opt out any longer stored
+        # number that merely ends the same way, and a short/garbled sender
+        # would collapse to a wildcard that opts out half the roster.
         digits = re.sub(r"\D", "", frm)[-10:]
-        conn.execute("UPDATE parents SET sms_opt_out = 1 "
-                     "WHERE replace(replace(phone,' ',''),'+','') LIKE ?", (f"%{digits}",))
+        if len(digits) < 10:
+            log.warning("ks: STOP from unmatchable sender %r — ignored", frm)
+            return 200, {"ok": True, "opted_out": False}
+        conn = _conn()
+        cur = conn.execute(
+            "UPDATE parents SET sms_opt_out = 1 "
+            "WHERE substr(replace(replace(phone,' ',''),'+',''), -10) = ?",
+            (digits,))
         conn.commit()
-        log.info("ks: STOP honoured for %s", frm)
+        log.info("ks: STOP honoured for %s (%d matched)", frm, cur.rowcount)
         return 200, {"ok": True, "opted_out": True}
     return 200, {"ok": True, "opted_out": False}
