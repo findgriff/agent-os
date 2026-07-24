@@ -4,6 +4,7 @@
 // An HQ surface, so it wears the AGENT OS dark theme (unlike the customer
 // pages under pages/mg/, which are deliberately light).
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Badge, Button, Card, EmptyState, Icon, Input, Modal, Select, SkeletonList, useToast } from '../../components/ui';
 import {
   invoicesApi, downloadInvoicePdf, gbp, PAYMENT_METHOD_LABELS,
@@ -51,7 +52,7 @@ function InvoiceRow({ inv, onSend, onPdf, onRecordPaid, onRevert }: {
   inv: MgInvoiceRow;
   onSend: (i: MgInvoiceRow) => Promise<void>;
   onPdf: (i: MgInvoiceRow) => Promise<void>;
-  onRecordPaid: (i: MgInvoiceRow, method: PaymentMethod, amountPence?: number) => Promise<void>;
+  onRecordPaid: (i: MgInvoiceRow, method: PaymentMethod, amountPence?: number) => Promise<boolean>;
   onRevert: (i: MgInvoiceRow) => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
@@ -101,7 +102,7 @@ function InvoiceRow({ inv, onSend, onPdf, onRecordPaid, onRevert }: {
         </div>
       </div>
 
-      <div className="flex shrink-0 items-center gap-2 pl-2.5 sm:pl-0">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 pl-2.5 sm:pl-0">
         <div className="text-right">
           <div className="text-sm font-semibold tabular-nums text-ink">{gbp(inv.amount_pence)}</div>
           {inv.display_status === 'partial' || (inv.paid_pence > 0 && inv.outstanding_pence > 0) ? (
@@ -116,13 +117,12 @@ function InvoiceRow({ inv, onSend, onPdf, onRecordPaid, onRevert }: {
           {inv.display_status[0].toUpperCase() + inv.display_status.slice(1)}
         </Badge>
         {inv.sumup_checkout_url && inv.outstanding_pence > 0 && (
-          <a href={inv.sumup_checkout_url} target="_blank" rel="noopener noreferrer"
-            title="Open the SumUp pay-link">
-            <Button variant="ghost" icon="link" className="!px-2 !py-1.5" />
-          </a>
+          <Button variant="ghost" icon="link" className="!h-11 !w-11 !px-0"
+            title="Open the SumUp pay-link" aria-label="Open the SumUp pay-link"
+            onClick={() => window.open(inv.sumup_checkout_url!, '_blank', 'noopener,noreferrer')} />
         )}
         {inv.outstanding_pence > 0 && inv.status !== 'void' && (
-          <Button variant="secondary" icon="payments" className="!px-2.5"
+          <Button variant="secondary" icon="payments" className="!px-2.5 min-h-[44px]"
             title="Record a cash, transfer or card-reader payment"
             onClick={openPay}>
             {inv.paid_pence > 0 ? 'Add payment' : 'Mark paid'}
@@ -130,11 +130,11 @@ function InvoiceRow({ inv, onSend, onPdf, onRecordPaid, onRevert }: {
         )}
         {canRevert && (
           <Button variant="ghost" icon="undo" loading={reverting} title="Revert this payment"
-            className="!px-2 !py-1.5"
+            aria-label="Revert this payment" className="!h-11 !w-11 !px-0"
             onClick={async () => { setReverting(true); await onRevert(inv); setReverting(false); }} />
         )}
         <Button variant="ghost" icon="download" loading={pdfBusy} title="Download PDF"
-          className="!px-2 !py-1.5"
+          aria-label="Download PDF" className="!h-11 !w-11 !px-0"
           onClick={async () => { setPdfBusy(true); await onPdf(inv); setPdfBusy(false); }} />
         <Button variant="secondary" icon="mail" loading={busy}
           disabled={!inv.customer_email}
@@ -178,10 +178,14 @@ function InvoiceRow({ inv, onSend, onPdf, onRecordPaid, onRevert }: {
               onClick={async () => {
                 setSaving(true);
                 // Send the amount only when it's a part payment; a full balance
-                // omits it so the server settles whatever is outstanding.
-                await onRecordPaid(inv, method, isPart ? amountPence : undefined);
-                setSaving(false);
-                setPayOpen(false);
+                // omits it so the server settles whatever is outstanding. Keep the
+                // modal open (and the entered amount intact) if the save failed.
+                try {
+                  const ok = await onRecordPaid(inv, method, isPart ? amountPence : undefined);
+                  if (ok) setPayOpen(false);
+                } finally {
+                  setSaving(false);
+                }
               }}>
               {isPart ? `Record ${gbp(amountPence)}` : 'Confirm payment'}
             </Button>
@@ -194,11 +198,15 @@ function InvoiceRow({ inv, onSend, onPdf, onRecordPaid, onRevert }: {
 
 export default function Invoices() {
   const toast = useToast();
+  const [params] = useSearchParams();
   const [data, setData] = useState<InvoiceList | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
-  const [search, setSearch] = useState('');
+  // Seed the search from ?q= so a "view invoice" link from a converted quote
+  // lands straight on that invoice number.
+  const [search, setSearch] = useState(() => params.get('q') || '');
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
@@ -217,8 +225,15 @@ export default function Invoices() {
   // Filtering is client-side: the list is already loaded in full, and the
   // server's own filter would cost a round-trip per tab click.
   const shown = useMemo(() => {
-    const rows = (data?.invoices || []).filter(
-      i => filter === 'all' || i.display_status === filter);
+    const rows = (data?.invoices || []).filter(i => {
+      if (filter === 'all') return true;
+      // 'Unpaid' is the umbrella for "still owes money" — part-paid and overdue
+      // invoices belong here too (matching the Unpaid badge/stat-tile, which
+      // count every invoice with a balance). Without this, a part-paid invoice
+      // — display_status 'partial' — is surfaced by no filter tab at all.
+      if (filter === 'unpaid') return i.outstanding_pence > 0;
+      return i.display_status === filter;
+    });
     const q = search.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter(i =>
@@ -280,8 +295,10 @@ export default function Invoices() {
         ? `${inv.number} part-paid by ${how} — ${gbp(invoice.outstanding_pence)} still due`
         : `${inv.number} marked paid — ${how}`, 'ok');
       await load();
+      return true;
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not record that payment', 'danger');
+      return false;
     }
   };
 
@@ -318,11 +335,14 @@ export default function Invoices() {
           <Button variant="primary" icon="auto_awesome" loading={generating} onClick={generate}>
             Auto-generate
           </Button>
-          <Button variant="secondary" icon="refresh" onClick={load}>Refresh</Button>
+          <Button variant="secondary" icon="refresh" loading={refreshing}
+            onClick={async () => { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } }}>
+            Refresh
+          </Button>
         </div>
       </header>
 
-      {error && (
+      {error && data && (
         <Card className="border-rose/25 bg-rose/5 p-3 text-sm text-rose">{error}</Card>
       )}
 
@@ -374,7 +394,10 @@ export default function Invoices() {
           className="min-w-[200px] flex-1 sm:max-w-xs" />
       </div>
 
-      {loading ? <SkeletonList count={5} /> : shown.length === 0 ? (
+      {loading ? <SkeletonList count={5} /> : error && !data ? (
+        <EmptyState icon="error" accent="#F43F5E" title="Couldn't load invoices"
+          hint={error} action={<Button icon="refresh" onClick={load}>Try again</Button>} />
+      ) : shown.length === 0 ? (
         <EmptyState icon="receipt_long"
           title={search ? 'Nothing matches that search' : `No ${filter === 'all' ? '' : filter} invoices`}
           hint={filter === 'all'
