@@ -473,8 +473,10 @@ export const ksApi = {
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────────
-export const money = (pence: number) =>
-  pence % 100 === 0 ? `£${pence / 100}` : `£${(pence / 100).toFixed(2)}`;
+export const money = (pence: number) => {
+  const p = pence || 0;
+  return p % 100 === 0 ? `£${p / 100}` : `£${(p / 100).toFixed(2)}`;
+};
 
 export const dayName = (iso: string) => {
   const d = new Date(`${iso}T00:00:00`);

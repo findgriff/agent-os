@@ -1269,7 +1269,7 @@ function TaxTab() {
                       <tr key={i.id} className="border-t border-white/5 transition-colors hover:bg-white/[0.03]">
                         <td className="px-1 py-2 font-mono text-[12px] text-ink">{i.number}</td>
                         <td className="px-1 py-2 text-[12px] text-muted">
-                          {new Date(i.issued_at * 1000).toLocaleDateString('en-GB')}
+                          {i.issued_at ? new Date(i.issued_at * 1000).toLocaleDateString('en-GB') : '—'}
                         </td>
                         <td className="max-w-[160px] truncate px-1 py-2 text-[12px] text-ink">
                           {i.customer_name || '—'}

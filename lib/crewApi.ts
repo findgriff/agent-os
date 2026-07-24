@@ -136,4 +136,4 @@ export const crewApi = {
 };
 
 export const photoUrl = (id: number) => `/api/maxgleam/photo/${id}`;
-export const money = (pence: number) => `£${(pence / 100).toFixed(2)}`;
+export const money = (pence: number) => `£${((pence || 0) / 100).toFixed(2)}`;

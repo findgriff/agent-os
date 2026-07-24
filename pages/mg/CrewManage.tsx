@@ -11,8 +11,8 @@ import type {
   CrewRow, CrewSummary, CrewDetail, CrewCore, NewCrew, Leave,
 } from '../../lib/crewAdminApi';
 
-const gbp = (p: number) => `£${(p / 100).toLocaleString('en-GB', { maximumFractionDigits: 0 })}`;
-const gbp2 = (p: number) => `£${(p / 100).toFixed(2)}`;
+const gbp = (p: number) => `£${((p || 0) / 100).toLocaleString('en-GB', { maximumFractionDigits: 0 })}`;
+const gbp2 = (p: number) => `£${((p || 0) / 100).toFixed(2)}`;
 const fmtDate = (d?: string | null) =>
   d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—';
 const fmtTs = (t?: number | null) =>
@@ -157,7 +157,7 @@ function CrewDrawer({ id, onClose, onChanged }: { id: number; onClose: () => voi
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {c && <Button variant="ghost" icon="edit" onClick={() => setEditing(true)}>Edit</Button>}
-          <button onClick={onClose} className="grid h-11 w-11 place-items-center rounded-lg text-muted hover:bg-white/6 hover:text-ink">
+          <button onClick={onClose} aria-label="Close" className="grid h-11 w-11 place-items-center rounded-lg text-muted hover:bg-white/6 hover:text-ink">
             <Icon name="close" size={20} />
           </button>
         </div>

@@ -9,8 +9,8 @@ import {
 import { quotesApi } from '../../lib/quotesApi';
 import type { Quote, QuoteStatus, QuoteSummary, NewQuote } from '../../lib/quotesApi';
 
-const gbp = (p: number) => `£${(p / 100).toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-const gbp2 = (p: number) => `£${(p / 100).toFixed(2)}`;
+const gbp = (p: number) => `£${((p || 0) / 100).toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+const gbp2 = (p: number) => `£${((p || 0) / 100).toFixed(2)}`;
 
 const STATUS: Record<QuoteStatus, { label: string; tone: 'ok' | 'warn' | 'danger' | 'info' | 'neutral' | 'violet'; icon: string }> = {
   draft:     { label: 'Draft',     tone: 'neutral', icon: 'edit_note' },
@@ -52,6 +52,7 @@ export default function Quotes() {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [summary, setSummary] = useState<QuoteSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [filter, setFilter] = useState<QuoteStatus | 'all'>('all');
   const [editing, setEditing] = useState<Quote | 'new' | null>(null);
   const [converting, setConverting] = useState<Quote | null>(null);
@@ -59,9 +60,10 @@ export default function Quotes() {
 
   const load = () => {
     setLoading(true);
+    setError('');
     quotesApi.list()
       .then(r => { setQuotes(r.quotes); setSummary(r.summary); })
-      .catch(() => toast('Could not load quotes', 'danger'))
+      .catch(() => { setError('Could not reach the server.'); toast('Could not load quotes', 'danger'); })
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
@@ -122,7 +124,10 @@ export default function Quotes() {
 
       {/* List */}
       {loading ? <SkeletonList count={4} />
-        : shown.length === 0 ? (
+        : error && quotes.length === 0 ? (
+          <EmptyState icon="error" accent="#F43F5E" title="Couldn't load quotes" hint={error}
+            action={<Button icon="refresh" onClick={load}>Try again</Button>} />
+        ) : shown.length === 0 ? (
           <EmptyState icon="request_quote" title="No quotes here"
             hint={filter === 'all' ? 'Create your first quote to start the funnel.' : 'Nothing in this stage yet.'} />
         ) : (

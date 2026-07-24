@@ -12,8 +12,8 @@ import type {
   CustomerRow, CustomerSummary, CustomerDetail, CustomerPatch,
 } from '../../lib/customersApi';
 
-const gbp = (p: number) => `£${(p / 100).toLocaleString('en-GB', { maximumFractionDigits: 0 })}`;
-const gbp2 = (p: number) => `£${(p / 100).toFixed(2)}`;
+const gbp = (p: number) => `£${((p || 0) / 100).toLocaleString('en-GB', { maximumFractionDigits: 0 })}`;
+const gbp2 = (p: number) => `£${((p || 0) / 100).toFixed(2)}`;
 const fmtDate = (d?: string | null) =>
   d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
 const fmtTs = (t?: number | null) =>
@@ -40,15 +40,17 @@ export default function Customers() {
   const [rows, setRows] = useState<CustomerRow[]>([]);
   const [summary, setSummary] = useState<CustomerSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [q, setQ] = useState('');
   const [openId, setOpenId] = useState<number | null>(null);
   const debounce = useRef<ReturnType<typeof setTimeout>>();
 
   const load = (search = q) => {
     setLoading(true);
+    setError('');
     customersApi.list(search)
       .then(r => { setRows(r.customers); setSummary(r.summary); })
-      .catch(() => toast('Could not load customers', 'danger'))
+      .catch(() => { setError('Could not reach the server.'); toast('Could not load customers', 'danger'); })
       .finally(() => setLoading(false));
   };
   useEffect(() => { load(''); }, []);
@@ -83,7 +85,10 @@ export default function Customers() {
       )}
 
       {loading ? <SkeletonList count={6} />
-        : rows.length === 0 ? (
+        : error && rows.length === 0 ? (
+          <EmptyState icon="error" accent="#F43F5E" title="Couldn't load customers" hint={error}
+            action={<Button icon="refresh" onClick={() => load()}>Try again</Button>} />
+        ) : rows.length === 0 ? (
           <EmptyState icon="person_search" title="No customers found"
             hint={q ? 'Nothing matches that search.' : 'Convert a quote to add your first customer.'} />
         ) : (
@@ -171,7 +176,7 @@ function CustomerDrawer({ id, onClose, onChanged }: {
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {c && <Button variant="ghost" icon="edit" onClick={() => setEditing(true)}>Edit</Button>}
-          <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-lg text-muted hover:bg-white/6 hover:text-ink">
+          <button onClick={onClose} aria-label="Close" className="grid h-9 w-9 place-items-center rounded-lg text-muted hover:bg-white/6 hover:text-ink">
             <Icon name="close" size={20} />
           </button>
         </div>
