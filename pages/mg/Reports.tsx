@@ -1980,12 +1980,16 @@ export default function Reports() {
         <RangeBar value={range} onChange={setRange} />
       )}
 
-      {/* Tax, exports and commissions each fetch their own data, so they stay
-          available even if the main reports payload fails to load. */}
+      {/* Every self-fetching tab sits above the shared-payload gate, so it stays
+          available even if reportsApi.reports() fails. Only Overview, Crew and
+          Time read that shared `data`; the rest fetch on their own terms. */}
       {tab === 'tax' ? <TaxTab />
         : tab === 'exports' ? <ExportsTab />
         : tab === 'commissions' ? <CommissionsTab />
         : tab === 'profit' ? <ProfitTab range={range} />
+        : tab === 'reviews' ? <ReviewsTab />
+        : tab === 'activity' ? <ActivityTab />
+        : tab === 'alerts' ? <AlertsTab />
         : loading ? <SkeletonList count={5} />
         : error ? (
           <EmptyState icon="error" accent="#F43F5E" title="Could not load reports" hint={error}
@@ -1993,10 +1997,7 @@ export default function Reports() {
         ) : data ? (
           tab === 'overview' ? <Overview data={data} />
             : tab === 'crew' ? <CrewTab data={data} />
-            : tab === 'time' ? <TimeTab data={data} />
-            : tab === 'reviews' ? <ReviewsTab />
-            : tab === 'activity' ? <ActivityTab />
-            : <AlertsTab />
+            : <TimeTab data={data} />
         ) : null}
     </div>
   );
