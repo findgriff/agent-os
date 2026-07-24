@@ -20,7 +20,10 @@
       "Bash(python3 -c \"import sys,json;r=json.load\\(sys.stdin\\);print\\('call_sid',r['call_sid'],'| score',r['score'],'| ticket_id',r.get\\('ticket_id'\\)\\)\")",
       "Bash(curl -s -X DELETE \"http://localhost:3200/ops_tickets?id=eq.38\" -H \"Prefer: return=minimal\" -o /dev/null -w \"deleted ticket #38 \\(HTTP %{http_code}\\)\\\\n\")",
       "Bash(python3 -)",
-      "Bash(python3 tools/call_agent.py badcmd)"
+      "Bash(python3 tools/call_agent.py badcmd)",
+      "Bash(./deploy.sh)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8100/healthz)",
+      "Bash(curl -s http://localhost:8100/)"
     ]
   }
 }

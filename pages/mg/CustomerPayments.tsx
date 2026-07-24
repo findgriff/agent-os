@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
-  MGShell, MGButton, MGCard, MGInput, MGLabel, MGAlert, MGPill, MGSpinner,
+  MGShell, MGButton, MGCard, MGInput, MGField, MGAlert, MGPill, MGSpinner,
 } from './MGKit';
 import {
   mgApi, getCustomerToken, setCustomerToken, clearCustomerToken,
@@ -372,17 +372,15 @@ function PaymentsLogin({ onAuthed }: { onAuthed: (c: MgCustomer) => void }) {
         </div>
         <MGCard className="p-5">
           <form onSubmit={submit} className="space-y-4">
-            <div>
-              <MGLabel hint="(whichever we have for you)">Email or mobile</MGLabel>
+            <MGField label="Email or mobile" hint="(whichever we have for you)">
               <MGInput required value={identifier} autoComplete="email"
                 onChange={e => setIdentifier(e.target.value)}
                 placeholder="you@example.com" />
-            </div>
-            <div>
-              <MGLabel hint="(on your invoice or text)">Job reference</MGLabel>
+            </MGField>
+            <MGField label="Job reference" hint="(on your invoice or text)">
               <MGInput required value={ref} onChange={e => setRef(e.target.value)}
                 placeholder="MG-0042" />
-            </div>
+            </MGField>
             {error && <MGAlert>{error}</MGAlert>}
             <MGButton type="submit" loading={busy} className="w-full py-4 text-base">
               Sign in

@@ -8,9 +8,9 @@
 // Sign-in is a code texted to the number already on the crew list — no
 // password to forget on site. The token lives in localStorage so the app
 // survives the phone locking between stops.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import {
-  MGShell, MGMark, MGButton, MGCard, MGInput, MGTextarea, MGLabel,
+  MGShell, MGMark, MGButton, MGCard, MGInput, MGTextarea, MGLabel, MGField,
   MGAlert, MGPill, MGSpinner,
 } from './MGKit';
 import {
@@ -191,12 +191,11 @@ function CrewLogin({ onAuthed }: { onAuthed: (c: Crew) => void }) {
         <MGCard className="p-5">
           {stage === 'phone' ? (
             <form onSubmit={sendCode} className="space-y-4">
-              <div>
-                <MGLabel>Mobile number</MGLabel>
+              <MGField label="Mobile number">
                 <MGInput type="tel" inputMode="tel" autoComplete="tel" required
                   value={phone} onChange={e => setPhone(e.target.value)}
                   placeholder="07700 900123" className="py-3.5 text-lg" />
-              </div>
+              </MGField>
               {error && <MGAlert>{error}</MGAlert>}
               <MGButton type="submit" loading={busy} className="w-full py-4 text-base">
                 Text me a code
@@ -205,14 +204,13 @@ function CrewLogin({ onAuthed }: { onAuthed: (c: Crew) => void }) {
           ) : (
             <form onSubmit={verify} className="space-y-4">
               {hint && <MGAlert tone="info">{hint}</MGAlert>}
-              <div>
-                <MGLabel>Code</MGLabel>
+              <MGField label="Code">
                 <MGInput inputMode="numeric" autoComplete="one-time-code" required
                   maxLength={6} value={code}
                   onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
                   placeholder="000000"
                   className="py-3.5 text-center text-xl font-bold tracking-[0.3em] sm:text-2xl sm:tracking-[0.4em]" />
-              </div>
+              </MGField>
               {error && <MGAlert>{error}</MGAlert>}
               <MGButton type="submit" loading={busy} disabled={code.length < 6}
                 className="w-full py-4 text-base">
@@ -541,9 +539,10 @@ function CompletePanel({ job, onDone, onCancel }:
 
   return (
     <form onSubmit={submit} className="space-y-3 border-t border-slate-200 bg-white p-4">
-      <MGLabel hint="optional">Anything the office should know?</MGLabel>
-      <MGTextarea rows={3} value={notes} onChange={e => setNotes(e.target.value)}
-        placeholder="Back gate locked, did fronts only…" />
+      <MGField label="Anything the office should know?" hint="optional">
+        <MGTextarea rows={3} value={notes} onChange={e => setNotes(e.target.value)}
+          placeholder="Back gate locked, did fronts only…" />
+      </MGField>
       {error && <MGAlert>{error}</MGAlert>}
       <div className="grid grid-cols-2 gap-2">
         <MGButton type="button" tone="secondary" onClick={onCancel}
@@ -567,6 +566,7 @@ function IssuePanel({ job, onDone, onCancel }:
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const photoId = useId();
 
   function pickPhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -598,16 +598,15 @@ function IssuePanel({ job, onDone, onCancel }:
 
   return (
     <form onSubmit={submit} className="space-y-3 border-t border-slate-200 bg-white p-4">
-      <div>
-        <MGLabel>What’s the problem?</MGLabel>
+      <MGField label="What’s the problem?">
         <MGTextarea rows={3} required value={description}
           onChange={e => setDescription(e.target.value)}
           placeholder="Cracked pane in the bay window, customer aware…" />
-      </div>
+      </MGField>
 
       <div>
         <MGLabel>How urgent?</MGLabel>
-        <div className="grid grid-cols-4 gap-1.5">
+        <div role="group" aria-label="How urgent?" className="grid grid-cols-4 gap-1.5">
           {PRIORITIES.map(p => (
             <button key={p} type="button" onClick={() => setPriority(p)}
               className={`min-h-[44px] rounded-xl border text-xs font-bold capitalize transition-colors
@@ -621,8 +620,8 @@ function IssuePanel({ job, onDone, onCancel }:
       </div>
 
       <div>
-        <MGLabel hint="optional">Photo</MGLabel>
-        <input ref={fileRef} type="file" accept="image/jpeg,image/png" capture="environment"
+        <MGLabel htmlFor={photoId} hint="optional">Photo</MGLabel>
+        <input id={photoId} ref={fileRef} type="file" accept="image/jpeg,image/png" capture="environment"
           onChange={pickPhoto}
           className="block w-full text-sm text-slate-600 file:mr-3 file:min-h-[44px] file:rounded-xl
             file:border file:border-slate-300 file:bg-white file:px-4 file:text-sm file:font-bold
