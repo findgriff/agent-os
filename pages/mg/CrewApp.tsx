@@ -605,7 +605,7 @@ function IssuePanel({ job, onDone, onCancel }:
       </MGField>
 
       <div>
-        <MGLabel>How urgent?</MGLabel>
+        <div className="mb-1.5 block text-sm font-semibold text-slate-700">How urgent?</div>
         <div role="group" aria-label="How urgent?" className="grid grid-cols-4 gap-1.5">
           {PRIORITIES.map(p => (
             <button key={p} type="button" onClick={() => setPriority(p)}

@@ -3,7 +3,7 @@
 // status, payment history, and how to reach the company doing the work.
 import { useCallback, useEffect, useState } from 'react';
 import {
-  MGShell, MGButton, MGButtonLink, MGCard, MGInput, MGLabel, MGAlert, MGPill, MGSpinner, signoffLook, Stars,
+  MGShell, MGButton, MGButtonLink, MGCard, MGInput, MGField, MGAlert, MGPill, MGSpinner, signoffLook, Stars,
 } from './MGKit';
 import {
   mgApi, setCustomerToken, clearCustomerToken, getCustomerToken,
@@ -150,18 +150,16 @@ export default function CustomerPortal() {
 
           <MGCard className="mt-6 p-6">
             <form onSubmit={submit} className="space-y-4">
-              <div>
-                <MGLabel hint="(whichever we have for you)">Email or mobile number</MGLabel>
+              <MGField label="Email or mobile number" hint="(whichever we have for you)">
                 <MGInput value={identifier} onChange={e => setIdentifier(e.target.value)}
                   placeholder="you@example.com or 07…" autoComplete="email"
                   autoCapitalize="none" autoCorrect="off" />
-              </div>
-              <div>
-                <MGLabel hint="(on your invoice or text)">Job reference</MGLabel>
+              </MGField>
+              <MGField label="Job reference" hint="(on your invoice or text)">
                 <MGInput value={ref} onChange={e => setRef(e.target.value)}
                   placeholder="MG-0026" autoCapitalize="characters" autoCorrect="off"
                   spellCheck={false} className="font-mono tracking-wider" />
-              </div>
+              </MGField>
               {error && <MGAlert>{error}</MGAlert>}
               <MGButton type="submit" loading={busy} className="w-full py-3">Sign in</MGButton>
             </form>

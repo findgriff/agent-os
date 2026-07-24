@@ -247,8 +247,9 @@ export default function BookOnline() {
               </div>
             )}
 
-            <MGLabel>Which address?</MGLabel>
-            <div className="mb-4 space-y-2">
+            <div role="group" aria-label="Which address?" className="mb-4">
+            <div className="mb-1.5 block text-sm font-semibold text-slate-700">Which address?</div>
+            <div className="space-y-2">
               {(lookup?.properties ?? []).map(p => (
                 <button key={p.property_id} type="button"
                   onClick={() => setProperty(p)}
@@ -261,8 +262,10 @@ export default function BookOnline() {
                 </button>
               ))}
             </div>
+            </div>
 
-            <MGLabel>What do you need?</MGLabel>
+            <div role="group" aria-label="What do you need?">
+            <div className="mb-1.5 block text-sm font-semibold text-slate-700">What do you need?</div>
             <div className="space-y-2">
               {services.map(s => (
                 <button key={s.key} type="button" onClick={() => setService(s.key)}
@@ -282,6 +285,7 @@ export default function BookOnline() {
                   )}
                 </button>
               ))}
+            </div>
             </div>
 
             <MGButton className="mt-4 w-full" disabled={!property || !service}

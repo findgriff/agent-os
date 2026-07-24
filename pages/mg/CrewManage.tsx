@@ -202,7 +202,7 @@ function CrewDrawer({ id, onClose, onChanged }: { id: number; onClose: () => voi
                       <span className="truncate text-sm text-ink">{fmtDate(l.date_from)} – {fmtDate(l.date_to)}</span>
                       {l.notes && <span className="truncate text-xs text-muted">· {l.notes}</span>}
                     </div>
-                    <button onClick={() => removeLeave(l)} title="Remove" disabled={deletingLeave !== null}
+                    <button onClick={() => removeLeave(l)} aria-label="Remove" title="Remove" disabled={deletingLeave !== null}
                       className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-muted hover:bg-rose/10 hover:text-rose disabled:opacity-40">
                       <Icon name={deletingLeave === l.id ? 'progress_activity' : 'delete'} size={16}
                         className={deletingLeave === l.id ? 'animate-spin' : ''} />
