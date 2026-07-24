@@ -3424,6 +3424,14 @@ def h_mg_gps_active(req: Request):
     return maxgleam_gps.active_crews(tenant_id)
 
 
+def h_mg_gps_mileage(req: Request):
+    """GET /api/maxgleam/gps/mileage?date= — miles driven per crew and
+    fleet-wide for a day. Tenant-scoped dispatch data like the live map, so a
+    partner office sees its own fleet; ?date defaults to today."""
+    _company_id, tenant_id = _maxgleam_scope(req)
+    return maxgleam_gps.fleet_mileage(req.query.get("date"), tenant_id)
+
+
 def h_mg_gps_prune(req: Request):
     """POST /api/maxgleam/gps/prune — drop location points past the retention
     window. HQ only, cron-driven: this is how the 14-day promise in the module
@@ -3724,6 +3732,7 @@ ROUTES = [
     # GPS crew tracking
     ("POST", re.compile(r"^/api/maxgleam/gps/update$"), h_mg_gps_update),
     ("GET",  re.compile(r"^/api/maxgleam/gps/active$"), h_mg_gps_active),
+    ("GET",  re.compile(r"^/api/maxgleam/gps/mileage$"), h_mg_gps_mileage),
     ("GET",  re.compile(r"^/api/maxgleam/gps/crew/(\d+)$"), h_mg_gps_crew),
     ("GET",  re.compile(r"^/api/maxgleam/gps/history/(\d+)$"), h_mg_gps_history),
     ("POST", re.compile(r"^/api/maxgleam/gps/prune$"), h_mg_gps_prune),

@@ -36,6 +36,8 @@ DEFAULT_TENANT_ID = maxgleam_notify.DEFAULT_TENANT_ID
 MIN_INTERVAL = 20
 RETENTION_DAYS = 14
 
+METRES_PER_MILE = 1609.344
+
 # A crew is "active" on the map if they have reported within this window.
 ACTIVE_WINDOW = 30 * 60
 
@@ -239,6 +241,13 @@ def _point_dto(p: dict) -> dict:
             "job_id": p["job_id"]}
 
 
+def _route_distance_m(points: list[dict]) -> float:
+    """Metres travelled along an ordered run of fixes — the sum of the leg
+    lengths. Zero for an empty route or a single fix (nowhere to travel to)."""
+    return sum(haversine_m(a["lat"], a["lng"], b["lat"], b["lng"])
+               for a, b in zip(points, points[1:]))
+
+
 def _geofence(position: dict | None, job: dict | None) -> dict | None:
     """How far the last fix sits from the stop it belongs to.
 
@@ -304,10 +313,7 @@ def crew_history(crew_id: int, date: str | None = None,
                 " AND timestamp >= ? AND timestamp < ? ORDER BY timestamp",
                 (crew_id, start, end))
     points = [_point_dto(p) for p in pts]
-
-    metres = 0.0
-    for a, b in zip(points, points[1:]):
-        metres += haversine_m(a["lat"], a["lng"], b["lat"], b["lng"])
+    metres = _route_distance_m(points)
 
     return 200, {
         "crew": {"id": crew["id"], "name": crew["name"]},
@@ -316,10 +322,63 @@ def crew_history(crew_id: int, date: str | None = None,
         "summary": {
             "count": len(points),
             "distance_m": round(metres),
-            "distance_miles": round(metres / 1609.344, 1),
+            "distance_miles": round(metres / METRES_PER_MILE, 1),
             "first_seen": points[0]["timestamp"] if points else None,
             "last_seen": points[-1]["timestamp"] if points else None,
             "jobs": sorted({p["job_id"] for p in points if p["job_id"]}),
+        },
+    }
+
+
+def fleet_mileage(date: str | None = None,
+                  tenant_id: int = DEFAULT_TENANT_ID) -> tuple[int, dict]:
+    """GET /api/maxgleam/gps/mileage — miles driven per crew, and fleet-wide,
+    for one day. The dispatch roll-up of crew_history: the office's fuel and
+    crew-efficiency view without opening each crew in turn. Estate-wide within
+    the tenant; a crew with no fixes that day simply does not appear."""
+    date = (date or "").strip() or _today()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+        return 400, {"error": "date must be YYYY-MM-DD"}
+    try:
+        start, end = _day_bounds(date)
+    except ValueError:
+        return 400, {"error": "date must be YYYY-MM-DD"}
+
+    rows = _rows(
+        "SELECT g.subcontractor_id, g.lat, g.lng, g.timestamp, g.job_id, s.name "
+        "  FROM gps_log g JOIN subcontractors s ON s.id = g.subcontractor_id "
+        " WHERE s.tenant_id = ? AND g.timestamp >= ? AND g.timestamp < ? "
+        " ORDER BY g.subcontractor_id, g.timestamp",
+        (tenant_id, start, end))
+
+    by_crew: dict[int, dict] = {}
+    for r in rows:
+        c = by_crew.setdefault(r["subcontractor_id"],
+                               {"crew_id": r["subcontractor_id"], "name": r["name"],
+                                "points": []})
+        c["points"].append(r)
+
+    crews = []
+    for c in by_crew.values():
+        metres = _route_distance_m(c["points"])
+        crews.append({
+            "crew_id": c["crew_id"],
+            "name": c["name"],
+            "count": len(c["points"]),
+            "distance_m": round(metres),
+            "distance_miles": round(metres / METRES_PER_MILE, 1),
+            "jobs": sorted({p["job_id"] for p in c["points"] if p["job_id"]}),
+        })
+    crews.sort(key=lambda c: c["distance_m"], reverse=True)
+
+    total_m = sum(c["distance_m"] for c in crews)
+    return 200, {
+        "date": date,
+        "crews": crews,
+        "totals": {
+            "crews": len(crews),
+            "distance_m": total_m,
+            "distance_miles": round(total_m / METRES_PER_MILE, 1),
         },
     }
 

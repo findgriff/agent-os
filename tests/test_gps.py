@@ -138,3 +138,28 @@ def test_retention_report_stale_points_are_unhealthy():
     assert r["oldest_age_days"] == 20.0
     assert r["stale_points"] == 4
     assert r["healthy"] is False
+
+
+# ── _route_distance_m ───────────────────────────────────────────────
+
+def _pt(lat, lng):
+    return {"lat": lat, "lng": lng}
+
+
+def test_route_distance_zero_for_empty_or_single():
+    # Nowhere to travel to from no fixes, or from just one.
+    assert gps._route_distance_m([]) == 0
+    assert gps._route_distance_m([_pt(51.5, -0.1)]) == 0
+
+
+def test_route_distance_sums_legs():
+    # Two ~1-degree-latitude legs north (~111.2 km each) total ~222.4 km.
+    pts = [_pt(0.0, 0.0), _pt(1.0, 0.0), _pt(2.0, 0.0)]
+    assert abs(gps._route_distance_m(pts) - 2 * 111195) < 20
+
+
+def test_route_distance_matches_single_haversine_leg():
+    # A one-leg route is exactly its haversine — the helper adds nothing.
+    a, b = _pt(51.50, -0.10), _pt(51.52, -0.12)
+    assert abs(gps._route_distance_m([a, b])
+               - gps.haversine_m(51.50, -0.10, 51.52, -0.12)) < 1e-9
