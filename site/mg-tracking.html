@@ -2,7 +2,7 @@
 <html lang="en" class="dark">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Max Gleam — Crew Tracking</title>
   <meta name="theme-color" content="#05080C" />
   <meta name="color-scheme" content="dark" />
@@ -42,7 +42,8 @@
       line-height: 1.5;
       -webkit-font-smoothing: antialiased;
     }
-    .wrap { max-width: 1180px; margin: 0 auto; padding: 22px clamp(14px, 4vw, 28px) 40px; }
+    .wrap { max-width: 1180px; margin: 0 auto;
+      padding: max(22px, env(safe-area-inset-top)) max(clamp(14px, 4vw, 28px), env(safe-area-inset-right)) max(40px, env(safe-area-inset-bottom)) max(clamp(14px, 4vw, 28px), env(safe-area-inset-left)); }
 
     h1 { font-family: 'Space Grotesk', system-ui, sans-serif; font-size: 24px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
     .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
