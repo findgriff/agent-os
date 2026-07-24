@@ -535,8 +535,14 @@ def tax_report(frm: str = "", to: str = "", tenant_id: int = DEFAULT_TENANT_ID,
     gross = sum(i["amount_pence"] for i in invoices)
     vat = sum(i["vat_pence"] or 0 for i in invoices)
     net = gross - vat
-    paid = sum(i["amount_pence"] for i in invoices if i["status"] == "paid")
-    unpaid = gross - paid
+    # Ledger-aware, matching list_invoices: a part-paid invoice contributes the
+    # amount actually received to 'paid' and only its remaining balance to
+    # 'unpaid' — counting it as £0 paid (status != 'paid') understated cash in
+    # and overstated what's owed. void invoices are already excluded by the
+    # query, so for every row paid_pence + outstanding_pence == amount_pence and
+    # unpaid == gross - paid still holds.
+    paid = sum(i["paid_pence"] for i in invoices)
+    unpaid = sum(i["outstanding_pence"] for i in invoices)
 
     status = vat_status(tenant_id)
     # Not VAT registered → nothing was charged. Show what the liability
@@ -552,7 +558,7 @@ def tax_report(frm: str = "", to: str = "", tenant_id: int = DEFAULT_TENANT_ID,
         m["gross_pence"] += i["amount_pence"]
         m["vat_pence"] += i["vat_pence"] or 0
         m["net_pence"] += i["net_pence"]
-        m["paid_pence"] += i["amount_pence"] if i["status"] == "paid" else 0
+        m["paid_pence"] += i["paid_pence"]
         m["count"] += 1
 
     return 200, {
