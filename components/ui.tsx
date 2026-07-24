@@ -96,19 +96,22 @@ export function Toggle({ checked, onChange, disabled }:
 }
 
 // ── Textarea / Input ────────────────────────────────────────────────────
+// text-base (16px), not text-sm: iOS Safari force-zooms the viewport when a
+// focused control is under 16px. This kit is shared with crew-facing phone
+// surfaces (e.g. /timeclock), so 16px is the safe floor for every text entry.
 export function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return <textarea {...props}
-    className={`w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 text-sm text-ink
+    className={`w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 text-base text-ink
       placeholder:text-muted/60 focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/30 ${props.className || ''}`} />;
 }
 export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props}
-    className={`w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 text-sm text-ink
+    className={`w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 text-base text-ink
       placeholder:text-muted/60 focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/30 ${props.className || ''}`} />;
 }
 export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return <select {...props}
-    className={`rounded-xl bg-black/30 border border-white/10 px-2.5 py-1.5 text-sm text-ink
+    className={`rounded-xl bg-black/30 border border-white/10 px-2.5 py-1.5 text-base text-ink
       focus:outline-none focus:border-accent/50 ${props.className || ''}`} />;
 }
 

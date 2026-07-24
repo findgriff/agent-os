@@ -52,10 +52,8 @@ function CodeGate({ onDone }: { onDone: () => void }) {
           <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted">
             Crew code
           </label>
-          {/* 16px font stops iOS Safari zooming the viewport on focus — the HQ
-              Input is text-sm (14px), fine on a desktop but not in a van. */}
           <Input value={code} onChange={e => setCode(e.target.value)} autoFocus
-            placeholder="Enter your crew code" type="password" style={{ fontSize: 16 }} />
+            placeholder="Enter your crew code" type="password" />
           <Button variant="primary" className="mt-4 w-full min-h-[44px]" type="submit" disabled={!code.trim()}>
             Continue
           </Button>
