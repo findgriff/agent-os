@@ -54,7 +54,7 @@ function CodeGate({ onDone }: { onDone: () => void }) {
           </label>
           <Input value={code} onChange={e => setCode(e.target.value)} autoFocus
             placeholder="Enter your crew code" type="password" />
-          <Button variant="primary" className="mt-4 w-full" type="submit" disabled={!code.trim()}>
+          <Button variant="primary" className="mt-4 w-full min-h-[44px]" type="submit" disabled={!code.trim()}>
             Continue
           </Button>
         </form>
@@ -95,14 +95,20 @@ function CrewPicker({ crews, onPick }: { crews: ClockCrew[]; onPick: (c: ClockCr
 }
 
 // ── Job card with the big button ────────────────────────────────────────
-function JobCard({ job, openHere, busy, onIn, onOut }: {
+function JobCard({ job, openHere, busy, locked, blockedBy, onIn, onOut }: {
   job: ClockJob;
   openHere: boolean;
   busy: boolean;
+  locked: boolean;
+  // The address of the OTHER job this crew is already on, if any. You can
+  // only be on one clock at a time, so this card's Clock in would 409 — say
+  // so up front rather than letting the tap bounce off the server.
+  blockedBy: string | null;
   onIn: () => void;
   onOut: () => void;
 }) {
   const over = job.logged_minutes > job.estimated_minutes;
+  const blocked = !openHere && !!blockedBy;
   return (
     <Card className={`overflow-hidden p-0 transition-all ${openHere ? 'border-emerald/40' : ''}`}
       style={openHere ? { boxShadow: '0 0 34px -10px rgba(34,197,94,0.55)' } : undefined}>
@@ -117,7 +123,7 @@ function JobCard({ job, openHere, busy, onIn, onOut }: {
           </div>
           <div className="shrink-0 text-right">
             <div className="text-sm font-semibold tabular-nums text-ink">{gbp(job.price_pence)}</div>
-            <div className="text-[11px] text-muted">est {job.estimated_minutes}m</div>
+            <div className="text-[11px] tabular-nums text-muted">est {job.estimated_minutes}m</div>
           </div>
         </div>
 
@@ -133,9 +139,16 @@ function JobCard({ job, openHere, busy, onIn, onOut }: {
         )}
       </div>
 
+      {blocked && (
+        <div className="flex items-center gap-1.5 border-t border-white/6 bg-white/[0.02] px-4 py-2 text-[11px] text-muted">
+          <Icon name="lock_clock" size={13} className="text-amber" />
+          Clock out of {blockedBy} first
+        </div>
+      )}
+
       <button
         onClick={openHere ? onOut : onIn}
-        disabled={busy}
+        disabled={busy || locked || blocked}
         className={`flex w-full items-center justify-center gap-2 py-4 text-base font-bold uppercase
           tracking-wider transition-all active:scale-[0.98] disabled:opacity-50
           ${openHere
@@ -201,6 +214,15 @@ export default function TimeClock() {
     return board.jobs.filter(j => j.subcontractor_id === crewId || j.subcontractor_id === null);
   }, [board, crewId]);
 
+  // Any open clock blocks starting another job — you can only be on one at a
+  // time, so a second Clock in would 409. Name what they're on so the other
+  // cards can say "clock out of X first" instead of bouncing off the server:
+  // the job's address, or "general duties" for a no-job clock-in.
+  const openWhere = !openLog ? null
+    : openLog.job_id
+      ? jobs.find(j => j.id === openLog.job_id)?.address ?? `job #${openLog.job_id}`
+      : 'general duties';
+
   const act = async (fn: () => Promise<unknown>, key: number | 'general', ok: string) => {
     setBusyJob(key);
     try {
@@ -218,8 +240,9 @@ export default function TimeClock() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-bg">
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-bg">
         <Icon name="schedule" size={34} className="animate-pulse text-accent" />
+        <p className="text-[12px] text-muted">Loading today&rsquo;s round…</p>
       </div>
     );
   }
@@ -255,7 +278,7 @@ export default function TimeClock() {
             <div className="truncate font-display text-base font-bold text-ink">{crew.name}</div>
             <div className="text-[11px] text-muted">{board ? dayLabel(board.day) : ''}</div>
           </div>
-          <Button variant="ghost" icon="swap_horiz" className="!px-2.5 !py-1.5 !text-[12px] min-h-[40px]"
+          <Button variant="ghost" icon="swap_horiz" className="!px-2.5 !py-1.5 !text-[12px] min-h-[44px]"
             onClick={() => { localStorage.removeItem(CREW_ID_KEY); setCrewId(null); }}>
             Not you?
           </Button>
@@ -284,8 +307,8 @@ export default function TimeClock() {
 
         {/* General clock-in, for work that is not one of today's scheduled jobs. */}
         {!openLog && (
-          <Button variant="secondary" icon="more_time" className="w-full"
-            loading={busyJob === 'general'}
+          <Button variant="secondary" icon="more_time" className="w-full !py-3.5"
+            loading={busyJob === 'general'} disabled={busyJob !== null}
             onClick={() => act(() => reportsApi.clockIn(crew.id, null), 'general',
               'Clocked in — general duties')}>
             Clock in without a job
@@ -299,7 +322,7 @@ export default function TimeClock() {
           <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] tabular-nums text-muted">
             {jobs.length}
           </span>
-          <Button variant="ghost" icon="refresh" className="ml-auto !px-2 !py-1 !text-[12px] min-h-[40px]"
+          <Button variant="ghost" icon="refresh" className="ml-auto !px-2 !py-1 !text-[12px] min-h-[44px]"
             onClick={load}>Refresh</Button>
         </div>
 
@@ -310,6 +333,8 @@ export default function TimeClock() {
           <JobCard key={job.id} job={job}
             openHere={openLog?.job_id === job.id}
             busy={busyJob === job.id}
+            locked={busyJob !== null}
+            blockedBy={openLog?.job_id === job.id ? null : openWhere}
             onIn={() => act(() => reportsApi.clockIn(crew.id, job.id), job.id,
               `Clocked in at ${job.address}`)}
             onOut={() => act(() => reportsApi.clockOut(crew.id), job.id,
@@ -318,7 +343,7 @@ export default function TimeClock() {
 
         {openLog && !openLog.job_id && (
           <Button variant="danger" icon="stop_circle" className="w-full !py-3.5"
-            loading={busyJob === 'general'}
+            loading={busyJob === 'general'} disabled={busyJob !== null}
             onClick={() => act(() => reportsApi.clockOut(crew.id), 'general', 'Clocked out')}>
             Clock out
           </Button>
