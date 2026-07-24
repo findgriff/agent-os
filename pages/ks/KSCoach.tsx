@@ -1310,6 +1310,11 @@ function CalendarTab({ schedule, loading, students, skills, onToggle, afterMark,
 
   const days = useMemo(() => {
     if (!schedule) return [];
+    // Demo sessions are a fallback for an empty diary only. The moment the
+    // coach has a single real booking anywhere in the loaded window, drop the
+    // fake children entirely — same "samples only until real data" rule the
+    // Students/Finance/Route/Leads tabs follow.
+    const anyReal = schedule.days.some(d => d.sessions.length > 0);
     return schedule.days.map(d => {
       const real: CalEvent[] = d.sessions.map(b => ({
         key: `b-${b.id}`,
@@ -1331,7 +1336,7 @@ function CalendarTab({ schedule, loading, students, skills, onToggle, afterMark,
         type: 'block' as const,
         block: bl,
       }));
-      return { ...d, layout: withLanes([...real, ...blocks, ...demoEventsFor(d.date)]) };
+      return { ...d, layout: withLanes([...real, ...blocks, ...(anyReal ? [] : demoEventsFor(d.date))]) };
     });
   }, [schedule]);
 
@@ -1651,9 +1656,10 @@ function EventModal({ ev, skills, onClose, onToggle, onSaved, onEdit }: {
 }
 
 // ── Route map ───────────────────────────────────────────────────────────
-// Leaflet comes from the unpkg CDN (no npm dep, no API key) and is only
-// fetched the first time the Route tab opens. The bookings table stores no
-// addresses yet, so the route runs on seeded Chester-area sample data.
+// Leaflet ships vendored locally (public/vendor/leaflet, served at
+// /vendor/leaflet) — no npm dep, no API key, no CDN dependency — and is only
+// fetched the first time the Route tab opens. When a booking has no address
+// the route falls back to seeded Chester-area sample data.
 let leafletLoader: Promise<any> | null = null;
 function loadLeaflet(): Promise<any> {
   const w = window as any;
@@ -1662,10 +1668,10 @@ function loadLeaflet(): Promise<any> {
   leafletLoader = new Promise((resolve, reject) => {
     const css = document.createElement('link');
     css.rel = 'stylesheet';
-    css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    css.href = '/vendor/leaflet/leaflet.css';
     document.head.appendChild(css);
     const s = document.createElement('script');
-    s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    s.src = '/vendor/leaflet/leaflet.js';
     s.onload = () => resolve((window as any).L);
     s.onerror = () => { leafletLoader = null; reject(new Error('Leaflet failed to load')); };
     document.head.appendChild(s);
