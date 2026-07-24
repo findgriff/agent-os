@@ -43,7 +43,11 @@ NO_5XX = [
 # "no such table: sessions" under test even though they are healthy in prod.
 # Smoke-testing them would require standing up the maxgleam schema too.
 
-PROTECTED = ["/api/me", "/api/agents", "/api/hermes/history", "/api/tenants"]
+# /api/maxgleam/reports/profit is HQ-only: _require() runs before any maxgleam
+# DB access, so an unauthenticated call 401s without needing the (absent) DB —
+# unlike an authenticated maxgleam call, which would 500 here (see note above).
+PROTECTED = ["/api/me", "/api/agents", "/api/hermes/history", "/api/tenants",
+             "/api/maxgleam/reports/profit"]
 
 
 # ── liveness & routing ──────────────────────────────────────────────

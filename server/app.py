@@ -3111,6 +3111,23 @@ def h_mg_tax_csv(req: Request):
         company_id=_mg_scope(req))
 
 
+# Profit is HQ-only: it nets turnover against crew pay, so a partner token
+# must never reach it — that would reveal MaxGleam's margin on their estate.
+# _require() rejects a partner token (it has no HQ user), unlike _mg_scope.
+def h_mg_profit(req: Request):
+    """GET /api/maxgleam/reports/profit[?from=&to=] — margin over the window."""
+    _require(req)
+    return maxgleam_reports.profit(
+        start=req.query.get("from"), end=req.query.get("to"))
+
+
+def h_mg_profit_csv(req: Request):
+    """GET /api/maxgleam/reports/profit.csv[?from=&to=] — per-crew margin CSV."""
+    _require(req)
+    return maxgleam_reports.profit_csv(
+        start=req.query.get("from"), end=req.query.get("to"))
+
+
 # ── Max Gleam accounting exports (QuickBooks / Xero) ─────────────────
 # Scoped exactly like the invoice list: a partner token exports only that
 # company's book, an HQ operator exports everything.
@@ -3573,6 +3590,8 @@ ROUTES = [
     ("GET",  re.compile(r"^/api/maxgleam/invoices/(\d+)/payments$"), h_mg_invoice_payments),
     ("GET",  re.compile(r"^/api/maxgleam/reports/tax$"), h_mg_tax_report),
     ("GET",  re.compile(r"^/api/maxgleam/reports/tax.csv$"), h_mg_tax_csv),
+    ("GET",  re.compile(r"^/api/maxgleam/reports/profit$"), h_mg_profit),
+    ("GET",  re.compile(r"^/api/maxgleam/reports/profit\.csv$"), h_mg_profit_csv),
 
     # ── Max Gleam accounting exports + commissions + payment chasing ────
     ("GET",  re.compile(r"^/api/maxgleam/exports/invoices-csv$"), h_mg_export_invoices_csv),

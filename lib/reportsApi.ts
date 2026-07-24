@@ -407,11 +407,43 @@ export interface AutoSendResult {
   ran_at: number;
 }
 
+// ── Profit / margin (HQ only) ───────────────────────────────────────────
+// Crew pay is the commission, not a separate deduction. `estimated` covers
+// jobs done but not yet signed off, whose pay hasn't accrued.
+export interface CrewMargin {
+  crew_id: number;
+  name: string;
+  jobs: number;
+  revenue_pence: number;
+  cost_pence: number;
+  net_pence: number;
+  margin_pct: number;
+}
+
+export interface ProfitData {
+  generated_at: number;
+  tenant_id: number;
+  range: { start: string; end: string; days: number; is_default: boolean };
+  jobs: number;
+  revenue_pence: number;
+  cost_pence: number;
+  net_pence: number;
+  margin_pct: number;
+  cost_breakdown: { paid: number; pending: number; estimated: number };
+  unassigned: { jobs: number; revenue_pence: number };
+  crew: CrewMargin[];
+}
+
 // ── Calls ───────────────────────────────────────────────────────────────
 export const reportsApi = {
   reports: (range?: DateRange) => {
     const qs = range ? `?from=${range.from}&to=${range.to}` : '';
     return req<ReportsData>('GET', `/api/maxgleam/reports${qs}`);
+  },
+
+  profit: (range?: DateRange) => {
+    const qs = range ? `?from=${range.from}&to=${range.to}` : '';
+    return req<ProfitData>('GET', `/api/maxgleam/reports/profit${qs}`);
   },
 
   board: (day?: string) => req<ClockBoard>(
@@ -468,6 +500,30 @@ export async function downloadCsv(report: ReportKind, range?: DateRange): Promis
   const a = document.createElement('a');
   a.href = url;
   a.download = `maxgleam-${report}-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/** Download the per-crew profit/margin CSV for the given window. */
+export async function downloadProfitCsv(range?: DateRange): Promise<void> {
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const q = range ? `?from=${range.from}&to=${range.to}` : '';
+  const res = await fetch(`/api/maxgleam/reports/profit.csv${q}`, { headers });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = res.statusText;
+    try { msg = JSON.parse(text).error || msg; } catch { /* not JSON — keep statusText */ }
+    throw new ReportsApiError(res.status, msg);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `maxgleam-profit-${new Date().toISOString().slice(0, 10)}.csv`;
   document.body.appendChild(a);
   a.click();
   a.remove();

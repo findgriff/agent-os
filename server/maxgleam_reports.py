@@ -619,6 +619,114 @@ def export_csv(report: str, tenant_id: int = DEFAULT_TENANT_ID,
     return 200, body, "text/csv"
 
 
+# ── profit / margin (HQ only) ─────────────────────────────────────────────
+# Turnover minus what the crew is paid. Crew pay IS the commission — the same
+# figure maxgleam_commissions accrues (flat rate_per_clean, or a percentage
+# when the rate reads as one) — not a second deduction stacked on top of it;
+# treating rate_per_clean and the commission as separate costs would pay every
+# crew twice on paper. Where a job is done but not yet signed off it has no
+# commission row, so its cost is estimated from the crew's current rate via the
+# same calculate(); that estimate is reported apart from committed pay so the
+# office can tell forecast pounds from owed ones. This is never partner-scoped:
+# it would show a property manager exactly what MaxGleam makes on their work.
+
+def _profit(tenant_id: int, start: str | None, end: str | None) -> dict:
+    from server import maxgleam_commissions as commissions
+    rng = _parse_range(start, end)
+    jobs = [j for j in _done_jobs(tenant_id, None, _midnight(rng["start"]))
+            if rng["start"] <= _revenue_day(j) <= rng["end"]]
+
+    ids = [j["id"] for j in jobs]
+    comm: dict[int, dict] = {}
+    if ids:
+        qs = ",".join("?" * len(ids))
+        try:
+            for c in _rows("SELECT job_id, amount_pence, status FROM commissions "
+                           f"WHERE job_id IN ({qs})", tuple(ids)):
+                comm[c["job_id"]] = c
+        except sqlite3.OperationalError:
+            comm = {}                       # commissions never accrued here yet
+    rates = {r["id"]: r for r in _rows(
+        "SELECT id, name, rate_per_clean FROM subcontractors WHERE tenant_id = ?",
+        (tenant_id,))}
+
+    total_rev = total_cost = paid = pending = estimated = 0
+    unassigned_jobs = unassigned_rev = 0
+    by_crew: dict[int, dict] = {}
+    for j in jobs:
+        price = j["price_pence"] or 0
+        total_rev += price
+        cid = j["subcontractor_id"]
+        if not cid:                         # office/owner did it — no crew cost
+            unassigned_jobs += 1
+            unassigned_rev += price
+            continue
+        row = comm.get(j["id"])
+        if row:
+            cost = row["amount_pence"] or 0
+            if row["status"] == "paid":
+                paid += cost
+            else:
+                pending += cost
+        else:
+            rate = (rates.get(cid) or {}).get("rate_per_clean") or 0
+            cost, _basis = commissions.calculate(price, rate)
+            estimated += cost
+        total_cost += cost
+        cr = by_crew.setdefault(cid, {
+            "crew_id": cid,
+            "name": j.get("crew_name") or (rates.get(cid) or {}).get("name") or f"Crew #{cid}",
+            "jobs": 0, "revenue_pence": 0, "cost_pence": 0,
+        })
+        cr["jobs"] += 1
+        cr["revenue_pence"] += price
+        cr["cost_pence"] += cost
+
+    crew = []
+    for c in by_crew.values():
+        c["net_pence"] = c["revenue_pence"] - c["cost_pence"]
+        c["margin_pct"] = (round(100.0 * c["net_pence"] / c["revenue_pence"], 1)
+                           if c["revenue_pence"] else 0.0)
+        crew.append(c)
+    crew.sort(key=lambda c: c["net_pence"], reverse=True)
+
+    net = total_rev - total_cost
+    return {
+        "generated_at": int(time.time()),
+        "tenant_id": tenant_id,
+        "range": {"start": rng["start"], "end": rng["end"],
+                  "days": rng["days"], "is_default": rng["is_default"]},
+        "jobs": len(jobs),
+        "revenue_pence": total_rev,
+        "cost_pence": total_cost,
+        "net_pence": net,
+        "margin_pct": round(100.0 * net / total_rev, 1) if total_rev else 0.0,
+        "cost_breakdown": {"paid": paid, "pending": pending, "estimated": estimated},
+        "unassigned": {"jobs": unassigned_jobs, "revenue_pence": unassigned_rev},
+        "crew": crew,
+    }
+
+
+def profit(tenant_id: int = DEFAULT_TENANT_ID,
+           start: str | None = None, end: str | None = None) -> tuple[int, dict]:
+    """Margin over the window. HQ only — crew pay is an internal figure."""
+    return 200, _profit(tenant_id, start, end)
+
+
+def profit_csv(tenant_id: int = DEFAULT_TENANT_ID,
+               start: str | None = None,
+               end: str | None = None) -> tuple[int, str, str]:
+    d = _profit(tenant_id, start, end)
+    header = ["crew_id", "name", "jobs", "revenue_gbp", "crew_pay_gbp",
+              "net_gbp", "margin_pct"]
+    rows = [[c["crew_id"], c["name"], c["jobs"], _pounds(c["revenue_pence"]),
+             _pounds(c["cost_pence"]), _pounds(c["net_pence"]), c["margin_pct"]]
+            for c in d["crew"]]
+    rows.append(["", "TOTAL", d["jobs"], _pounds(d["revenue_pence"]),
+                 _pounds(d["cost_pence"]), _pounds(d["net_pence"]), d["margin_pct"]])
+    return 200, _csv(header, rows), "text/csv"
+
+
 # ── time tracking ───────────────────────────────────────────────────────
 
 def _time_logs(tenant_id: int, company_id: int | None,

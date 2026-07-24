@@ -13,17 +13,19 @@ import {
   invoicesApi, downloadTaxCsv, type TaxReport,
   reviewsApi, type ReviewList, type ReviewAverage,
   exportsApi, downloadExport, commissionsApi,
+  downloadProfitCsv, type ProfitData,
   type ReportsData, type ReportKind, type TimeHistory, type DateRange,
   type ActivityFeed, type ActorType, type AlertPreview, type AlertLogRow,
   type TaxSummary, type ExportKind, type CommissionList, type CommissionSummary,
   type CommissionRow,
 } from '../../lib/reportsApi';
 
-type Tab = 'overview' | 'crew' | 'time' | 'reviews' | 'tax' | 'exports' | 'commissions'
-  | 'activity' | 'alerts';
+type Tab = 'overview' | 'profit' | 'crew' | 'time' | 'reviews' | 'tax' | 'exports'
+  | 'commissions' | 'activity' | 'alerts';
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'overview', label: 'Overview', icon: 'monitoring' },
+  { id: 'profit', label: 'Profit', icon: 'savings' },
   { id: 'crew', label: 'Crew', icon: 'groups' },
   { id: 'time', label: 'Time', icon: 'schedule' },
   { id: 'reviews', label: 'Reviews', icon: 'reviews' },
@@ -379,6 +381,159 @@ function Overview({ data }: { data: ReportsData }) {
             )}
           </Card>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Profit / margin (HQ only) ───────────────────────────────────────────
+function ProfitExport({ range }: { range: DateRange }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  return (
+    <Button variant="ghost" icon="download" loading={busy} className="!px-2.5 !py-1.5 !text-[12px]"
+      onClick={async () => {
+        setBusy(true);
+        try { await downloadProfitCsv(range); toast('profit report downloaded', 'ok'); }
+        catch (e) { toast(e instanceof Error ? e.message : 'Export failed', 'danger'); }
+        finally { setBusy(false); }
+      }}>CSV</Button>
+  );
+}
+
+function PayChip({ label, value, total, colour }:
+  { label: string; value: number; total: number; colour: string }) {
+  const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-white/6 bg-white/[0.02] px-3 py-2">
+      <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: colour }} />
+      <div className="min-w-0">
+        <div className="text-[11px] text-muted">{label}</div>
+        <div className="text-sm font-semibold tabular-nums text-ink">{gbp(value)}</div>
+      </div>
+      <span className="ml-auto text-[11px] tabular-nums text-muted/70">{pct}%</span>
+    </div>
+  );
+}
+
+function ProfitTab({ range }: { range: DateRange | null }) {
+  const toast = useToast();
+  const [data, setData] = useState<ProfitData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setData(await reportsApi.profit(range ?? undefined)); setError(''); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Could not load profit'); }
+    finally { setLoading(false); }
+  }, [range]);
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <SkeletonList count={4} />;
+  if (error) {
+    return <EmptyState icon="error" accent="#F43F5E" title="Could not load profit" hint={error}
+      action={<Button icon="refresh" onClick={load}>Try again</Button>} />;
+  }
+  if (!data) return null;
+
+  const net = data.net_pence;
+  const netColour = net > 0 ? '#22C55E' : net < 0 ? '#F43F5E' : '#8B96A8';
+  const bd = data.cost_breakdown;
+  const rangeDto: DateRange = { from: data.range.start, to: data.range.end };
+  // Crew-pay share of turnover; the remainder is the margin the bar shows green.
+  const costPct = data.revenue_pence > 0
+    ? Math.min(100, (data.cost_pence / data.revenue_pence) * 100) : 0;
+  const bestNet = Math.max(1, ...data.crew.map(c => Math.abs(c.net_pence)));
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile label="Revenue" value={gbp(data.revenue_pence)}
+          sub={`${data.jobs} completed job${data.jobs === 1 ? '' : 's'}`}
+          icon="payments" accent="#22C55E" delay={0} />
+        <StatTile label="Crew pay" value={gbp(data.cost_pence)}
+          sub="commission on those jobs" icon="engineering" accent="#F59E0B" delay={60} />
+        <StatTile label="Net profit" value={gbp(net)}
+          sub={`${data.margin_pct}% margin`} icon="savings" accent={netColour} delay={120} />
+        <StatTile label="Margin" value={`${data.margin_pct}%`}
+          sub={net >= 0 ? 'after crew pay' : 'crew pay exceeds turnover'}
+          icon="percent" accent={netColour} delay={180} />
+      </div>
+
+      <div>
+        <SectionTitle accent="#F59E0B">Revenue split</SectionTitle>
+        <Card className="p-4 sm:p-5">
+          <div className="flex h-3 overflow-hidden rounded-full bg-white/6">
+            <div className="h-full transition-all duration-700"
+              style={{ width: `${costPct}%`, background: '#F59E0B' }} title={`Crew pay ${gbp(data.cost_pence)}`} />
+            <div className="h-full flex-1 transition-all duration-700"
+              style={{ background: net >= 0 ? '#22C55E' : '#F43F5E' }}
+              title={`Net ${gbp(net)}`} />
+          </div>
+          <div className="mt-2 flex justify-between text-[11px] text-muted">
+            <span><span className="font-semibold text-amber tabular-nums">{gbp(data.cost_pence)}</span> crew pay</span>
+            <span><span className="font-semibold tabular-nums" style={{ color: netColour }}>{gbp(net)}</span> net</span>
+          </div>
+          <div className="mt-4 grid gap-2 sm:grid-cols-3">
+            <PayChip label="Paid" value={bd.paid} total={data.cost_pence} colour="#22C55E" />
+            <PayChip label="Pending" value={bd.pending} total={data.cost_pence} colour="#F59E0B" />
+            <PayChip label="Estimated" value={bd.estimated} total={data.cost_pence} colour="#8B96A8" />
+          </div>
+          <div className="mt-2 text-[11px] text-muted/70">
+            Crew pay is the commission accrued per clean; “estimated” covers done jobs not yet signed off.
+            {data.unassigned.jobs > 0 && ` ${data.unassigned.jobs} job${data.unassigned.jobs === 1 ? '' : 's'} (${gbp(data.unassigned.revenue_pence)}) had no crew assigned.`}
+          </div>
+        </Card>
+      </div>
+
+      <div>
+        <SectionTitle count={data.crew.length} action={<ProfitExport range={rangeDto} />}>
+          Margin by crew
+        </SectionTitle>
+        <Card className="p-2">
+          {data.crew.length === 0 ? (
+            <EmptyState icon="groups" title="No crew activity"
+              hint="No completed jobs with an assigned crew in this window." />
+          ) : (
+            <div className="space-y-2 p-1">
+              {data.crew.map((c, i) => {
+                const cNet = c.net_pence;
+                const cColour = cNet > 0 ? '#22C55E' : cNet < 0 ? '#F43F5E' : '#8B96A8';
+                return (
+                  <div key={c.crew_id}
+                    className="flex flex-col gap-2 rounded-xl border border-white/6 bg-white/[0.02] p-3
+                      transition-colors hover:border-white/12 hover:bg-white/[0.05] sm:flex-row sm:items-center sm:gap-4">
+                    <div className="flex min-w-0 flex-1 items-center gap-3">
+                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[13px] font-bold tabular-nums"
+                        style={{ background: i === 0 ? '#22C55E22' : 'rgba(255,255,255,0.05)',
+                          color: i === 0 ? '#22C55E' : '#8B96A8' }}>{i + 1}</span>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-ink">{c.name}</div>
+                        <div className="text-[11px] text-muted">
+                          {c.jobs} job{c.jobs === 1 ? '' : 's'} · {gbp(c.revenue_pence)} in · {gbp(c.cost_pence)} pay
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4 sm:w-56">
+                      <div className="min-w-0 flex-1">
+                        <div className="h-1.5 overflow-hidden rounded-full bg-white/6">
+                          <div className="h-full rounded-full"
+                            style={{ width: `${(Math.abs(cNet) / bestNet) * 100}%`, background: cColour }} />
+                        </div>
+                        <div className="mt-1 text-[11px] tabular-nums text-muted">{c.margin_pct}% margin</div>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <div className="text-sm font-semibold tabular-nums" style={{ color: cColour }}>{gbp(cNet)}</div>
+                        <div className="text-[11px] text-muted/70">net</div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
       </div>
     </div>
   );
@@ -1736,7 +1891,7 @@ function ReviewsTab() {
 
 // The range control only steers the tabs built from the shared reports
 // payload; the rest fetch their own data on their own terms.
-const RANGE_TABS: Tab[] = ['overview', 'crew', 'time'];
+const RANGE_TABS: Tab[] = ['overview', 'profit', 'crew', 'time'];
 
 export default function Reports() {
   const toast = useToast();
@@ -1814,6 +1969,7 @@ export default function Reports() {
       {tab === 'tax' ? <TaxTab />
         : tab === 'exports' ? <ExportsTab />
         : tab === 'commissions' ? <CommissionsTab />
+        : tab === 'profit' ? <ProfitTab range={range} />
         : loading ? <SkeletonList count={5} />
         : error ? (
           <EmptyState icon="error" accent="#F43F5E" title="Could not load reports" hint={error}
