@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Icon, Button, Card, Badge, Input, Textarea, Modal, Drawer,
-  EmptyState, SkeletonList, useToast, Stat,
+  EmptyState, SkeletonList, useToast, Stat, Toggle,
 } from '../../components/ui';
 import { customersApi } from '../../lib/customersApi';
 import type {
@@ -275,7 +275,7 @@ function CustomerDrawer({ id, onClose, onChanged }: {
           {/* Notes & history */}
           <Section icon="forum" title="History & notes">
             <div className="mb-3 flex items-end gap-2">
-              <Textarea rows={1} value={note} onChange={e => setNote(e.target.value)}
+              <Textarea rows={2} aria-label="Add a note" value={note} onChange={e => setNote(e.target.value)}
                 placeholder="Add a note (access, complaint, call back…)"
                 onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) addNote(); }} />
               <Button variant="secondary" icon="add" loading={savingNote} onClick={addNote}>Note</Button>
@@ -285,10 +285,10 @@ function CustomerDrawer({ id, onClose, onChanged }: {
                 {d.comms.map(m => (
                   <div key={m.id} className="flex gap-2 text-sm">
                     <Icon name={m.kind === 'note' ? 'sticky_note_2' : 'send'} size={15}
-                      className="mt-0.5 shrink-0 text-muted/60" />
+                      className="mt-0.5 shrink-0 text-muted/70" />
                     <div className="min-w-0">
                       <div className="text-ink/90">{m.content}</div>
-                      <div className="text-[10px] uppercase tracking-wide text-muted/50">{m.kind} · {fmtTs(m.created_at)}</div>
+                      <div className="text-[11px] uppercase tracking-wide text-muted">{m.kind} · {fmtTs(m.created_at)}</div>
                     </div>
                   </div>
                 ))}
@@ -309,7 +309,7 @@ function CustomerDrawer({ id, onClose, onChanged }: {
 function MiniStat({ label, value, tone }: { label: string; value: string; tone: string }) {
   return (
     <div className="rounded-xl border border-white/6 bg-white/[0.02] p-3">
-      <div className="text-[10px] uppercase tracking-wide text-muted/60">{label}</div>
+      <div className="text-[11px] uppercase tracking-wide text-muted">{label}</div>
       <div className={`mt-0.5 text-lg font-bold ${tone}`}>{value}</div>
     </div>
   );
@@ -324,7 +324,7 @@ function Section({ icon, title, children }: { icon: string; title: string; child
     </div>
   );
 }
-const Empty = ({ text }: { text: string }) => <p className="px-1 text-sm text-muted/60">{text}</p>;
+const Empty = ({ text }: { text: string }) => <p className="px-1 text-sm text-muted">{text}</p>;
 
 // ── Edit modal ────────────────────────────────────────────────────────────────
 function EditModal({ customer, onClose, onSaved }: {
@@ -365,11 +365,11 @@ function EditModal({ customer, onClose, onSaved }: {
         </Field>
         <Field label="Notes"><Textarea rows={3} value={f.notes || ''} onChange={e => set('notes', e.target.value)}
           placeholder="Access, gate codes, preferences…" /></Field>
-        <label className="flex items-center gap-2 text-sm text-muted">
-          <input type="checkbox" checked={!!f.archived} onChange={e => set('archived', e.target.checked)}
-            className="h-4 w-4 rounded border-white/20 bg-black/30 accent-accent" />
-          Archived (hidden from the active book)
-        </label>
+        <div className="flex items-center justify-between gap-2 rounded-xl bg-white/[0.03] px-3 py-2.5 text-sm text-muted">
+          <span>Archived (hidden from the active book)</span>
+          <Toggle checked={!!f.archived} onChange={() => set('archived', !f.archived)}
+            ariaLabel="Archived (hidden from the active book)" />
+        </div>
       </div>
       <div className="mt-5 flex justify-end gap-2">
         <Button variant="ghost" onClick={onClose}>Cancel</Button>

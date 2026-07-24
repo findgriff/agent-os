@@ -57,14 +57,23 @@ const TONES: Record<Tone, string> = {
   danger: 'bg-white text-red-600 border border-red-200 hover:bg-red-50',
 };
 
-const BTN_BASE = `inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold
+type Size = 'md' | 'lg';
+// One padding/height source per size, so callers never layer a second `py-*`
+// over the base (Tailwind resolves conflicting utilities by stylesheet order,
+// not source order, so `py-4 py-2.5` is a coin-flip). `lg` also clears the
+// 44px thumb-target floor on its own.
+const SIZES: Record<Size, string> = {
+  md: 'px-4 py-2.5 text-sm',
+  lg: 'px-5 py-3.5 text-base min-h-[48px]',
+};
+const BTN_BASE = `inline-flex items-center justify-center gap-2 rounded-xl font-bold
   transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50`;
 
-export function MGButton({ tone = 'primary', loading, children, className = '', ...props }:
-  React.ButtonHTMLAttributes<HTMLButtonElement> & { tone?: Tone; loading?: boolean }) {
+export function MGButton({ tone = 'primary', size = 'md', loading, children, className = '', ...props }:
+  React.ButtonHTMLAttributes<HTMLButtonElement> & { tone?: Tone; size?: Size; loading?: boolean }) {
   return (
     <button {...props} disabled={props.disabled || loading}
-      className={`${BTN_BASE} ${TONES[tone]} ${className}`}>
+      className={`${BTN_BASE} ${SIZES[size]} ${TONES[tone]} ${className}`}>
       {loading && <MGSpinner />}
       {children}
     </button>
@@ -74,10 +83,10 @@ export function MGButton({ tone = 'primary', loading, children, className = '', 
 /** An anchor styled as a button. Use for navigation CTAs so we never nest a
  *  real <button> inside an <a> — that's invalid HTML and some screen readers
  *  double-announce / double-activate it. */
-export function MGButtonLink({ tone = 'primary', children, className = '', ...props }:
-  React.AnchorHTMLAttributes<HTMLAnchorElement> & { tone?: Tone }) {
+export function MGButtonLink({ tone = 'primary', size = 'md', children, className = '', ...props }:
+  React.AnchorHTMLAttributes<HTMLAnchorElement> & { tone?: Tone; size?: Size }) {
   return (
-    <a {...props} className={`${BTN_BASE} ${TONES[tone]} ${className}`}>
+    <a {...props} className={`${BTN_BASE} ${SIZES[size]} ${TONES[tone]} ${className}`}>
       {children}
     </a>
   );

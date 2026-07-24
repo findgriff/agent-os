@@ -323,14 +323,14 @@ function CrewRound({ crew, onSignOut }: { crew: Crew; onSignOut: () => void }) {
 
         {/* Day picker — for catching up on yesterday, or looking ahead */}
         <div className="mb-4 flex items-center gap-2">
-          <MGInput type="date" value={date || data?.date || ''}
+          <MGInput type="date" aria-label="Show round for date" value={date || data?.date || ''}
             onChange={e => setDate(e.target.value)} className="flex-1" />
           {date && (
-            <MGButton tone="secondary" onClick={() => setDate('')}>Today</MGButton>
+            <MGButton tone="secondary" className="min-h-[44px]" onClick={() => setDate('')}>Today</MGButton>
           )}
         </div>
 
-        {error && <MGAlert>{error}</MGAlert>}
+        {error && data && <MGAlert>{error}</MGAlert>}
 
         {loading && !data ? (
           <div className="space-y-3">
@@ -338,6 +338,14 @@ function CrewRound({ crew, onSignOut }: { crew: Crew; onSignOut: () => void }) {
               <div key={i} className="h-40 animate-pulse rounded-2xl bg-slate-100" />
             ))}
           </div>
+        ) : error && !data ? (
+          <MGCard className="px-6 py-14 text-center">
+            <p className="text-base font-bold">Couldn&rsquo;t load your round</p>
+            <p className="mt-1 text-sm text-slate-500">{error}</p>
+            <MGButton className="mt-4 min-h-[44px]" onClick={() => load(date || undefined)}>
+              Try again
+            </MGButton>
+          </MGCard>
         ) : !data?.jobs.length ? (
           <MGCard className="px-6 py-14 text-center">
             <div className="mb-3 flex justify-center"><MGMark size={44} /></div>
@@ -432,7 +440,7 @@ function JobCard({ job, stop, onChanged }:
           className="flex min-h-[52px] flex-col items-center justify-center gap-0.5 rounded-xl
             border border-slate-300 bg-white text-xs font-bold text-slate-700
             transition-colors hover:bg-slate-50 active:scale-[0.98]">
-          <span className="text-lg leading-none">📍</span> Navigate
+          <span className="text-lg leading-none" aria-hidden>📍</span> Navigate
         </a>
         <a href={job.customer_phone ? `tel:${job.customer_phone}` : undefined}
           aria-disabled={!job.customer_phone}
@@ -440,13 +448,13 @@ function JobCard({ job, stop, onChanged }:
             border border-slate-300 bg-white text-xs font-bold text-slate-700 transition-colors
             ${job.customer_phone ? 'hover:bg-slate-50 active:scale-[0.98]'
               : 'pointer-events-none opacity-40'}`}>
-          <span className="text-lg leading-none">📞</span> Call
+          <span className="text-lg leading-none" aria-hidden>📞</span> Call
         </a>
         <button onClick={() => toggle('photos')}
           className="flex min-h-[52px] flex-col items-center justify-center gap-0.5 rounded-xl
             border border-slate-300 bg-white text-xs font-bold text-slate-700
             transition-colors hover:bg-slate-50 active:scale-[0.98]">
-          <span className="text-lg leading-none">🖼️</span>
+          <span className="text-lg leading-none" aria-hidden>🖼️</span>
           Photos{job.photos.length ? ` (${job.photos.length})` : ''}
         </button>
       </div>
@@ -479,11 +487,11 @@ function JobCard({ job, stop, onChanged }:
         )}
         {!done && (
           <div className="grid grid-cols-2 gap-2">
-            <MGButton tone="secondary" onClick={start} loading={busy} disabled={started}
+            <MGButton tone={started ? 'secondary' : 'primary'} onClick={start} loading={busy} disabled={started}
               className="min-h-[52px] w-full text-base">
               {started ? 'Started' : 'Start job'}
             </MGButton>
-            <MGButton onClick={() => toggle('complete')}
+            <MGButton tone={started ? 'primary' : 'secondary'} onClick={() => toggle('complete')}
               className="min-h-[52px] w-full text-base">
               Complete job
             </MGButton>
@@ -517,7 +525,7 @@ function Detail({ label, value, tone }:
     <div className={`rounded-xl px-3.5 py-3 ${tone === 'amber'
       ? 'border border-amber-200 bg-amber-50' : 'bg-slate-50'}`}>
       <div className={`mb-1 text-[11px] font-extrabold uppercase tracking-wider
-        ${tone === 'amber' ? 'text-amber-700' : 'text-slate-400'}`}>
+        ${tone === 'amber' ? 'text-amber-700' : 'text-slate-500'}`}>
         {label}
       </div>
       <p className={`whitespace-pre-line text-sm font-medium leading-relaxed

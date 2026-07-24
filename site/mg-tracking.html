@@ -58,22 +58,25 @@
     .topbar { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
 
     button.btn {
-      display: inline-flex; align-items: center; gap: 7px;
+      display: inline-flex; align-items: center; justify-content: center; gap: 7px;
       font: 600 13px/1 'Inter', system-ui, sans-serif;
       color: var(--ink); background: rgba(255,255,255,0.05);
       border: 1px solid var(--line); border-radius: 12px;
-      padding: 9px 14px; cursor: pointer; transition: all .15s ease;
+      min-height: 44px; padding: 9px 16px; cursor: pointer; transition: all .15s ease;
     }
     button.btn:hover { border-color: rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); }
+    button.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     button.btn.full { width: 100%; justify-content: center; }
     button.btn.primary { background: var(--accent); color: #05080C; border-color: transparent; }
     button.btn.primary:hover { filter: brightness(1.08); }
 
-    .err { border-color: rgba(248,113,113,0.3); background: rgba(248,113,113,0.06); color: #FCA5A5; padding: 12px 14px; margin-bottom: 18px; font-size: 13px; border-radius: 14px; }
+    .err { border-color: rgba(248,113,113,0.3); background: rgba(248,113,113,0.06); color: #FCA5A5; padding: 12px 14px; margin-bottom: 18px; font-size: 13px; }
     .hidden { display: none !important; }
 
     /* Stat tiles */
     .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 18px; }
+    /* 5 tiles in a 2-col phone grid would strand the last one; let it span the row. */
+    @media (max-width: 719px) { .stats .stat:last-child { grid-column: 1 / -1; } }
     @media (min-width: 720px) { .stats { grid-template-columns: repeat(5, 1fr); } }
     .stat { padding: 14px 16px; }
     .stat .label { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
@@ -109,7 +112,8 @@
     .badge.ok { color: var(--ok); background: rgba(52,211,153,0.12); }
     .badge.neutral { color: var(--muted); background: rgba(255,255,255,0.06); }
 
-    .crewcard .meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; font-size: 11px; color: var(--muted); }
+    .crewcard .meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; margin-top: 10px; font-size: 11px; color: var(--muted); }
+    .crewcard .meta > * { min-width: 0; }
     .crewcard .meta .onsite { color: var(--ok); }
     .crewcard .meta .offsite { color: var(--warn); }
     .crewcard .route { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
@@ -154,7 +158,7 @@
     <div class="box glass">
       <h2>Connect to Max Gleam</h2>
       <p>Paste an HQ or partner access token to see the live crew map.</p>
-      <input id="gateToken" type="password" placeholder="Access token" autocomplete="off" />
+      <input id="gateToken" type="password" placeholder="Access token" aria-label="Access token" autocomplete="off" />
       <div id="gateErr" class="gerr hidden"></div>
       <button class="btn primary full" id="gateBtn">Connect</button>
     </div>
@@ -189,7 +193,7 @@
           <span class="li"><span class="swatch" style="background:#19C3E6"></span>Crew</span>
           <span class="li"><span class="swatch ring" style="background:#19C3E6"></span>Off site</span>
           <span class="li"><span class="swatch" style="background:rgba(52,211,153,0.9)"></span>Done</span>
-          <span class="li"><span class="swatch" style="background:rgba(255,255,255,0.35)"></span>Stop</span>
+          <span class="li"><span class="swatch" style="background:rgba(255,255,255,0.55)"></span>Stop</span>
           <span class="li" id="reporting" style="margin-left:auto"></span>
         </div>
       </div>
@@ -291,7 +295,17 @@
     // ── Leaflet map ─────────────────────────────────────────────────────
     function whenLeaflet(cb) {
       if (window.L) return cb();
-      var t = setInterval(function () { if (window.L) { clearInterval(t); cb(); } }, 120);
+      // Poll for the Leaflet vendor bundle, but give up after ~5s so a failed
+      // /vendor/leaflet load surfaces an error instead of "Loading map…" forever.
+      var tries = 0;
+      var t = setInterval(function () {
+        if (window.L) { clearInterval(t); cb(); return; }
+        if (++tries > 42) {
+          clearInterval(t);
+          var el = $('mapLoading');
+          if (el) el.textContent = 'Map failed to load — refresh to retry.';
+        }
+      }, 120);
     }
 
     function initMap() {
@@ -335,7 +349,7 @@
       return L.divIcon({
         className: '', iconSize: [12, 12], iconAnchor: [6, 6],
         html: '<div style="width:12px;height:12px;border-radius:50%;background:'
-          + (done ? 'rgba(52,211,153,0.9)' : 'rgba(255,255,255,0.35)')
+          + (done ? 'rgba(52,211,153,0.9)' : 'rgba(255,255,255,0.55)')
           + ';border:1.5px solid rgba(5,8,12,0.8);"></div>'
       });
     }

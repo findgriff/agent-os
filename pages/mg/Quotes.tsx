@@ -113,10 +113,10 @@ export default function Quotes() {
           const n = f.key === 'all' ? quotes.length : quotes.filter(q => q.status === f.key).length;
           const active = filter === f.key;
           return (
-            <button key={f.key} onClick={() => setFilter(f.key)}
+            <button key={f.key} onClick={() => setFilter(f.key)} aria-pressed={active}
               className={`rounded-full px-3 py-1.5 text-xs font-medium transition-all
                 ${active ? 'bg-accent text-[#04222b]' : 'glass text-muted hover:text-ink'}`}>
-              {f.label} <span className={active ? 'opacity-70' : 'opacity-50'}>{n}</span>
+              {f.label} <span className="tabular-nums opacity-70">{n}</span>
             </button>
           );
         })}
@@ -178,7 +178,7 @@ function QuoteRow({ q, busy, delay, onEdit, onSend, onAccept, onDecline, onReope
             <Icon name="location_on" size={14} />
             <span className="truncate">{q.address}{q.postcode ? `, ${q.postcode}` : ''}</span>
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs tabular-nums">
             {q.recurring_pence > 0 && (
               <span className="text-ink">
                 <span className="font-semibold">{gbp2(q.recurring_pence)}</span>
@@ -210,7 +210,7 @@ function QuoteRow({ q, busy, delay, onEdit, onSend, onAccept, onDecline, onReope
           {q.status === 'converted'
             ? <span className="flex items-center gap-1 text-xs text-emerald"><Icon name="check_circle" size={16} />Customer</span>
             : <button onClick={onEdit} title="Edit" aria-label="Edit quote"
-                className="grid h-8 w-8 place-items-center rounded-lg text-muted transition-colors hover:bg-white/6 hover:text-ink">
+                className="grid h-9 w-9 place-items-center rounded-xl text-muted transition-colors hover:bg-white/6 hover:text-ink">
                 <Icon name="edit" size={17} />
               </button>}
         </div>
@@ -349,9 +349,10 @@ function ConvertModal({ quote, onClose, onDone }: {
       {quote.first_clean_pence > 0 && (
         <div className="mt-4">
           <Field label={`Book the first clean (${gbp2(quote.first_clean_pence)}) for — optional`}>
-            <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
+            <Input type="date" min={new Date().toISOString().slice(0, 10)}
+              value={date} onChange={e => setDate(e.target.value)} />
           </Field>
-          <p className="mt-1 text-xs text-muted/70">Leave blank to convert without scheduling a first job.</p>
+          <p className="mt-1 text-xs text-muted">Leave blank to convert without scheduling a first job.</p>
         </div>
       )}
       <div className="mt-5 flex justify-end gap-2">

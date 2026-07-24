@@ -75,14 +75,15 @@ function InvoiceRow({ inv, onSend, onPdf, onRecordPaid, onRevert }: {
   const isPart = amountValid && amountPence < outstanding;
   const tone = STATUS_TONE[inv.display_status] || 'neutral';
   const accent = inv.display_status === 'paid' ? '#22C55E'
-    : inv.display_status === 'overdue' ? '#F43F5E' : '#F59E0B';
+    : inv.display_status === 'overdue' ? '#F43F5E'
+    : inv.display_status === 'void' ? '#64748B' : '#F59E0B';
   return (
     <div className="relative flex flex-col gap-2 rounded-xl border border-white/6 bg-white/[0.02] p-3 transition-colors hover:border-white/12 sm:flex-row sm:items-center sm:gap-4">
       <span className="absolute bottom-3 left-0 top-3 w-[3px] rounded-r-full"
         style={{ background: accent, boxShadow: `0 0 10px ${accent}88` }} />
       <div className="shrink-0 pl-2.5 sm:w-36">
         <div className="font-mono text-sm font-semibold text-ink">{inv.number}</div>
-        <div className="text-[11px] text-muted/70">
+        <div className="text-[11px] text-muted">
           {inv.issued_at ? new Date(inv.issued_at * 1000).toLocaleDateString('en-GB') : '—'}
         </div>
       </div>
@@ -93,11 +94,13 @@ function InvoiceRow({ inv, onSend, onPdf, onRecordPaid, onRevert }: {
           {inv.address && <span className="truncate">{inv.address}</span>}
           {inv.days_outstanding !== null && inv.display_status !== 'paid' && (
             <span className={inv.is_overdue ? 'text-rose' : ''}>
-              · {inv.days_outstanding}d outstanding
+              {inv.address ? '· ' : ''}{inv.days_outstanding}d outstanding
             </span>
           )}
           {!inv.customer_email && (
-            <span className="text-amber/80">· no email on file</span>
+            <span className="text-amber/80">
+              {(inv.address || (inv.days_outstanding !== null && inv.display_status !== 'paid')) ? '· ' : ''}no email on file
+            </span>
           )}
         </div>
       </div>
@@ -106,11 +109,11 @@ function InvoiceRow({ inv, onSend, onPdf, onRecordPaid, onRevert }: {
         <div className="text-right">
           <div className="text-sm font-semibold tabular-nums text-ink">{gbp(inv.amount_pence)}</div>
           {inv.display_status === 'partial' || (inv.paid_pence > 0 && inv.outstanding_pence > 0) ? (
-            <div className="text-[10px] tabular-nums text-amber/90">
+            <div className="text-[11px] tabular-nums text-amber/90">
               {gbp(inv.paid_pence)} paid · {gbp(inv.outstanding_pence)} due
             </div>
           ) : inv.vat_pence > 0 && (
-            <div className="text-[10px] tabular-nums text-muted/70">inc. {gbp(inv.vat_pence)} VAT</div>
+            <div className="text-[11px] tabular-nums text-muted">inc. {gbp(inv.vat_pence)} VAT</div>
           )}
         </div>
         <Badge tone={tone}>
@@ -136,7 +139,7 @@ function InvoiceRow({ inv, onSend, onPdf, onRecordPaid, onRevert }: {
         <Button variant="ghost" icon="download" loading={pdfBusy} title="Download PDF"
           aria-label="Download PDF" className="!h-11 !w-11 !px-0"
           onClick={async () => { setPdfBusy(true); await onPdf(inv); setPdfBusy(false); }} />
-        <Button variant="secondary" icon="mail" loading={busy}
+        <Button variant="secondary" icon="mail" loading={busy} className="min-h-[44px]"
           disabled={!inv.customer_email}
           title={inv.customer_email ? `Email ${inv.customer_email}` : 'No email address on file'}
           onClick={async () => { setBusy(true); await onSend(inv); setBusy(false); }}>

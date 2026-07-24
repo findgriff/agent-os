@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import {
   Icon, Button, Card, Badge, Input, Select, Textarea, Modal, Drawer,
-  EmptyState, SkeletonList, useToast, Stat,
+  EmptyState, SkeletonList, useToast, Stat, Toggle,
 } from '../../components/ui';
 import { crewAdminApi } from '../../lib/crewAdminApi';
 import type {
@@ -25,7 +25,7 @@ const JOB_TONE: Record<string, 'ok' | 'warn' | 'danger' | 'info' | 'neutral'> = 
   done: 'ok', scheduled: 'info', skipped: 'warn', missed: 'danger',
 };
 
-function Field({ label, children, className = '' }: { label: string; children: React.ReactNode; className?: string }) {
+function Field({ label, children, className = '' }: { label: React.ReactNode; children: React.ReactNode; className?: string }) {
   return (
     <label className={`block ${className}`}>
       <span className="mb-1 block text-xs font-medium text-muted">{label}</span>
@@ -99,7 +99,7 @@ export default function CrewManage() {
                         <span className="flex items-center gap-1"><Icon name="sell" size={13} />{gbp2(c.rate_per_clean_pence)}/clean</span>
                       </div>
                     </div>
-                    <Icon name="chevron_right" size={20} className="shrink-0 text-muted/40" />
+                    <Icon name="chevron_right" size={20} className="shrink-0 text-muted/70" />
                   </div>
                 </Card>
               </button>
@@ -202,7 +202,7 @@ function CrewDrawer({ id, onClose, onChanged }: { id: number; onClose: () => voi
                       <span className="truncate text-sm text-ink">{fmtDate(l.date_from)} – {fmtDate(l.date_to)}</span>
                       {l.notes && <span className="truncate text-xs text-muted">· {l.notes}</span>}
                     </div>
-                    <button onClick={() => removeLeave(l)} aria-label="Remove" title="Remove" disabled={deletingLeave !== null}
+                    <button onClick={() => removeLeave(l)} aria-label="Remove" title="Remove" disabled={deletingLeave === l.id}
                       className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-muted hover:bg-rose/10 hover:text-rose disabled:opacity-40">
                       <Icon name={deletingLeave === l.id ? 'progress_activity' : 'delete'} size={16}
                         className={deletingLeave === l.id ? 'animate-spin' : ''} />
@@ -227,7 +227,7 @@ function CrewDrawer({ id, onClose, onChanged }: { id: number; onClose: () => voi
                   </div>
                 ))}
                 {d.jobs.length > 10 && (
-                  <p className="px-1 pt-1 text-xs text-muted/50">Showing the 10 most recent of {d.jobs.length}.</p>
+                  <p className="px-1 pt-1 text-xs text-muted">Showing the 10 most recent of {d.jobs.length}.</p>
                 )}
               </div>
             )}
@@ -271,7 +271,7 @@ function CrewDrawer({ id, onClose, onChanged }: { id: number; onClose: () => voi
 function MiniStat({ label, value, tone }: { label: string; value: string; tone: string }) {
   return (
     <div className="rounded-xl border border-white/6 bg-white/[0.02] p-3">
-      <div className="text-[10px] uppercase tracking-wide text-muted/60">{label}</div>
+      <div className="text-[11px] uppercase tracking-wide text-muted">{label}</div>
       <div className={`mt-0.5 text-lg font-bold tabular-nums ${tone}`}>{value}</div>
     </div>
   );
@@ -289,7 +289,7 @@ function Section({ icon, title, action, children }: { icon: string; title: strin
     </div>
   );
 }
-const Empty = ({ text }: { text: string }) => <p className="px-1 text-sm text-muted/60">{text}</p>;
+const Empty = ({ text }: { text: string }) => <p className="px-1 text-sm text-muted">{text}</p>;
 
 // ── Add / edit crew ───────────────────────────────────────────────────────────
 function CrewFormModal({ crew, onClose, onSaved }: {
@@ -319,7 +319,7 @@ function CrewFormModal({ crew, onClose, onSaved }: {
   return (
     <Modal open onClose={onClose} title={crew ? 'Edit crew' : 'Add crew'} width="max-w-lg">
       <div className="space-y-3">
-        <Field label="Name"><Input value={f.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Dave Smith" /></Field>
+        <Field label={<>Name <span className="text-rose">*</span></>}><Input value={f.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Dave Smith" /></Field>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Phone"><Input value={f.phone || ''} onChange={e => set('phone', e.target.value)} placeholder="07…" /></Field>
           <Field label="Email"><Input type="email" value={f.email || ''} onChange={e => set('email', e.target.value)} /></Field>
@@ -336,11 +336,11 @@ function CrewFormModal({ crew, onClose, onSaved }: {
         <Field label="Notes"><Textarea rows={2} value={f.notes || ''} onChange={e => set('notes', e.target.value)}
           placeholder="Vehicle, area, day preferences…" /></Field>
         {crew && (
-          <label className="flex items-center gap-2 text-sm text-muted">
-            <input type="checkbox" checked={!!f.active} onChange={e => set('active', e.target.checked)}
-              className="h-4 w-4 rounded border-white/20 bg-black/30 accent-accent" />
-            Active (available for assignment)
-          </label>
+          <div className="flex items-center justify-between gap-2 rounded-xl bg-white/[0.03] px-3 py-2.5 text-sm text-muted">
+            <span>Active (available for assignment)</span>
+            <Toggle checked={!!f.active} onChange={() => set('active', !f.active)}
+              ariaLabel="Active (available for assignment)" />
+          </div>
         )}
       </div>
       <div className="mt-5 flex justify-end gap-2">
