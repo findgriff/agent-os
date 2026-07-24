@@ -41,7 +41,9 @@ const NAV = [
   { to: '/call-center', label: 'Call Center', icon: 'headset_mic', colour: '#FF6B00', group: 'Comms' },
   { to: '/comms', label: 'Comms Log', icon: 'forum', colour: '#38BDF8', group: 'Comms' },
   { to: '/inventory', label: 'Stock', icon: 'inventory_2', colour: '#22C55E', group: 'Command' },
-  { to: '/tracking', label: 'Crew Tracking', icon: 'my_location', colour: '#19C3E6', group: 'Command' },
+  // Crew Tracking now lives as a standalone static page (mg-tracking.html),
+  // not a React route — so it's a full page load like /crew and /book.
+  { to: '/mg-tracking.html', label: 'Crew Tracking', icon: 'my_location', colour: '#19C3E6', group: 'Command', external: true },
   // The crew view repaints the page white and runs its own session, so it
   // must be a full page load rather than a client-side transition.
   { to: '/crew', label: 'Crew View', icon: 'directions_car', colour: '#19C3E6', group: 'Comms', external: true },
