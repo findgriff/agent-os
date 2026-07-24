@@ -502,7 +502,7 @@ function TimeTab({ data }: { data: ReportsData }) {
         <StatTile label="On the clock now" value={String(history?.open_count ?? 0)}
           sub={history?.open_count ? 'crew currently on site' : 'nobody clocked in'}
           icon="play_circle" accent={history?.open_count ? '#22C55E' : '#8B96A8'} delay={60} />
-        <StatTile label="Avg per job (30d)" value={hoursMins(data.time.avg_minutes)}
+        <StatTile label={`Avg per job (${data.window_days}d)`} value={hoursMins(data.time.avg_minutes)}
           sub={`${data.time.logged_jobs} timed job${data.time.logged_jobs === 1 ? '' : 's'}`}
           icon="timer" accent="#A78BFA" delay={120} />
         <StatTile label="vs estimate"
