@@ -210,7 +210,7 @@ function CrewLogin({ onAuthed }: { onAuthed: (c: Crew) => void }) {
                   maxLength={6} value={code}
                   onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
                   placeholder="000000"
-                  className="py-3.5 text-center text-2xl font-bold tracking-[0.4em]" />
+                  className="py-3.5 text-center text-xl font-bold tracking-[0.3em] sm:text-2xl sm:tracking-[0.4em]" />
               </div>
               {error && <MGAlert>{error}</MGAlert>}
               <MGButton type="submit" loading={busy} disabled={code.length < 6}
@@ -269,7 +269,7 @@ function CrewRound({ crew, onSignOut }: { crew: Crew; onSignOut: () => void }) {
 
   return (
     <MGShell compact>
-      <main className="mx-auto max-w-xl px-4 pb-24 pt-5 sm:px-6">
+      <main className="mx-auto max-w-xl px-4 pb-[max(6rem,env(safe-area-inset-bottom))] pt-5 sm:px-6">
         {/* Who and when */}
         <div className="mb-5 flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -279,7 +279,7 @@ function CrewRound({ crew, onSignOut }: { crew: Crew; onSignOut: () => void }) {
             <p className="text-sm text-slate-500">{prettyDate(data?.date || date)}</p>
           </div>
           <button onClick={onSignOut}
-            className="shrink-0 rounded-lg px-2.5 py-1.5 text-sm font-semibold text-slate-500 hover:bg-slate-100">
+            className="shrink-0 rounded-lg px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100 min-h-[40px]">
             Sign out
           </button>
         </div>
