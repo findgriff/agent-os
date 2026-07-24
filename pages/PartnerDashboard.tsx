@@ -31,9 +31,12 @@ const PRIORITY_TONE: Record<string, 'ok' | 'warn' | 'danger' | 'info' | 'neutral
 };
 
 // ── Kebab (⋯) menu ──────────────────────────────────────────────────────
-// A click-to-open dropdown that closes on outside click or Escape. Kept
-// local to this file — it is the only surface that needs one, and the AGENT
-// OS kit has no menu primitive.
+// Click-to-open, closes on outside tap or Escape. Kept local to this file —
+// it is the only surface that needs one, and the AGENT OS kit has no menu
+// primitive. On phones the list is a bottom sheet (thumb-reachable, never
+// clipped by the row it hangs off); from `sm` up it is a right-aligned
+// dropdown. The trigger keeps a 44px touch target regardless of its visual
+// size so it clears the Apple/Android minimum.
 interface KebabItem {
   label: string;
   icon: string;
@@ -42,21 +45,22 @@ interface KebabItem {
   disabled?: boolean;
 }
 
-function KebabMenu({ items, label = 'Job actions' }:
-  { items: KebabItem[]; label?: string }) {
+function KebabMenu({ items, label = 'Job actions', title = 'Job actions' }:
+  { items: KebabItem[]; label?: string; title?: string }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => {
+    // pointerdown covers mouse and touch in one listener.
+    const onDown = (e: Event) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    document.addEventListener('mousedown', onDown);
+    document.addEventListener('pointerdown', onDown);
     document.addEventListener('keydown', onKey);
     return () => {
-      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('pointerdown', onDown);
       document.removeEventListener('keydown', onKey);
     };
   }, [open]);
@@ -65,27 +69,41 @@ function KebabMenu({ items, label = 'Job actions' }:
     <div className="relative" ref={ref}>
       <button type="button" aria-haspopup="menu" aria-expanded={open} aria-label={label}
         onClick={() => setOpen(o => !o)}
-        className={`grid h-8 w-8 place-items-center rounded-lg border border-white/8 text-muted
+        className={`grid h-11 w-11 place-items-center rounded-lg border border-white/8 text-muted
           transition-colors hover:border-white/16 hover:bg-white/5 hover:text-ink
-          ${open ? 'bg-white/5 text-ink' : ''}`}>
+          sm:h-8 sm:w-8 ${open ? 'bg-white/5 text-ink' : ''}`}>
         <Icon name="more_vert" size={18} />
       </button>
+
       {open && (
-        <div role="menu"
-          className="absolute right-0 z-40 mt-1 w-44 overflow-hidden rounded-xl border border-white/10
-            bg-surface/95 p-1 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.6)] backdrop-blur-xl
-            animate-[fadeInUp_0.12s_ease-out_both]">
-          {items.map(item => (
-            <button key={item.label} type="button" role="menuitem" disabled={item.disabled}
-              onClick={() => { setOpen(false); item.onClick(); }}
-              className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm
-                transition-colors disabled:cursor-not-allowed disabled:opacity-40
-                ${item.danger ? 'text-rose hover:bg-rose/10' : 'text-ink hover:bg-white/6'}`}>
-              <Icon name={item.icon} size={16} className={item.danger ? 'text-rose' : 'text-muted'} />
-              {item.label}
-            </button>
-          ))}
-        </div>
+        <>
+          {/* Scrim — phones only; the dropdown needs no backdrop */}
+          <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px] sm:hidden"
+            aria-hidden onClick={() => setOpen(false)} />
+          <div role="menu"
+            className="fixed inset-x-0 bottom-0 z-50 overflow-hidden rounded-t-2xl border-t border-white/10
+              bg-surface/95 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]
+              shadow-[0_-12px_40px_-8px_rgba(0,0,0,0.6)] backdrop-blur-xl
+              animate-[fadeInUp_0.16s_ease-out_both]
+              sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:mt-1 sm:w-44 sm:rounded-xl
+              sm:border sm:pb-2 sm:shadow-[0_12px_40px_-8px_rgba(0,0,0,0.6)]">
+            {/* Sheet header — phones only: grabber + title */}
+            <div className="mb-1 sm:hidden">
+              <span className="mx-auto mb-2 block h-1 w-9 rounded-full bg-white/15" />
+              <span className="block truncate px-2 text-[11px] font-semibold uppercase tracking-wider text-muted">{title}</span>
+            </div>
+            {items.map(item => (
+              <button key={item.label} type="button" role="menuitem" disabled={item.disabled}
+                onClick={() => { setOpen(false); item.onClick(); }}
+                className={`flex w-full items-center gap-3 rounded-lg px-2.5 py-3 text-left text-sm
+                  transition-colors disabled:cursor-not-allowed disabled:opacity-40 sm:gap-2.5 sm:py-2
+                  ${item.danger ? 'text-rose hover:bg-rose/10' : 'text-ink hover:bg-white/6'}`}>
+                <Icon name={item.icon} size={18} className={item.danger ? 'text-rose' : 'text-muted'} />
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
@@ -171,7 +189,7 @@ function JobRow({ job, tone, crews, onChanged }: {
             : tone === 'done' ? 'ok' : tone === 'overdue' ? 'danger' : 'info'}>
             {tone === 'overdue' && job.status !== 'cancelled' ? 'Overdue' : titleCase(job.status)}
           </Badge>
-          <KebabMenu items={items} />
+          <KebabMenu items={items} title={job.address || 'Job actions'} />
         </div>
       </div>
 
@@ -190,52 +208,64 @@ function JobRow({ job, tone, crews, onChanged }: {
       )}
 
       {panel === 'reschedule' && (
-        <div className="flex flex-wrap items-end gap-2 border-t border-white/6 px-4 py-3">
-          <div>
+        <div className="flex flex-col gap-3 border-t border-white/6 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-end">
+          <div className="w-full sm:w-auto">
             <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">New date</label>
             <Input type="date" value={date} min={new Date().toISOString().slice(0, 10)}
-              onChange={e => setDate(e.target.value)} className="!w-auto" />
+              onChange={e => setDate(e.target.value)} className="w-full sm:!w-auto" />
           </div>
-          <Button variant="primary" icon="event_available" loading={busy}
-            disabled={!date || date === job.scheduled_date}
-            onClick={() => run(() => partnerApi.rescheduleJob(job.id, date),
-              `Moved to ${prettyDate(date)}`)}>
-            Save
-          </Button>
-          <Button variant="ghost" onClick={() => setPanel('none')}>Cancel</Button>
+          <div className="flex w-full gap-2 sm:w-auto">
+            <Button variant="primary" icon="event_available" loading={busy}
+              disabled={!date || date === job.scheduled_date}
+              onClick={() => run(() => partnerApi.rescheduleJob(job.id, date),
+                `Moved to ${prettyDate(date)}`)}
+              className="flex-1 sm:flex-none">
+              Save
+            </Button>
+            <Button variant="ghost" onClick={() => setPanel('none')} className="flex-1 sm:flex-none">Cancel</Button>
+          </div>
         </div>
       )}
 
       {panel === 'assign' && (
-        <div className="flex flex-wrap items-end gap-2 border-t border-white/6 px-4 py-3">
-          <div>
+        <div className="flex flex-col gap-3 border-t border-white/6 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-end">
+          <div className="w-full sm:w-auto">
             <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">Crew</label>
-            <Select value={crewId} onChange={e => setCrewId(e.target.value)}>
+            <Select value={crewId} onChange={e => setCrewId(e.target.value)} className="w-full sm:w-auto">
               <option value="">Unassign</option>
               {(crews || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select>
           </div>
-          <Button variant="primary" icon="group" loading={busy}
-            onClick={() => run(
-              () => partnerApi.assignJob(job.id, crewId ? Number(crewId) : null),
-              crewId ? 'Crew assigned' : 'Crew removed')}>
-            Save
-          </Button>
-          <Button variant="ghost" onClick={() => setPanel('none')}>Cancel</Button>
+          <div className="flex w-full gap-2 sm:w-auto">
+            <Button variant="primary" icon="group" loading={busy}
+              onClick={() => run(
+                () => partnerApi.assignJob(job.id, crewId ? Number(crewId) : null),
+                crewId ? 'Crew assigned' : 'Crew removed')}
+              className="flex-1 sm:flex-none">
+              Save
+            </Button>
+            <Button variant="ghost" onClick={() => setPanel('none')} className="flex-1 sm:flex-none">Cancel</Button>
+          </div>
         </div>
       )}
 
       {panel === 'cancel' && (
-        <div className="flex flex-wrap items-center gap-2 border-t border-rose/20 bg-rose/[0.04] px-4 py-3">
-          <Icon name="warning" size={18} className="text-rose" />
-          <span className="flex-1 text-[12px] text-muted">
-            Cancel this clean at {job.address}? The crew and customer keep their record; the job stops being scheduled.
-          </span>
-          <Button variant="danger" icon="cancel" loading={busy}
-            onClick={() => run(() => partnerApi.cancelJob(job.id), 'Job cancelled')}>
-            Cancel job
-          </Button>
-          <Button variant="ghost" onClick={() => setPanel('none')}>Keep it</Button>
+        <div className="flex flex-col gap-3 border-t border-rose/20 bg-rose/[0.04] px-4 py-3
+          sm:flex-row sm:flex-wrap sm:items-center">
+          <div className="flex items-start gap-2">
+            <Icon name="warning" size={18} className="mt-px shrink-0 text-rose" />
+            <span className="flex-1 text-[12px] text-muted sm:flex-none">
+              Cancel this clean at {job.address}? The crew and customer keep their record; the job stops being scheduled.
+            </span>
+          </div>
+          <div className="flex w-full gap-2 sm:ml-auto sm:w-auto">
+            <Button variant="danger" icon="cancel" loading={busy}
+              onClick={() => run(() => partnerApi.cancelJob(job.id), 'Job cancelled')}
+              className="flex-1 sm:flex-none">
+              Cancel job
+            </Button>
+            <Button variant="ghost" onClick={() => setPanel('none')} className="flex-1 sm:flex-none">Keep it</Button>
+          </div>
         </div>
       )}
     </div>
@@ -858,7 +888,9 @@ export default function PartnerDashboard({ partner, onSignOut }:
             </div>
           </div>
           <Button variant="ghost" icon="refresh" onClick={load} loading={loading}
-            className="hidden sm:inline-flex">Refresh</Button>
+            aria-label="Refresh" className="shrink-0">
+            <span className="hidden sm:inline">Refresh</span>
+          </Button>
           <Button variant="ghost" icon="logout" onClick={signOut} className="shrink-0">
             <span className="hidden sm:inline">Sign out</span>
           </Button>
