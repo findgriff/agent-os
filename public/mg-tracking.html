@@ -238,6 +238,14 @@
     function distanceLabel(metres) {
       return metres < 950 ? (Math.round(metres) + ' m') : ((metres / 1000).toFixed(1) + ' km');
     }
+    // Driving-vs-parked, read from the crew's last two fixes. '' when it can't
+    // be told (no movement data, or the crew has gone stale).
+    function isDriving(crew) {
+      return !!(crew.live && crew.movement && crew.movement.moving);
+    }
+    function speedLabel(crew) {
+      return '🚗 ' + Math.round(crew.movement.speed_mph) + ' mph';
+    }
     function esc(s) {
       return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
         return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -304,13 +312,21 @@
       var colour = colourFor(crew.crew_id);
       var offSite = crew.live && crew.geofence && !crew.geofence.on_site;
       var ring = offSite ? '#FBBF24' : colour;
+      // A small 🚗 rides the pin when the crew is moving, so driving-vs-parked
+      // reads straight off the map without opening the popup.
+      var badge = isDriving(crew)
+        ? '<div style="position:absolute;top:-5px;right:-5px;font-size:13px;line-height:1;'
+          + 'filter:drop-shadow(0 1px 1px rgba(0,0,0,0.7));">🚗</div>'
+        : '';
       return L.divIcon({
         className: '', iconSize: [34, 34], iconAnchor: [17, 17],
-        html: '<div style="width:34px;height:34px;border-radius:50%;display:grid;place-items:center;'
+        html: '<div style="position:relative;width:34px;height:34px;">'
+          + '<div style="width:34px;height:34px;border-radius:50%;display:grid;place-items:center;'
           + "font:700 12px/1 'Space Grotesk',system-ui,sans-serif;color:#05080C;"
           + 'background:' + colour + ';border:2px solid ' + (offSite ? '#FBBF24' : 'rgba(255,255,255,0.85)') + ';'
           + 'box-shadow:0 0 0 4px ' + ring + (offSite ? '55' : '33') + ',0 4px 12px rgba(0,0,0,0.5);'
           + 'opacity:' + (crew.live ? 1 : 0.45) + ';">' + esc(initials(crew.name)) + '</div>'
+          + badge + '</div>'
       });
     }
     function stopIcon(done) {
@@ -352,6 +368,7 @@
         var marker = L.marker([crew.position.lat, crew.position.lng], { icon: vanIcon(crew) })
           .bindPopup('<b>' + esc(crew.name) + '</b><br>' + esc(crew.job && crew.job.address || 'Between jobs')
             + siteLine(crew)
+            + (isDriving(crew) ? '<br><span style="color:#19C3E6">' + speedLabel(crew) + '</span>' : '')
             + '<br><span style="opacity:0.7">Last seen ' + agoLabel(crew.age_seconds) + '</span>')
           .on('click', function () { select(crew.crew_id); });
         marker.addTo(layer);
@@ -413,7 +430,10 @@
           + '<div class="job">' + esc(crew.job && crew.job.address || 'Between jobs') + '</div></div>'
           + '<span class="badge ' + (crew.live ? 'ok' : 'neutral') + '"><span class="bdot" style="background:' + (crew.live ? 'var(--ok)' : 'var(--muted)') + '"></span>' + (crew.live ? 'Live' : 'Stale') + '</span>'
           + '</div>'
-          + '<div class="meta"><span>Last seen ' + agoLabel(crew.age_seconds) + '</span>' + meta + '</div>'
+          + '<div class="meta"><span>Last seen ' + agoLabel(crew.age_seconds) + '</span>'
+          + '<span style="display:flex;align-items:center;gap:8px">'
+          + (isDriving(crew) ? '<span style="color:var(--accent)">' + speedLabel(crew) + '</span>' : '')
+          + meta + '</span></div>'
           + route
           + '</button>';
       }).join('');
