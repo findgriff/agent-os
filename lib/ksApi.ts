@@ -28,7 +28,15 @@ async function req<T>(method: string, path: string, body?: unknown, token?: stri
     method, headers, body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
-  const data = text ? JSON.parse(text) : {};
+  // A proxy/gateway can answer with an HTML 5xx page instead of JSON. Parsing
+  // that raw would throw a bare SyntaxError ("Unexpected token <…") straight
+  // past KsApiError and surface gibberish to parents and coaches, so treat an
+  // unparseable body as an empty payload and let the status carry the error.
+  let data: any = {};
+  if (text) {
+    try { data = JSON.parse(text); }
+    catch { if (res.ok) throw new KsApiError(res.status, 'unexpected response from the server'); }
+  }
   if (!res.ok) throw new KsApiError(res.status, data.error || res.statusText);
   return data as T;
 }

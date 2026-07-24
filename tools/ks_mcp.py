@@ -11,6 +11,7 @@ Tools:
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 KNOWLEDGE_FILE = Path("/opt/ks-bot/knowledge.json")
@@ -166,7 +167,6 @@ TOOLS = {
 }
 
 # ── MCP Protocol ────────────────────────────────────────────────────
-import time
 
 def main():
     for line in sys.stdin:

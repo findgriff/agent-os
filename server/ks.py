@@ -717,7 +717,12 @@ def session_subject(token: str, kind: str) -> dict | None:
     if not s:
         return None
     table = "parents" if kind == "parent" else "coaches"
-    return _one(f"SELECT * FROM {table} WHERE id = ?", (s["subject_id"],))
+    # coach_login refuses inactive coaches, but a token issued before
+    # deactivation would otherwise keep full dashboard access (finance, every
+    # student, all bookings) until it expires. Re-check active on each request
+    # so deactivating a coach revokes their session immediately.
+    active = " AND active = 1" if kind == "coach" else ""
+    return _one(f"SELECT * FROM {table} WHERE id = ?{active}", (s["subject_id"],))
 
 
 def logout(token: str) -> tuple[int, dict]:
