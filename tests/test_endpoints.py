@@ -46,8 +46,16 @@ NO_5XX = [
 # /api/maxgleam/reports/profit is HQ-only: _require() runs before any maxgleam
 # DB access, so an unauthenticated call 401s without needing the (absent) DB —
 # unlike an authenticated maxgleam call, which would 500 here (see note above).
+#
+# The GPS read routes qualify too: _maxgleam_scope() first calls
+# partner_for_token(), which short-circuits to None for an empty token *before*
+# any query, then falls through to _require() → 401. So the wiring is provable
+# here even though an authenticated GPS call needs the (absent) maxgleam DB.
 PROTECTED = ["/api/me", "/api/agents", "/api/hermes/history", "/api/tenants",
-             "/api/maxgleam/reports/profit"]
+             "/api/maxgleam/reports/profit",
+             "/api/maxgleam/gps/active",
+             "/api/maxgleam/gps/crew/1",
+             "/api/maxgleam/gps/history/1"]
 
 
 # ── liveness & routing ──────────────────────────────────────────────
@@ -69,6 +77,25 @@ def test_unknown_api_route_404(client):
 def test_requires_auth(client, path):
     status, _ = client.get(path, token=None)
     assert status == 401, f"{path} should reject an unauthenticated caller"
+
+
+# The GPS write route carries a crew token, not an HQ session. crew_for_token()
+# rejects an empty/garbage token before any DB access (bad tokens fail the HMAC
+# check), so this proves the route is wired and never logs a fix without a valid
+# crew — hermetic despite the absent maxgleam DB (see note above).
+def test_gps_update_requires_crew_token(client):
+    body = {"job_id": 1, "lat": 51.5, "lng": -0.1}
+    assert client.post("/api/maxgleam/gps/update", body=body, token=None)[0] == 401, \
+        "no token must be rejected"
+    assert client.post("/api/maxgleam/gps/update", body=body, token="not-a-token")[0] == 401, \
+        "a malformed crew token must be rejected"
+
+
+# Retention pruning is HQ-only and cron-driven. _require() gates it before any
+# maxgleam DB access, so the unauthenticated path is provable in this suite.
+def test_gps_prune_requires_hq_session(client):
+    assert client.post("/api/maxgleam/gps/prune", token=None)[0] == 401, \
+        "prune must reject an unauthenticated caller"
 
 
 # The customer invoice-PDF route is gated by a signed capability token, not an

@@ -3424,6 +3424,15 @@ def h_mg_gps_active(req: Request):
     return maxgleam_gps.active_crews(tenant_id)
 
 
+def h_mg_gps_prune(req: Request):
+    """POST /api/maxgleam/gps/prune — drop location points past the retention
+    window. HQ only, cron-driven: this is how the 14-day promise in the module
+    docstring ("a dispatch tool, not surveillance") is actually kept. The log
+    is estate-wide and not tenant-scoped, so it is never a partner's to prune."""
+    _require(req)
+    return 200, maxgleam_gps.prune()
+
+
 # ── Max Gleam stock + comms log (HQ or partner token) ────────────────
 
 def h_mg_inventory(req: Request):
@@ -3707,6 +3716,7 @@ ROUTES = [
     ("GET",  re.compile(r"^/api/maxgleam/gps/active$"), h_mg_gps_active),
     ("GET",  re.compile(r"^/api/maxgleam/gps/crew/(\d+)$"), h_mg_gps_crew),
     ("GET",  re.compile(r"^/api/maxgleam/gps/history/(\d+)$"), h_mg_gps_history),
+    ("POST", re.compile(r"^/api/maxgleam/gps/prune$"), h_mg_gps_prune),
 
     # ── Max Gleam stock control + communications log ────────────────────
     ("GET",  re.compile(r"^/api/maxgleam/inventory$"), h_mg_inventory),
