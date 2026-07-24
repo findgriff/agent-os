@@ -2,7 +2,7 @@
 // The AGENT OS primitives are dark-theme only, so the customer surfaces
 // bring their own shell and controls. Mobile-first: customers open these
 // pages from a text message on a phone.
-import { useEffect } from 'react';
+import { cloneElement, useEffect, useId } from 'react';
 
 export const MG_TEAL = '#19C3E6';
 export const MG_INK = '#0F2733';
@@ -57,16 +57,29 @@ const TONES: Record<Tone, string> = {
   danger: 'bg-white text-red-600 border border-red-200 hover:bg-red-50',
 };
 
+const BTN_BASE = `inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold
+  transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50`;
+
 export function MGButton({ tone = 'primary', loading, children, className = '', ...props }:
   React.ButtonHTMLAttributes<HTMLButtonElement> & { tone?: Tone; loading?: boolean }) {
   return (
     <button {...props} disabled={props.disabled || loading}
-      className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold
-        transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50
-        ${TONES[tone]} ${className}`}>
+      className={`${BTN_BASE} ${TONES[tone]} ${className}`}>
       {loading && <MGSpinner />}
       {children}
     </button>
+  );
+}
+
+/** An anchor styled as a button. Use for navigation CTAs so we never nest a
+ *  real <button> inside an <a> — that's invalid HTML and some screen readers
+ *  double-announce / double-activate it. */
+export function MGButtonLink({ tone = 'primary', children, className = '', ...props }:
+  React.AnchorHTMLAttributes<HTMLAnchorElement> & { tone?: Tone }) {
+  return (
+    <a {...props} className={`${BTN_BASE} ${TONES[tone]} ${className}`}>
+      {children}
+    </a>
   );
 }
 
@@ -83,12 +96,28 @@ export function MGCard({ children, className = '' }:
   );
 }
 
-export function MGLabel({ children, hint }: { children: React.ReactNode; hint?: string }) {
+export function MGLabel({ children, hint, htmlFor }:
+  { children: React.ReactNode; hint?: string; htmlFor?: string }) {
   return (
-    <label className="mb-1.5 block text-sm font-semibold text-slate-700">
+    <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-semibold text-slate-700">
       {children}
       {hint && <span className="ml-1.5 font-normal text-slate-400">{hint}</span>}
     </label>
+  );
+}
+
+/** Label + control as one associated unit. Generates a stable id and wires it
+ *  to both, so clicking the label focuses the field and screen readers announce
+ *  the label on focus. `children` must be a single form control that forwards
+ *  an `id` prop (MGInput / MGTextarea / <select> all do). */
+export function MGField({ label, hint, children, className = '' }:
+  { label: React.ReactNode; hint?: string; children: React.ReactElement; className?: string }) {
+  const id = useId();
+  return (
+    <div className={className}>
+      <MGLabel htmlFor={id} hint={hint}>{label}</MGLabel>
+      {cloneElement(children, { id })}
+    </div>
   );
 }
 

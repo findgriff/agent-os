@@ -8,9 +8,9 @@
 //
 // The step the customer is on is the only one expanded; the ones behind it
 // collapse to a single line they can tap to go back and change.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
-  MGShell, MGButton, MGCard, MGInput, MGTextarea, MGLabel, MGAlert, MGMark,
+  MGShell, MGButton, MGButtonLink, MGCard, MGInput, MGTextarea, MGLabel, MGField, MGAlert, MGMark,
 } from './MGKit';
 import {
   bookApi, type BookLookup, type BookProperty, type BookResult,
@@ -96,9 +96,7 @@ function Confirmed({ result, onAgain }: { result: BookResult; onAgain: () => voi
               need to get in touch.
             </p>
             <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-              <a href="/customer/login" className="sm:flex-1">
-                <MGButton className="w-full">Track it in your account</MGButton>
-              </a>
+              <MGButtonLink href="/customer/login" className="w-full sm:flex-1">Track it in your account</MGButtonLink>
               <MGButton tone="secondary" onClick={onAgain} className="w-full sm:w-auto">Book another</MGButton>
             </div>
           </div>
@@ -113,6 +111,7 @@ export default function BookOnline() {
   const [step, setStep] = useState<Step>('postcode');
 
   const [postcode, setPostcode] = useState('');
+  const postcodeId = useId();
   const [lookup, setLookup] = useState<BookLookup | null>(null);
   const [looking, setLooking] = useState(false);
 
@@ -218,9 +217,9 @@ export default function BookOnline() {
             summary={lookup?.postcode}
             onReopen={() => setStep('postcode')}>
             <form onSubmit={findProperty}>
-              <MGLabel hint="e.g. CH2 4BD">Postcode</MGLabel>
+              <MGLabel htmlFor={postcodeId} hint="e.g. CH2 4BD">Postcode</MGLabel>
               <div className="flex gap-2">
-                <MGInput value={postcode} autoFocus autoCapitalize="characters"
+                <MGInput id={postcodeId} value={postcode} autoFocus autoCapitalize="characters"
                   autoComplete="postal-code" placeholder="CH2 4BD"
                   onChange={e => setPostcode(e.target.value)} />
                 <MGButton type="submit" loading={looking} disabled={!postcode.trim()}>
@@ -323,27 +322,23 @@ export default function BookOnline() {
           {/* 4 — details */}
           <StepCard n={4} title="Your details" active={step === 'details'} done={false}>
             <form onSubmit={submit} className="space-y-3">
-              <div>
-                <MGLabel>Your name</MGLabel>
+              <MGField label="Your name">
                 <MGInput value={name} onChange={e => setName(e.target.value)}
                   autoComplete="name" placeholder="Jane Smith" required />
-              </div>
-              <div>
-                <MGLabel>Mobile</MGLabel>
+              </MGField>
+              <MGField label="Mobile">
                 <MGInput value={phone} onChange={e => setPhone(e.target.value)}
                   type="tel" autoComplete="tel" placeholder="07700 900123" />
-              </div>
-              <div>
-                <MGLabel hint="optional if you gave a mobile">Email</MGLabel>
+              </MGField>
+              <MGField label="Email" hint="optional if you gave a mobile">
                 <MGInput value={email} onChange={e => setEmail(e.target.value)}
                   type="email" autoComplete="email" placeholder="jane@example.com" />
-              </div>
-              <div>
-                <MGLabel hint="optional">Anything we should know?</MGLabel>
+              </MGField>
+              <MGField label="Anything we should know?" hint="optional">
                 <MGTextarea value={notes} rows={3} maxLength={500}
                   onChange={e => setNotes(e.target.value)}
                   placeholder="Side gate code, dog in the garden, parking…" />
-              </div>
+              </MGField>
 
               {price !== null && (
                 <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3.5 py-3">

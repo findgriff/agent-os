@@ -3,7 +3,7 @@
 // status, payment history, and how to reach the company doing the work.
 import { useCallback, useEffect, useState } from 'react';
 import {
-  MGShell, MGButton, MGCard, MGInput, MGLabel, MGAlert, MGPill, MGSpinner, signoffLook, Stars,
+  MGShell, MGButton, MGButtonLink, MGCard, MGInput, MGLabel, MGAlert, MGPill, MGSpinner, signoffLook, Stars,
 } from './MGKit';
 import {
   mgApi, setCustomerToken, clearCustomerToken, getCustomerToken,
@@ -61,9 +61,7 @@ function JobCard({ job }: { job: MgJob }) {
       )}
 
       {job.can_sign_off && job.signoff_url && (
-        <a href={job.signoff_url} className="mt-3 block">
-          <MGButton className="w-full">Sign off this clean →</MGButton>
-        </a>
+        <MGButtonLink href={job.signoff_url} className="mt-3 w-full">Sign off this clean →</MGButtonLink>
       )}
     </MGCard>
   );
