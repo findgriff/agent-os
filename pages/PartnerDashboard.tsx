@@ -424,6 +424,32 @@ function WorkRequestForm({ properties, serviceTypes, priorities, onSubmitted }: 
   );
 }
 
+// Clipboard write that survives non-HTTPS origins and older mobile browsers
+// where navigator.clipboard is missing — falls back to a hidden textarea.
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* fall through to the legacy path below */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 // ── Sign-off row ────────────────────────────────────────────────────────
 function SignoffRow({ job, onSend, tone }:
   { job: SignoffJob; onSend?: (j: SignoffJob) => Promise<void>; tone: 'pending' | 'overdue' | 'done' }) {
@@ -455,6 +481,16 @@ function SignoffRow({ job, onSend, tone }:
             : job.signoff_status === 'auto-approved' ? 'Auto-approved'
             : job.signoff_status === 'sent' ? 'Link sent' : 'Not sent'}
         </Badge>
+        {onSend && job.signoff_url && (
+          <Button variant="ghost" icon="content_copy" aria-label="Copy sign-off link"
+            onClick={async () => {
+              const ok = await copyText(job.signoff_url!);
+              toast(ok ? 'Sign-off link copied — paste it anywhere' : 'Could not copy the link',
+                ok ? 'ok' : 'danger');
+            }}>
+            <span className="hidden sm:inline">Copy link</span>
+          </Button>
+        )}
         {onSend && (
           <Button variant="secondary" icon="sms" loading={busy}
             onClick={async () => {
