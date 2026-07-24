@@ -458,14 +458,25 @@ def reports(tenant_id: int = DEFAULT_TENANT_ID,
 
     series = _series_range(jobs, span_start, rng["days"])
 
-    # Actual vs estimated time, from logs closed inside the window.
+    # Actual vs estimated time, from logs closed inside the window. Scoped to
+    # this tenant/company via the crew and job (mirrors _time_logs) — an
+    # unscoped aggregate here sums every company's labour hours into a single
+    # partner's report.
     win_start_e = _midnight(span_start)
     win_end_e = _midnight(_day_add(span_end, 1))            # exclusive
-    tl = _one("""SELECT COUNT(*) AS n, SUM(total_minutes) AS mins
-                   FROM time_logs
-                  WHERE clock_out IS NOT NULL
-                    AND clock_in >= ? AND clock_in < ?""",
-              (win_start_e, win_end_e))
+    tl_args: list = [win_start_e, win_end_e, tenant_id, tenant_id]
+    tl_where = ("WHERE t.clock_out IS NOT NULL"
+                " AND t.clock_in >= ? AND t.clock_in < ?"
+                " AND (s.tenant_id = ? OR j.tenant_id = ?)")
+    if company_id is not None:
+        tl_where += " AND (j.partner_company_id = ? OR p.partner_company_id = ?)"
+        tl_args += [company_id, company_id]
+    tl = _one("""SELECT COUNT(*) AS n, SUM(t.total_minutes) AS mins
+                   FROM time_logs t
+                   LEFT JOIN subcontractors s ON s.id = t.subcontractor_id
+                   LEFT JOIN jobs j ON j.id = t.job_id
+                   LEFT JOIN properties p ON p.id = j.property_id
+                 """ + tl_where, tuple(tl_args))
     logged_n = (tl or {}).get("n") or 0
     logged_mins = (tl or {}).get("mins") or 0
 
