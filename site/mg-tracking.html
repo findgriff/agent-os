@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Max Gleam — Crew Tracking</title>
+  <meta name="theme-color" content="#05080C" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="description" content="Max Gleam — live crew map. Every van reporting today, drawn over today's stops." />
+  <link rel="icon" type="image/svg+xml"
+        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Ccircle cx='24' cy='24' r='7' fill='%2319C3E6'/%3E%3Ccircle cx='24' cy='24' r='12' stroke='%2319C3E6' stroke-width='2' fill='none' opacity='0.6'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Leaflet 1.9.4 — self-hosted from AGENT OS's vendored copy (window.L, no
+       CDN, no npm dep). Same asset the React crew-tracking page draws from. -->
+  <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
+  <script src="/vendor/leaflet/leaflet.js" defer></script>
+
+  <style>
+    :root {
+      --bg: #05080C;
+      --ink: #E8EDF5;
+      --muted: #8A97A8;
+      --accent: #19C3E6;
+      --ok: #34D399;
+      --warn: #FBBF24;
+      --err: #F87171;
+      --card: rgba(255, 255, 255, 0.03);
+      --line: rgba(255, 255, 255, 0.08);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background:
+        radial-gradient(ellipse 70% 50% at 50% -10%, #0B1826, transparent 70%),
+        var(--bg);
+      color: var(--ink);
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; padding: 22px clamp(14px, 4vw, 28px) 40px; }
+
+    h1 { font-family: 'Space Grotesk', system-ui, sans-serif; font-size: 24px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+    .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+
+    .glass {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      backdrop-filter: blur(12px);
+    }
+
+    .topbar { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+
+    button.btn {
+      display: inline-flex; align-items: center; gap: 7px;
+      font: 600 13px/1 'Inter', system-ui, sans-serif;
+      color: var(--ink); background: rgba(255,255,255,0.05);
+      border: 1px solid var(--line); border-radius: 12px;
+      padding: 9px 14px; cursor: pointer; transition: all .15s ease;
+    }
+    button.btn:hover { border-color: rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); }
+    button.btn.full { width: 100%; justify-content: center; }
+    button.btn.primary { background: var(--accent); color: #05080C; border-color: transparent; }
+    button.btn.primary:hover { filter: brightness(1.08); }
+
+    .err { border-color: rgba(248,113,113,0.3); background: rgba(248,113,113,0.06); color: #FCA5A5; padding: 12px 14px; margin-bottom: 18px; font-size: 13px; border-radius: 14px; }
+    .hidden { display: none !important; }
+
+    /* Stat tiles */
+    .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 18px; }
+    @media (min-width: 720px) { .stats { grid-template-columns: repeat(4, 1fr); } }
+    .stat { padding: 14px 16px; }
+    .stat .label { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+    .stat .value { font-family: 'Space Grotesk', sans-serif; font-size: 26px; font-weight: 700; margin-top: 4px; }
+    .stat .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; vertical-align: middle; }
+
+    /* Main layout */
+    .main { display: grid; gap: 16px; grid-template-columns: 1fr; }
+    @media (min-width: 1000px) { .main { grid-template-columns: 320px 1fr; align-items: start; } }
+
+    .crewlist { display: flex; flex-direction: column; gap: 10px; }
+    .crewlist .muted-card { padding: 24px; text-align: center; color: var(--muted); font-size: 13px; }
+
+    .crewcard {
+      width: 100%; text-align: left; cursor: pointer;
+      border: 1px solid var(--line); background: var(--card);
+      border-radius: 16px; padding: 14px; transition: all .15s ease;
+      font-family: inherit; color: inherit;
+    }
+    .crewcard:hover { border-color: rgba(255,255,255,0.16); }
+    .crewcard.sel { border-color: rgba(25,195,230,0.5); background: rgba(25,195,230,0.08); }
+    .crewcard .row { display: flex; align-items: center; gap: 12px; }
+    .avatar {
+      width: 36px; height: 36px; flex: 0 0 36px; border-radius: 50%;
+      display: grid; place-items: center; color: #05080C;
+      font: 800 11px/1 'Space Grotesk', sans-serif;
+    }
+    .crewcard .who { min-width: 0; flex: 1; }
+    .crewcard .name { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .crewcard .job { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+    .badge .bdot { width: 6px; height: 6px; border-radius: 50%; }
+    .badge.ok { color: var(--ok); background: rgba(52,211,153,0.12); }
+    .badge.neutral { color: var(--muted); background: rgba(255,255,255,0.06); }
+
+    .crewcard .meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; font-size: 11px; color: var(--muted); }
+    .crewcard .meta .onsite { color: var(--ok); }
+    .crewcard .meta .offsite { color: var(--warn); }
+    .crewcard .route { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+
+    /* Map */
+    .mapcard { overflow: hidden; padding: 0; }
+    #map { width: 100%; height: 60vh; min-height: 360px; }
+    @media (min-width: 1000px) { #map { height: 560px; } }
+    .maploading { height: 60vh; min-height: 360px; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
+    @media (min-width: 1000px) { .maploading { height: 560px; } }
+    .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; border-top: 1px solid var(--line); padding: 11px 16px; font-size: 11px; color: var(--muted); }
+    .legend .li { display: inline-flex; align-items: center; gap: 7px; }
+    .legend .swatch { width: 10px; height: 10px; border-radius: 50%; }
+    .legend .ring { box-shadow: 0 0 0 2px var(--warn); }
+
+    /* Leaflet dark chrome */
+    .leaflet-container { background: #0A121C; font-family: 'Inter', sans-serif; }
+    .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: #0E1722; color: var(--ink); box-shadow: 0 8px 28px rgba(0,0,0,0.55); border: 1px solid var(--line); }
+    .leaflet-popup-content { font-size: 12px; line-height: 1.5; margin: 10px 13px; }
+    .leaflet-popup-content b { font-family: 'Space Grotesk', sans-serif; }
+    .leaflet-popup-close-button { color: var(--muted) !important; }
+    .leaflet-bar a { background: #0E1722; color: var(--ink); border-color: var(--line); }
+    .leaflet-bar a:hover { background: #16222F; }
+    .leaflet-control-attribution { background: rgba(5,8,12,0.7) !important; color: var(--muted) !important; }
+    .leaflet-control-attribution a { color: var(--muted) !important; }
+
+    /* Token gate */
+    .gate { position: fixed; inset: 0; display: grid; place-items: center; padding: 20px; background: radial-gradient(ellipse 60% 45% at 50% 40%, #0B1826, #05080C 78%); z-index: 1000; }
+    .gate .box { width: 100%; max-width: 400px; padding: 26px; }
+    .gate h2 { font-family: 'Space Grotesk', sans-serif; font-size: 18px; margin: 0 0 6px; }
+    .gate p { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+    .gate input { width: 100%; padding: 11px 13px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,0.04); color: var(--ink); font: 500 13px/1.4 'Inter', sans-serif; margin-bottom: 12px; }
+    .gate input:focus { outline: none; border-color: rgba(25,195,230,0.5); }
+    .gate .gerr { color: var(--err); font-size: 12px; margin: -4px 0 12px; }
+  </style>
+</head>
+<body>
+  <!-- Token gate — shown only when no token is stored or the API returns 401.
+       Reuses the same `agentos_token` key as the main SPA, so opening this from
+       a signed-in browser needs no re-auth. -->
+  <div id="gate" class="gate hidden">
+    <div class="box glass">
+      <h2>Connect to Max Gleam</h2>
+      <p>Paste an HQ or partner access token to see the live crew map.</p>
+      <input id="gateToken" type="password" placeholder="Access token" autocomplete="off" />
+      <div id="gateErr" class="gerr hidden"></div>
+      <button class="btn primary full" id="gateBtn">Connect</button>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="topbar">
+      <div>
+        <h1>Crew tracking</h1>
+        <div class="sub">Live positions while a job is open · refreshes every <span id="refreshSecs">20</span>s</div>
+      </div>
+      <button class="btn" id="refreshBtn">↻ Refresh</button>
+    </div>
+
+    <div id="error" class="err glass hidden"></div>
+
+    <div class="stats">
+      <div class="stat glass"><div class="label"><span class="dot" style="background:#19C3E6"></span>Tracking now</div><div class="value" id="s-tracking">0</div></div>
+      <div class="stat glass"><div class="label"><span class="dot" style="background:#34D399"></span>On site</div><div class="value" id="s-onsite">0</div></div>
+      <div class="stat glass"><div class="label"><span class="dot" style="background:#A78BFA"></span>Seen today</div><div class="value" id="s-seen">0</div></div>
+      <div class="stat glass"><div class="label"><span class="dot" style="background:#FBBF24"></span>Stops today</div><div class="value" id="s-jobs">0</div></div>
+    </div>
+
+    <div class="main">
+      <div class="crewlist" id="crewlist"></div>
+
+      <div class="mapcard glass">
+        <div id="mapLoading" class="maploading">Loading map…</div>
+        <div id="map" class="hidden"></div>
+        <div class="legend">
+          <span class="li"><span class="swatch" style="background:#19C3E6"></span>Crew</span>
+          <span class="li"><span class="swatch ring" style="background:#19C3E6"></span>Off site</span>
+          <span class="li"><span class="swatch" style="background:rgba(52,211,153,0.9)"></span>Done</span>
+          <span class="li"><span class="swatch" style="background:rgba(255,255,255,0.35)"></span>Stop</span>
+          <span class="li" id="reporting" style="margin-left:auto"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    'use strict';
+
+    // ── Config (ported from CrewTracking.tsx / maxgleam_gps.py) ──────────
+    var REFRESH_MS = 20000;
+    var ACCENT = '#19C3E6';
+    var CREW_COLOURS = ['#19C3E6', '#A78BFA', '#34D399', '#FBBF24', '#F472B6', '#60A5FA'];
+    var TOKEN_KEY = 'agentos_token';
+    // Carry a tenant override through to the API for HQ users viewing a
+    // specific tenant, e.g. /mg-tracking.html?tenant_id=2
+    var TENANT = new URLSearchParams(location.search).get('tenant_id');
+    var TQ = TENANT ? ('tenant_id=' + encodeURIComponent(TENANT)) : '';
+
+    var colourFor = function (crewId) { return CREW_COLOURS[crewId % CREW_COLOURS.length]; };
+
+    // ── Formatting helpers (ported from lib/gpsApi.ts) ──────────────────
+    function initials(name) {
+      return (name || '').split(/\s+/).map(function (w) { return w[0]; })
+        .slice(0, 2).join('').toUpperCase();
+    }
+    function agoLabel(seconds) {
+      if (seconds === null || seconds === undefined) return 'never';
+      if (seconds < 45) return 'just now';
+      var m = Math.round(seconds / 60);
+      if (m < 60) return m + 'm ago';
+      var h = Math.floor(m / 60);
+      return h < 24 ? (h + 'h ' + (m % 60) + 'm ago') : (Math.floor(h / 24) + 'd ago');
+    }
+    function clockTime(epoch) {
+      return epoch ? new Date(epoch * 1000).toLocaleTimeString('en-GB',
+        { hour: '2-digit', minute: '2-digit' }) : '—';
+    }
+    function durationLabel(seconds) {
+      if (seconds === null || seconds === undefined) return '—';
+      var m = Math.round(seconds / 60);
+      if (m < 1) return 'just started';
+      if (m < 60) return m + 'm';
+      return Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
+    }
+    function distanceLabel(metres) {
+      return metres < 950 ? (Math.round(metres) + ' m') : ((metres / 1000).toFixed(1) + ' km');
+    }
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
+
+    // ── API ─────────────────────────────────────────────────────────────
+    function getToken() { return localStorage.getItem(TOKEN_KEY) || ''; }
+
+    function apiGet(path) {
+      var token = getToken();
+      var headers = {};
+      if (token) headers.Authorization = 'Bearer ' + token;
+      return fetch(path, { headers: headers, cache: 'no-store' }).then(function (res) {
+        return res.text().then(function (text) {
+          var data = text ? JSON.parse(text) : {};
+          if (!res.ok) {
+            var e = new Error(data.error || res.statusText);
+            e.status = res.status;
+            throw e;
+          }
+          return data;
+        });
+      });
+    }
+    function withTenant(path) {
+      if (!TQ) return path;
+      return path + (path.indexOf('?') === -1 ? '?' : '&') + TQ;
+    }
+    var gpsApi = {
+      active: function () { return apiGet(withTenant('/api/maxgleam/gps/active')); },
+      history: function (id) { return apiGet(withTenant('/api/maxgleam/gps/history/' + id)); }
+    };
+
+    // ── State ───────────────────────────────────────────────────────────
+    var state = { data: null, history: null, selected: null, loading: true };
+    var map = null, layer = null, fitted = false, historyTimer = null;
+
+    var $ = function (id) { return document.getElementById(id); };
+    $('refreshSecs').textContent = String(REFRESH_MS / 1000);
+
+    // ── Leaflet map ─────────────────────────────────────────────────────
+    function whenLeaflet(cb) {
+      if (window.L) return cb();
+      var t = setInterval(function () { if (window.L) { clearInterval(t); cb(); } }, 120);
+    }
+
+    function initMap() {
+      var L = window.L;
+      map = L.map('map', { zoomControl: true, attributionControl: true })
+        .setView([53.19, -2.89], 11); // Chester, until the first fix lands
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19
+      }).addTo(map);
+      layer = L.layerGroup().addTo(map);
+      $('mapLoading').classList.add('hidden');
+      $('map').classList.remove('hidden');
+      setTimeout(function () { map.invalidateSize(); }, 100);
+      drawMap();
+    }
+
+    function vanIcon(crew) {
+      var L = window.L;
+      var colour = colourFor(crew.crew_id);
+      var offSite = crew.live && crew.geofence && !crew.geofence.on_site;
+      var ring = offSite ? '#FBBF24' : colour;
+      return L.divIcon({
+        className: '', iconSize: [34, 34], iconAnchor: [17, 17],
+        html: '<div style="width:34px;height:34px;border-radius:50%;display:grid;place-items:center;'
+          + "font:700 12px/1 'Space Grotesk',system-ui,sans-serif;color:#05080C;"
+          + 'background:' + colour + ';border:2px solid ' + (offSite ? '#FBBF24' : 'rgba(255,255,255,0.85)') + ';'
+          + 'box-shadow:0 0 0 4px ' + ring + (offSite ? '55' : '33') + ',0 4px 12px rgba(0,0,0,0.5);'
+          + 'opacity:' + (crew.live ? 1 : 0.45) + ';">' + esc(initials(crew.name)) + '</div>'
+      });
+    }
+    function stopIcon(done) {
+      var L = window.L;
+      return L.divIcon({
+        className: '', iconSize: [12, 12], iconAnchor: [6, 6],
+        html: '<div style="width:12px;height:12px;border-radius:50%;background:'
+          + (done ? 'rgba(52,211,153,0.9)' : 'rgba(255,255,255,0.35)')
+          + ';border:1.5px solid rgba(5,8,12,0.8);"></div>'
+      });
+    }
+    function siteLine(crew) {
+      if (!crew.geofence || !crew.live) return '';
+      return crew.geofence.on_site
+        ? '<br><span style="color:#34D399">On site · ' + durationLabel(crew.on_site_seconds) + '</span>'
+        : '<br><span style="color:#FBBF24">' + distanceLabel(crew.geofence.distance_m) + ' from stop</span>';
+    }
+
+    function drawMap() {
+      if (!map || !layer || !state.data) return;
+      var L = window.L, data = state.data;
+      layer.clearLayers();
+
+      data.jobs.forEach(function (stop) {
+        L.marker([stop.latitude, stop.longitude], { icon: stopIcon(!!stop.completed_at) })
+          .bindPopup('<b>' + esc(stop.address) + '</b><br>' + esc(stop.crew_name || 'Unassigned') + '<br>'
+            + '<span style="opacity:0.7">' + (stop.completed_at ? 'Done' : stop.started_at ? 'In progress' : 'Not started') + '</span>')
+          .addTo(layer);
+      });
+
+      if (state.history && state.history.points.length > 1 && state.selected !== null) {
+        L.polyline(state.history.points.map(function (p) { return [p.lat, p.lng]; }), {
+          color: colourFor(state.selected), weight: 3, opacity: 0.75, dashArray: '6 6'
+        }).addTo(layer);
+      }
+
+      var pins = [];
+      data.crews.forEach(function (crew) {
+        var marker = L.marker([crew.position.lat, crew.position.lng], { icon: vanIcon(crew) })
+          .bindPopup('<b>' + esc(crew.name) + '</b><br>' + esc(crew.job && crew.job.address || 'Between jobs')
+            + siteLine(crew)
+            + '<br><span style="opacity:0.7">Last seen ' + agoLabel(crew.age_seconds) + '</span>')
+          .on('click', function () { select(crew.crew_id); });
+        marker.addTo(layer);
+        pins.push(marker);
+      });
+
+      // Fit once, on the first data with anything to fit to — after that the
+      // dispatcher owns the viewport.
+      if (!fitted && (pins.length || data.jobs.length)) {
+        var pts = data.crews.map(function (c) { return [c.position.lat, c.position.lng]; })
+          .concat(data.jobs.map(function (j) { return [j.latitude, j.longitude]; }));
+        if (pts.length) {
+          map.fitBounds(L.latLngBounds(pts).pad(0.15), { maxZoom: 14 });
+          fitted = true;
+        }
+      }
+    }
+
+    // ── Crew list ───────────────────────────────────────────────────────
+    function renderList() {
+      var el = $('crewlist');
+      var crews = (state.data && state.data.crews) || [];
+
+      if (state.loading && !state.data) {
+        el.innerHTML = '<div class="glass muted-card">Loading crews…</div>';
+        return;
+      }
+      if (crews.length === 0) {
+        el.innerHTML = '<div class="glass muted-card">'
+          + '<div style="font-size:15px;font-weight:700;color:var(--ink);margin-bottom:6px">Nobody tracking yet</div>'
+          + 'A crew appears here the moment they start a job in the crew app with location switched on.</div>';
+        return;
+      }
+
+      var html = crews.map(function (crew) {
+        var sel = state.selected === crew.crew_id;
+        var meta;
+        if (crew.geofence && crew.live) {
+          meta = crew.geofence.on_site
+            ? '<span class="onsite">✓ On site ' + durationLabel(crew.on_site_seconds) + '</span>'
+            : '<span class="offsite">⚠ ' + distanceLabel(crew.geofence.distance_m) + ' from stop</span>';
+        } else if (crew.job && crew.job.started_at) {
+          meta = '<span>Started ' + clockTime(crew.job.started_at) + '</span>';
+        } else {
+          meta = '<span></span>';
+        }
+
+        var route = '';
+        if (sel && state.history) {
+          var s = state.history.summary;
+          route = '<div class="route"><span>▸ ' + s.distance_miles + ' mi</span>'
+            + '<span>' + s.count + ' points</span><span>' + s.jobs.length + ' jobs</span></div>';
+        }
+
+        return '<button class="crewcard' + (sel ? ' sel' : '') + '" data-crew="' + crew.crew_id + '">'
+          + '<div class="row">'
+          + '<span class="avatar" style="background:' + colourFor(crew.crew_id) + ';opacity:' + (crew.live ? 1 : 0.45) + '">' + esc(initials(crew.name)) + '</span>'
+          + '<div class="who"><div class="name">' + esc(crew.name) + '</div>'
+          + '<div class="job">' + esc(crew.job && crew.job.address || 'Between jobs') + '</div></div>'
+          + '<span class="badge ' + (crew.live ? 'ok' : 'neutral') + '"><span class="bdot" style="background:' + (crew.live ? 'var(--ok)' : 'var(--muted)') + '"></span>' + (crew.live ? 'Live' : 'Stale') + '</span>'
+          + '</div>'
+          + '<div class="meta"><span>Last seen ' + agoLabel(crew.age_seconds) + '</span>' + meta + '</div>'
+          + route
+          + '</button>';
+      }).join('');
+
+      if (state.selected !== null) {
+        html += '<button class="btn full" id="clearRoute">✕ Clear route</button>';
+      }
+      el.innerHTML = html;
+
+      Array.prototype.forEach.call(el.querySelectorAll('.crewcard'), function (b) {
+        b.addEventListener('click', function () { focus(parseInt(b.getAttribute('data-crew'), 10)); });
+      });
+      var clr = $('clearRoute');
+      if (clr) clr.addEventListener('click', function () { select(null); });
+    }
+
+    function renderStats() {
+      var sum = (state.data && state.data.summary) || {};
+      $('s-tracking').textContent = sum.tracking || 0;
+      $('s-onsite').textContent = sum.on_site || 0;
+      $('s-seen').textContent = sum.seen_today || 0;
+      $('s-jobs').textContent = sum.jobs_today || 0;
+      var live = ((state.data && state.data.crews) || []).filter(function (c) { return c.live; });
+      $('reporting').textContent = live.length ? (live.length + ' crew' + (live.length === 1 ? '' : 's') + ' reporting') : '';
+    }
+
+    // ── Selection + history ─────────────────────────────────────────────
+    function pullHistory() {
+      if (state.selected === null) return;
+      var id = state.selected;
+      gpsApi.history(id).then(function (h) {
+        if (state.selected === id) { state.history = h; renderList(); drawMap(); }
+      }).catch(function () { /* the pin still shows where they are */ });
+    }
+
+    function select(crewId) {
+      state.selected = crewId;
+      if (historyTimer) { clearInterval(historyTimer); historyTimer = null; }
+      if (crewId === null) {
+        state.history = null;
+      } else {
+        state.history = null;
+        pullHistory();
+        historyTimer = setInterval(pullHistory, REFRESH_MS);
+      }
+      renderList();
+      drawMap();
+    }
+
+    function focus(crewId) {
+      select(crewId);
+      var crew = ((state.data && state.data.crews) || []).filter(function (c) { return c.crew_id === crewId; })[0];
+      if (crew && map) map.setView([crew.position.lat, crew.position.lng], 15, { animate: true });
+    }
+
+    // ── Load loop ───────────────────────────────────────────────────────
+    function showError(msg) {
+      var e = $('error');
+      if (msg) { e.textContent = msg; e.classList.remove('hidden'); }
+      else { e.classList.add('hidden'); }
+    }
+
+    function load() {
+      return gpsApi.active().then(function (d) {
+        state.data = d;
+        state.loading = false;
+        showError('');
+        hideGate();
+        renderStats();
+        renderList();
+        drawMap();
+      }).catch(function (err) {
+        state.loading = false;
+        if (err.status === 401 || err.status === 403) { showGate(); return; }
+        showError(err.message || 'Could not load crew positions.');
+        renderList();
+      });
+    }
+
+    // ── Token gate ──────────────────────────────────────────────────────
+    function showGate(msg) {
+      $('gate').classList.remove('hidden');
+      var ge = $('gateErr');
+      if (msg) { ge.textContent = msg; ge.classList.remove('hidden'); } else { ge.classList.add('hidden'); }
+      $('gateToken').focus();
+    }
+    function hideGate() { $('gate').classList.add('hidden'); }
+
+    $('gateBtn').addEventListener('click', function () {
+      var v = $('gateToken').value.trim();
+      if (!v) { showGate('Enter a token to continue.'); return; }
+      localStorage.setItem(TOKEN_KEY, v);
+      $('gateToken').value = '';
+      load();
+    });
+    $('gateToken').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('gateBtn').click(); });
+
+    // ── Boot ────────────────────────────────────────────────────────────
+    $('refreshBtn').addEventListener('click', load);
+
+    whenLeaflet(initMap);
+    renderList();
+    if (!getToken()) { state.loading = false; showGate(); }
+    else { load(); }
+    setInterval(load, REFRESH_MS);
+  })();
+  </script>
+</body>
+</html>
