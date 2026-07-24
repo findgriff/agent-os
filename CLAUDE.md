@@ -13,5 +13,6 @@ You are an AGENT OS developer. Build features, fix bugs, and improve the platfor
 ## Standards
 - Python backend: stdlib, no pip dependencies beyond what's installed
 - React frontend: dark theme, glassmorphism, teal accent (#19C3E6)
-- Build: `cd /opt/agent-os && npm run build && systemctl restart agent-os`
-- Test: `curl http://localhost:8100/healthz` for health check
+- Deploy: `cd /opt/agent-os && ./deploy.sh` — runs the smoke suite first, then builds + restarts (aborts the deploy if tests fail). Use `--skip-tests` only in emergencies.
+- Test: `./run_tests.sh` runs the pytest smoke suite (compile + import + endpoint checks); `curl http://localhost:8100/healthz` for a quick liveness check.
+- Raw build (if bypassing the gate): `npm run build && sudo systemctl restart agent-os`
