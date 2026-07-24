@@ -20,7 +20,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, parse_qs, unquote
 
 from server import db as db_module
-from server import auth, agents, vault, bridges, metrics, inference, studio, omi, features, oracle_search, apollo, video_editor, auto_caption, transitions, speed_change, clip_split, audio_track, overlay, video_effects, export_presets, suno_bridge, investments_api, partner, ks, ks_attendance, ks_progress, ks_billing, maxgleam_portal, maxgleam_invoicing, maxgleam_ops, maxgleam_crew, maxgleam_inventory, maxgleam_reports, maxgleam_activity, maxgleam_alerts, maxgleam_referrals, maxgleam_notify, maxgleam_accounting, maxgleam_commissions, maxgleam_booking, maxgleam_gps, maxgleam_marketing, maxgleam_reviews, hermes
+from server import auth, agents, vault, bridges, metrics, inference, studio, omi, features, oracle_search, apollo, video_editor, auto_caption, transitions, speed_change, clip_split, audio_track, overlay, video_effects, export_presets, suno_bridge, investments_api, partner, ks, ks_attendance, ks_progress, ks_billing, maxgleam_portal, maxgleam_invoicing, maxgleam_ops, maxgleam_crew, maxgleam_inventory, maxgleam_reports, maxgleam_activity, maxgleam_alerts, maxgleam_referrals, maxgleam_notify, maxgleam_accounting, maxgleam_commissions, maxgleam_booking, maxgleam_gps, maxgleam_marketing, maxgleam_reviews, maxgleam_quotes, hermes
 
 log = logging.getLogger("agentos")
 
@@ -2410,6 +2410,30 @@ def h_maxgleam_referral_create(req: Request):
     return maxgleam_referrals.create_referral(req.body or {}, tenant_id, company_id)
 
 
+def h_maxgleam_quotes(req: Request):
+    """GET /api/maxgleam/quotes — the quote pipeline + funnel summary."""
+    company_id, tenant_id = _maxgleam_scope(req)
+    return maxgleam_quotes.list_quotes(tenant_id, company_id)
+
+
+def h_maxgleam_quote_create(req: Request):
+    """POST /api/maxgleam/quotes/create — price up a new prospect."""
+    company_id, tenant_id = _maxgleam_scope(req)
+    return maxgleam_quotes.create_quote(req.body or {}, tenant_id, company_id)
+
+
+def h_maxgleam_quote_update(req: Request, quote_id: str):
+    """POST /api/maxgleam/quotes/<id>/update — edit fields / move status."""
+    company_id, tenant_id = _maxgleam_scope(req)
+    return maxgleam_quotes.update_quote(int(quote_id), req.body or {}, tenant_id, company_id)
+
+
+def h_maxgleam_quote_convert(req: Request, quote_id: str):
+    """POST /api/maxgleam/quotes/<id>/convert — turn a win into a customer + property."""
+    company_id, tenant_id = _maxgleam_scope(req)
+    return maxgleam_quotes.convert_quote(int(quote_id), req.body or {}, tenant_id, company_id)
+
+
 def h_maxgleam_referral_sweep(req: Request):
     """POST /api/maxgleam/referrals/sweep — promote sign-ups and apply credits.
     HQ only: it edits invoices."""
@@ -3422,6 +3446,10 @@ ROUTES = [
     ("GET",  re.compile(r"^/api/maxgleam/referrals$"), h_maxgleam_referrals),
     ("POST", re.compile(r"^/api/maxgleam/referrals/create$"), h_maxgleam_referral_create),
     ("POST", re.compile(r"^/api/maxgleam/referrals/sweep$"), h_maxgleam_referral_sweep),
+    ("GET",  re.compile(r"^/api/maxgleam/quotes$"), h_maxgleam_quotes),
+    ("POST", re.compile(r"^/api/maxgleam/quotes/create$"), h_maxgleam_quote_create),
+    ("POST", re.compile(r"^/api/maxgleam/quotes/(\d+)/update$"), h_maxgleam_quote_update),
+    ("POST", re.compile(r"^/api/maxgleam/quotes/(\d+)/convert$"), h_maxgleam_quote_convert),
     ("GET",  re.compile(r"^/api/maxgleam/notifications/settings$"), h_maxgleam_notification_settings),
     ("POST", re.compile(r"^/api/maxgleam/notifications/settings$"), h_maxgleam_notification_settings),
     ("POST", re.compile(r"^/api/maxgleam/notifications/test$"), h_maxgleam_notification_test),

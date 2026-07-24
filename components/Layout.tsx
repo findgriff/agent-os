@@ -35,6 +35,7 @@ const NAV = [
   { to: '/maxgleam/reports', label: 'MG Reports', icon: 'monitoring', colour: '#19C3E6', group: 'Intel' },
   { to: '/maxgleam/marketing', label: 'MG Marketing', icon: 'campaign', colour: '#F472B6', group: 'Comms' },
   { to: '/maxgleam/invoices', label: 'MG Invoices', icon: 'receipt_long', colour: '#19C3E6', group: 'Intel' },
+  { to: '/maxgleam/quotes', label: 'MG Quotes', icon: 'request_quote', colour: '#22C55E', group: 'Intel' },
   { to: '/call-center', label: 'Call Center', icon: 'headset_mic', colour: '#FF6B00', group: 'Comms' },
   { to: '/comms', label: 'Comms Log', icon: 'forum', colour: '#38BDF8', group: 'Comms' },
   { to: '/inventory', label: 'Stock', icon: 'inventory_2', colour: '#22C55E', group: 'Command' },
