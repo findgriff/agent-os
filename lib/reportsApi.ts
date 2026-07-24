@@ -554,8 +554,27 @@ export const invoicesApi = {
   send: (id: number) => req<{ ok: boolean; status: string; to: string; checkout_url: string }>(
     'POST', `/api/maxgleam/invoices/${id}/send`),
 
+  /** Record an offline payment (cash / transfer / card reader) against an invoice. */
+  recordPayment: (id: number, method: PaymentMethod, paidAt?: number) =>
+    req<{ ok: boolean; invoice: MgInvoiceRow }>(
+      'POST', `/api/maxgleam/invoices/${id}/record-payment`,
+      paidAt ? { method, paid_at: paidAt } : { method }),
+
+  /** Revert a manually-recorded payment back to unpaid (keyed in by mistake). */
+  unmarkPayment: (id: number) => req<{ ok: boolean; invoice: MgInvoiceRow }>(
+    'POST', `/api/maxgleam/invoices/${id}/unmark-payment`),
+
   tax: (from: string, to: string) => req<TaxReport>(
     'GET', `/api/maxgleam/reports/tax?from=${from}&to=${to}`),
+};
+
+/** Offline payment methods the office can key in. Online SumUp settles itself. */
+export type PaymentMethod = 'cash' | 'transfer' | 'sumup_reader';
+
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  cash: 'Cash',
+  transfer: 'Bank transfer',
+  sumup_reader: 'Card reader',
 };
 
 /**

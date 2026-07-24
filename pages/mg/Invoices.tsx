@@ -4,9 +4,10 @@
 // An HQ surface, so it wears the AGENT OS dark theme (unlike the customer
 // pages under pages/mg/, which are deliberately light).
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Badge, Button, Card, EmptyState, Icon, Input, SkeletonList, useToast } from '../../components/ui';
+import { Badge, Button, Card, EmptyState, Icon, Input, Modal, Select, SkeletonList, useToast } from '../../components/ui';
 import {
-  invoicesApi, downloadInvoicePdf, gbp, type InvoiceList, type MgInvoiceRow,
+  invoicesApi, downloadInvoicePdf, gbp, PAYMENT_METHOD_LABELS,
+  type InvoiceList, type MgInvoiceRow, type PaymentMethod,
 } from '../../lib/reportsApi';
 
 const ACCENT = '#19C3E6';
@@ -46,13 +47,21 @@ function StatTile({ label, value, sub, icon, accent = ACCENT, delay = 0 }: {
   );
 }
 
-function InvoiceRow({ inv, onSend, onPdf }: {
+function InvoiceRow({ inv, onSend, onPdf, onRecordPaid, onRevert }: {
   inv: MgInvoiceRow;
   onSend: (i: MgInvoiceRow) => Promise<void>;
   onPdf: (i: MgInvoiceRow) => Promise<void>;
+  onRecordPaid: (i: MgInvoiceRow, method: PaymentMethod) => Promise<void>;
+  onRevert: (i: MgInvoiceRow) => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [payOpen, setPayOpen] = useState(false);
+  const [method, setMethod] = useState<PaymentMethod>('cash');
+  const [saving, setSaving] = useState(false);
+  const [reverting, setReverting] = useState(false);
+  // A manually-keyed payment can be undone here; an online SumUp one can't.
+  const canRevert = inv.status === 'paid' && !!inv.method && inv.method !== 'sumup_online';
   const tone = STATUS_TONE[inv.display_status] || 'neutral';
   const accent = inv.display_status === 'paid' ? '#22C55E'
     : inv.display_status === 'overdue' ? '#F43F5E' : '#F59E0B';
@@ -98,6 +107,18 @@ function InvoiceRow({ inv, onSend, onPdf }: {
             <Button variant="ghost" icon="link" className="!px-2 !py-1.5" />
           </a>
         )}
+        {inv.status === 'unpaid' && (
+          <Button variant="secondary" icon="payments" className="!px-2.5"
+            title="Record a cash, transfer or card-reader payment"
+            onClick={() => setPayOpen(true)}>
+            Mark paid
+          </Button>
+        )}
+        {canRevert && (
+          <Button variant="ghost" icon="undo" loading={reverting} title="Revert this payment"
+            className="!px-2 !py-1.5"
+            onClick={async () => { setReverting(true); await onRevert(inv); setReverting(false); }} />
+        )}
         <Button variant="ghost" icon="download" loading={pdfBusy} title="Download PDF"
           className="!px-2 !py-1.5"
           onClick={async () => { setPdfBusy(true); await onPdf(inv); setPdfBusy(false); }} />
@@ -108,6 +129,37 @@ function InvoiceRow({ inv, onSend, onPdf }: {
           Send
         </Button>
       </div>
+
+      <Modal open={payOpen} onClose={() => setPayOpen(false)}
+        title={`Record payment — ${inv.number}`} width="max-w-sm">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between rounded-xl border border-white/6 bg-white/[0.02] px-3 py-2.5">
+            <span className="text-sm text-muted">Amount</span>
+            <span className="text-base font-semibold tabular-nums text-ink">{gbp(inv.amount_pence)}</span>
+          </div>
+          <label className="block space-y-1.5">
+            <span className="text-[12px] font-medium text-muted">How was it paid?</span>
+            <Select value={method} onChange={e => setMethod(e.target.value as PaymentMethod)}
+              className="w-full">
+              {(Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[]).map(m => (
+                <option key={m} value={m}>{PAYMENT_METHOD_LABELS[m]}</option>
+              ))}
+            </Select>
+          </label>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="ghost" onClick={() => setPayOpen(false)}>Cancel</Button>
+            <Button variant="primary" icon="check" loading={saving}
+              onClick={async () => {
+                setSaving(true);
+                await onRecordPaid(inv, method);
+                setSaving(false);
+                setPayOpen(false);
+              }}>
+              Confirm payment
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -189,6 +241,26 @@ export default function Invoices() {
       await downloadInvoicePdf(inv.id, inv.number);
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not download that invoice', 'danger');
+    }
+  };
+
+  const recordPaid = async (inv: MgInvoiceRow, method: PaymentMethod) => {
+    try {
+      await invoicesApi.recordPayment(inv.id, method);
+      toast(`${inv.number} marked paid — ${PAYMENT_METHOD_LABELS[method].toLowerCase()}`, 'ok');
+      await load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not record that payment', 'danger');
+    }
+  };
+
+  const revert = async (inv: MgInvoiceRow) => {
+    try {
+      await invoicesApi.unmarkPayment(inv.id);
+      toast(`${inv.number} reverted to unpaid`, 'ok');
+      await load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not revert that payment', 'danger');
     }
   };
 
@@ -277,7 +349,10 @@ export default function Invoices() {
             : 'Try a different filter.'} />
       ) : (
         <div className="space-y-2">
-          {shown.map(inv => <InvoiceRow key={inv.id} inv={inv} onSend={send} onPdf={pdf} />)}
+          {shown.map(inv => (
+            <InvoiceRow key={inv.id} inv={inv} onSend={send} onPdf={pdf}
+              onRecordPaid={recordPaid} onRevert={revert} />
+          ))}
         </div>
       )}
     </div>

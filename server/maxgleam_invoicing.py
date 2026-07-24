@@ -956,6 +956,91 @@ def reconcile_payments(tenant_id: int = DEFAULT_TENANT_ID,
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# Offline payments
+#
+# reconcile_payments() settles SumUp *online* checkouts, but plenty of cleans
+# are paid in cash, by bank transfer, or on a SumUp card reader at the door.
+# Nothing wrote those, so an offline-paid invoice stayed 'unpaid' forever and
+# the overdue sweep kept texting the customer a charge notice they didn't owe.
+# This lets the office — or a partner, for their own jobs — record that money.
+# ─────────────────────────────────────────────────────────────────────────
+
+# Methods that may be keyed in by hand. 'sumup_online' is deliberately absent:
+# an online card payment is settled from SumUp itself by reconcile_payments,
+# never typed in, so it also cannot be reverted by the office action below.
+OFFLINE_METHODS = ("cash", "transfer", "sumup_reader")
+
+
+def record_payment(invoice_id: int, method: str, paid_at: int | None = None,
+                   tenant_id: int = DEFAULT_TENANT_ID,
+                   company_id: int | None = None) -> tuple[int, dict]:
+    """Mark an invoice paid by an offline method (cash / transfer / card reader)."""
+    method = (method or "").strip().lower()
+    if method not in OFFLINE_METHODS:
+        return 400, {"error": "method must be one of " + ", ".join(OFFLINE_METHODS)}
+    row = _one(_INVOICE_SELECT + " WHERE i.id = ? AND i.tenant_id = ?",
+               (invoice_id, tenant_id))
+    if not row:
+        return 404, {"error": "invoice not found"}
+    if company_id is not None and row.get("partner_company_id") != company_id:
+        return 404, {"error": "invoice not found"}
+    if row["status"] == "paid":
+        return 409, {"error": "this invoice is already marked paid"}
+    if row["status"] == "void":
+        return 409, {"error": "this invoice has been cancelled"}
+
+    when = int(paid_at) if paid_at else int(time.time())
+    conn = _conn()
+    # The status guard keeps this idempotent against a concurrent SumUp
+    # reconcile: whichever marks it paid first wins, the other is a no-op.
+    cur = conn.execute(
+        "UPDATE invoices SET status = 'paid', method = ?, paid_at = ? "
+        "WHERE id = ? AND status = 'unpaid'", (method, when, invoice_id))
+    if not cur.rowcount:
+        return 409, {"error": "this invoice was just settled elsewhere"}
+    try:
+        conn.execute(
+            "INSERT INTO comms_log (tenant_id, customer_id, kind, content) VALUES (?,?,?,?)",
+            (tenant_id, row["customer_id"], "payment_recorded",
+             f"Invoice {row['number']} marked paid ({method.replace('_', ' ')})"))
+    except Exception:                                          # noqa: BLE001
+        log.exception("comms_log write failed")
+    conn.commit()
+    log.info("maxgleam: invoice %s marked paid by %s", row["number"], method)
+
+    fresh = _one(_INVOICE_SELECT + " WHERE i.id = ?", (invoice_id,))
+    return 200, {"ok": True, "invoice": _invoice_dto(fresh, int(time.time()))}
+
+
+def unmark_payment(invoice_id: int, tenant_id: int = DEFAULT_TENANT_ID,
+                   company_id: int | None = None) -> tuple[int, dict]:
+    """Revert a manually-recorded payment (keyed in by mistake) back to unpaid.
+
+    An online SumUp payment reflects money SumUp has actually taken, so it is
+    never un-settled from here — only offline methods can be reversed.
+    """
+    row = _one(_INVOICE_SELECT + " WHERE i.id = ? AND i.tenant_id = ?",
+               (invoice_id, tenant_id))
+    if not row:
+        return 404, {"error": "invoice not found"}
+    if company_id is not None and row.get("partner_company_id") != company_id:
+        return 404, {"error": "invoice not found"}
+    if row["status"] != "paid":
+        return 409, {"error": "this invoice is not marked paid"}
+    if row["method"] == "sumup_online":
+        return 409, {"error": "an online card payment can't be reversed here"}
+
+    conn = _conn()
+    conn.execute("UPDATE invoices SET status = 'unpaid', method = NULL, paid_at = NULL "
+                 "WHERE id = ?", (invoice_id,))
+    conn.commit()
+    log.info("maxgleam: invoice %s payment reverted to unpaid", row["number"])
+
+    fresh = _one(_INVOICE_SELECT + " WHERE i.id = ?", (invoice_id,))
+    return 200, {"ok": True, "invoice": _invoice_dto(fresh, int(time.time()))}
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Invoice PDF
 #
 # A downloadable A4 invoice, rendered by the stdlib PDF writer in server.pdf
