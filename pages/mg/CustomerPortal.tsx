@@ -70,6 +70,8 @@ function JobCard({ job }: { job: MgJob }) {
 export default function CustomerPortal() {
   const [customer, setCustomer] = useState<MgCustomer | null>(null);
   const [booting, setBooting] = useState(true);
+  const [bootError, setBootError] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [tab, setTab] = useState<Tab>('cleans');
 
   const [identifier, setIdentifier] = useState('');
@@ -86,6 +88,10 @@ export default function CustomerPortal() {
 
   const loadAll = useCallback(async () => {
     const [j, p, c] = await Promise.allSettled([mgApi.jobs(), mgApi.payments(), mgApi.contact()]);
+    // If any panel failed to load, flag it so the signed-in view can warn the
+    // customer rather than silently show empty lists / £0 totals for data we
+    // never actually received (e.g. telling someone who owes money they owe none).
+    setLoadError(j.status === 'rejected' || p.status === 'rejected' || c.status === 'rejected');
     if (j.status === 'fulfilled') {
       setUpcoming(j.value.upcoming);
       setPast(j.value.past);
@@ -99,13 +105,26 @@ export default function CustomerPortal() {
     if (c.status === 'fulfilled') setCompany(c.value.company);
   }, []);
 
-  useEffect(() => {
+  const boot = useCallback(() => {
     if (!getCustomerToken()) { setBooting(false); return; }
+    setBooting(true);
+    setBootError(false);
     mgApi.jobs()
       .then(async r => { setCustomer(r.customer); await loadAll(); })
-      .catch(() => clearCustomerToken())
+      // Only an expired/invalid token (401) means sign in again. A transient
+      // failure (network, 5xx) must KEEP the session and offer a retry, not
+      // silently log the customer out.
+      .catch((err: unknown) => {
+        if (err && typeof err === 'object' && (err as { status?: number }).status === 401) {
+          clearCustomerToken();
+        } else {
+          setBootError(true);
+        }
+      })
       .finally(() => setBooting(false));
   }, [loadAll]);
+
+  useEffect(() => { boot(); }, [boot]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -127,6 +146,7 @@ export default function CustomerPortal() {
     clearCustomerToken();
     setCustomer(null);
     setUpcoming([]); setPast([]); setInvoices([]); setCanPayOnline(false); setCompany(null);
+    setLoadError(false); setBootError(false);
     setIdentifier(''); setRef('');
   };
 
@@ -134,6 +154,20 @@ export default function CustomerPortal() {
     return (
       <MGShell compact>
         <div className="flex min-h-[50vh] items-center justify-center text-slate-400"><MGSpinner /></div>
+      </MGShell>
+    );
+  }
+
+  // ── Boot failed (not a 401) — keep the session, offer a retry ─────
+  if (bootError && !customer) {
+    return (
+      <MGShell compact>
+        <div className="mx-auto max-w-xl px-4 py-10 sm:px-6">
+          <MGAlert tone="error">
+            We couldn't load your account just now. Please check your connection and try again.
+          </MGAlert>
+          <MGButton onClick={boot} className="mt-4 w-full">Try again</MGButton>
+        </div>
       </MGShell>
     );
   }
@@ -200,13 +234,27 @@ export default function CustomerPortal() {
         <div className="mt-5 flex gap-1 overflow-x-auto border-b border-slate-200">
           {TABS.map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
-              className={`relative shrink-0 px-3.5 py-2.5 text-sm font-bold transition-colors
+              className={`relative shrink-0 min-h-[44px] px-3.5 py-2.5 text-sm font-bold transition-colors
                 ${tab === t.id ? 'text-[#0E7C93]' : 'text-slate-500 hover:text-slate-800'}`}>
               {t.label}
               {tab === t.id && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-[#19C3E6]" />}
             </button>
           ))}
         </div>
+
+        {/* A panel failed to load — warn rather than show misleading empty /
+            £0 state (e.g. "No invoices yet" to a customer who may owe money). */}
+        {loadError && (
+          <div className="mt-5">
+            <MGAlert tone="error">
+              Some of your account details didn't load. The figures below may be
+              incomplete — please try again.
+            </MGAlert>
+            <MGButton tone="secondary" onClick={() => loadAll()} className="mt-3 w-full">
+              Try again
+            </MGButton>
+          </div>
+        )}
 
         {/* ── Cleans ─────────────────────────────────────────────── */}
         {tab === 'cleans' && (

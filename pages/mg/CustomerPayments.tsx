@@ -64,7 +64,7 @@ export default function CustomerPayments() {
             </p>
           </div>
           <Link to="/customer/login"
-            className="rounded-lg px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100">
+            className="inline-flex min-h-[44px] items-center rounded-xl px-3 text-sm font-semibold text-slate-600 hover:bg-slate-100">
             Back to my account
           </Link>
         </header>
@@ -83,7 +83,7 @@ export default function CustomerPayments() {
               </MGAlert>
             )}
             <button onClick={() => { params.delete('paid'); setParams(params, { replace: true }); }}
-              className="-mx-2 mt-2 rounded px-2 py-1 text-xs font-semibold text-slate-400 hover:text-slate-600">
+              className="mt-1 inline-flex min-h-[44px] items-center rounded-xl px-3 text-sm font-semibold text-slate-600 hover:bg-slate-100">
               Dismiss
             </button>
           </div>
@@ -100,7 +100,7 @@ export default function CustomerPayments() {
           <div className="mb-5">
             <MGAlert>{error}</MGAlert>
             <button onClick={() => load()}
-              className="mt-2 inline-flex min-h-[44px] items-center rounded-lg px-3 text-sm font-semibold text-[#0E7C93] hover:bg-slate-100">
+              className="mt-2 inline-flex min-h-[44px] items-center rounded-xl px-3 text-sm font-semibold text-[#0E7C93] hover:bg-slate-100">
               Try again
             </button>
           </div>
@@ -223,8 +223,8 @@ export function PayButton({ invoice, className = '' }:
 
   return (
     <div className={`mt-3 ${className}`}>
-      <MGButton onClick={pay} loading={busy}
-        className="min-h-[52px] w-full text-base">
+      <MGButton onClick={pay} loading={busy} size="lg"
+        className="w-full">
         {busy ? 'Opening secure checkout…' : `Pay ${gbp(invoice.outstanding_pence ?? invoice.amount_pence)} now`}
       </MGButton>
       {error && <div className="mt-2"><MGAlert>{error}</MGAlert></div>}
@@ -239,7 +239,7 @@ function Total({ label, value, tone }:
   const colour = { amber: 'text-amber-600', green: 'text-green-600', slate: 'text-slate-700' }[tone];
   return (
     <MGCard className="min-w-0 p-3.5">
-      <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+      <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
         {label}
       </div>
       <div className={`mt-1 truncate text-base font-extrabold tabular-nums sm:text-xl ${colour}`}
@@ -268,7 +268,7 @@ function InvoiceCard({ invoice, children }:
         <div className="min-w-0">
           <div className="font-mono text-sm font-bold">{invoice.number}</div>
           <div className="truncate text-sm text-slate-600">{invoice.address || '—'}</div>
-          <div className="mt-0.5 text-xs text-slate-400">
+          <div className="mt-0.5 text-xs text-slate-500">
             Issued {niceStamp(invoice.issued_at)}
             {invoice.paid_at ? ` · Paid ${niceStamp(invoice.paid_at)}` : ''}
             {paid && invoice.method ? ` · ${methodLabel(invoice.method)}` : ''}
@@ -284,12 +284,12 @@ function InvoiceCard({ invoice, children }:
         </div>
       </div>
       {partPaid && (
-        <p className="mt-1 text-xs text-slate-400">
+        <p className="mt-1 text-xs text-slate-500">
           {gbp(invoice.paid_pence ?? 0)} of {gbp(invoice.amount_pence)} already paid
         </p>
       )}
       {invoice.vat_pence > 0 && (
-        <p className="mt-1 text-xs text-slate-400">
+        <p className="mt-1 text-xs text-slate-500">
           Includes {gbp(invoice.vat_pence)} VAT
         </p>
       )}
@@ -325,10 +325,10 @@ function InvoicePdfLink({ invoice, paid }: { invoice: MgInvoice; paid: boolean }
   return (
     <div className="mt-3">
       <button onClick={download} disabled={busy}
-        className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-60">
+        className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl px-2 text-sm font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-60">
         {busy ? 'Preparing…' : paid ? 'Download receipt (PDF)' : 'Download invoice (PDF)'}
       </button>
-      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+      {error && <div className="mt-2"><MGAlert tone="error">{error}</MGAlert></div>}
     </div>
   );
 }
@@ -382,7 +382,7 @@ function PaymentsLogin({ onAuthed }: { onAuthed: (c: MgCustomer) => void }) {
                 placeholder="MG-0042" />
             </MGField>
             {error && <MGAlert>{error}</MGAlert>}
-            <MGButton type="submit" loading={busy} className="w-full py-4 text-base">
+            <MGButton type="submit" loading={busy} size="lg" className="w-full">
               Sign in
             </MGButton>
           </form>

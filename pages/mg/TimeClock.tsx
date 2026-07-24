@@ -4,7 +4,7 @@
 // device), then one big CLOCK IN / CLOCK OUT button per job on today's round.
 // No AGENT OS chrome and no HQ login — crews authenticate with the shared crew
 // code (see MAXGLEAM_CREW_CODE), or an office user's existing HQ token.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge, Button, Card, EmptyState, Field, Icon, Input, useToast } from '../../components/ui';
 import {
   reportsApi, getCrewCode, setCrewCode, clearCrewCode, ReportsApiError,
@@ -57,7 +57,7 @@ function CodeGate({ onDone }: { onDone: () => void }) {
             Continue
           </Button>
         </form>
-        <p className="mt-4 text-[11px] leading-relaxed text-muted/70">
+        <p className="mt-4 text-[11px] leading-relaxed text-muted">
           Ask the office for the code. It is stored on this device only.
         </p>
       </Card>
@@ -155,7 +155,7 @@ function JobCard({ job, openHere, busy, locked, blockedBy, onIn, onOut }: {
             : 'bg-gradient-to-br from-[#2AD4F5] to-[#0EA5C9] text-[#04222b]'}`}>
         <Icon name={busy ? 'progress_activity' : openHere ? 'stop_circle' : 'play_circle'}
           size={22} className={busy ? 'animate-spin' : ''} />
-        {openHere ? 'Clock out' : 'Clock in'}
+        {busy ? (openHere ? 'Clocking out…' : 'Clocking in…') : (openHere ? 'Clock out' : 'Clock in')}
       </button>
     </Card>
   );
@@ -175,21 +175,34 @@ export default function TimeClock() {
   const [busyJob, setBusyJob] = useState<number | 'general' | null>(null);
   const [error, setError] = useState('');
 
+  // Mirrors `board` for the catch handler below: reading state there would be
+  // stale (load is memoised with a bare dep list on purpose), and a ref lets us
+  // tell a first-load failure from a refresh/poll that already has a board.
+  const boardRef = useRef<ClockBoard | null>(null);
+
   const load = useCallback(async () => {
     try {
-      setBoard(await reportsApi.board());
+      const next = await reportsApi.board();
+      boardRef.current = next;
+      setBoard(next);
       setError('');
     } catch (e) {
       if (e instanceof ReportsApiError && (e.status === 401 || e.status === 403)) {
-        // A stale or wrong crew code — send them back to the gate.
+        // A stale or wrong crew code — send them back to the gate, and say why
+        // rather than silently dropping them at the code prompt again.
         clearCrewCode();
+        toast("That code wasn't accepted", 'danger');
         setGated(true);
+      } else if (boardRef.current) {
+        // A board is already on screen (Refresh tap or the 60s poll): keep it,
+        // but surface the dropped connection instead of failing in silence.
+        toast(e instanceof Error ? e.message : "Couldn't refresh", 'danger');
       }
       setError(e instanceof Error ? e.message : 'Could not load today’s round');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [toast]);
 
   useEffect(() => { if (!gated) load(); }, [gated, load]);
   // Someone else may clock a shared job in or out — keep the board honest.
@@ -250,7 +263,7 @@ export default function TimeClock() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-bg p-5">
         <EmptyState icon="error" accent="#F43F5E" title="Could not load the time clock" hint={error}
-          action={<Button icon="refresh" onClick={() => { setLoading(true); load(); }}>Try again</Button>} />
+          action={<Button icon="refresh" className="min-h-[44px]" onClick={() => { setLoading(true); load(); }}>Try again</Button>} />
       </div>
     );
   }
@@ -299,7 +312,9 @@ export default function TimeClock() {
             <div className="mt-2 font-mono text-5xl font-bold tabular-nums text-ink">{elapsed}</div>
             <div className="mt-1 text-[12px] text-muted">
               since {clockTime(openLog.clock_in)}
-              {openLog.job_id ? ` · job #${openLog.job_id}` : ' · general duties'}
+              {openLog.job_id
+                ? ` · ${jobs.find(j => j.id === openLog.job_id)?.address ?? `job #${openLog.job_id}`}`
+                : ' · general duties'}
             </div>
           </Card>
         )}

@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import {
-  MGShell, MGButton, MGCard, MGAlert, MGPill, MGSpinner, MGTextarea, Stars,
+  MGShell, MGButton, MGCard, MGField, MGAlert, MGPill, MGSpinner, MGTextarea, Stars,
 } from './MGKit';
 import {
   mgApi, compressImage, gbp, niceDate, niceStamp, photoUrl,
@@ -25,8 +25,8 @@ function JobSummary({ job }: { job: MgJob }) {
           ['Price', gbp(job.price_pence)],
         ].map(([k, v]) => (
           <div key={k}>
-            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">{k}</dt>
-            <dd className="truncate font-semibold text-slate-800">{v}</dd>
+            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">{k}</dt>
+            <dd className="font-semibold text-slate-800 break-words">{v}</dd>
           </div>
         ))}
       </dl>
@@ -208,7 +208,7 @@ export default function SignOff() {
           <div className="mt-6">
             <div className="text-sm font-semibold text-slate-700">How did we do?</div>
             <div className="mt-2 flex items-center gap-3">
-              <Stars value={rating} onChange={setRating} />
+              <Stars value={rating} onChange={setRating} size={44} />
               {rating > 0 && (
                 <span className="text-sm font-semibold text-slate-500">
                   {['', 'Poor', 'Fair', 'Good', 'Great', 'Excellent'][rating]}
@@ -218,19 +218,17 @@ export default function SignOff() {
           </div>
 
           {/* Note */}
-          <div className="mt-5">
-            <div className="mb-1.5 text-sm font-semibold text-slate-700">
-              Anything you'd like to add? <span className="font-normal text-slate-400">(optional)</span>
-            </div>
+          <MGField className="mt-5"
+            label={<>Anything you'd like to add? <span className="font-normal text-slate-500">(optional)</span></>}>
             <MGTextarea rows={3} value={note} maxLength={1000}
               onChange={e => setNote(e.target.value)}
               placeholder="Missed a window, gate left open, or just a thank you…" />
-          </div>
+          </MGField>
 
           {/* Photo */}
           <div className="mt-5">
             <div className="mb-1.5 text-sm font-semibold text-slate-700">
-              Add a photo <span className="font-normal text-slate-400">(optional)</span>
+              Add a photo <span className="font-normal text-slate-500">(optional)</span>
             </div>
             <input ref={fileRef} type="file" accept="image/*" capture="environment"
               className="hidden" onChange={e => pickPhoto(e.target.files?.[0])} />
@@ -241,21 +239,21 @@ export default function SignOff() {
                 <span className="min-w-0 flex-1 truncate text-sm text-slate-600">{photoName}</span>
                 <button onClick={() => { setPhoto(null); setPhotoName(''); if (fileRef.current) fileRef.current.value = ''; }}
                   aria-label="Remove photo"
-                  className="inline-flex min-h-[44px] shrink-0 items-center rounded-lg px-3 text-xs font-bold text-slate-400 hover:bg-red-50 hover:text-red-600">
+                  className="inline-flex min-h-[44px] shrink-0 items-center rounded-xl px-3 text-sm font-bold text-slate-500 hover:bg-red-50 hover:text-red-600">
                   Remove
                 </button>
               </div>
             ) : (
-              <MGButton tone="secondary" className="w-full" onClick={() => fileRef.current?.click()}>
-                📷 Take or choose a photo
+              <MGButton tone="secondary" className="w-full min-h-[44px]" onClick={() => fileRef.current?.click()}>
+                <span aria-hidden>📷</span> Take or choose a photo
               </MGButton>
             )}
           </div>
 
           {error && <div className="mt-5"><MGAlert>{error}</MGAlert></div>}
 
-          <MGButton onClick={submit} loading={busy} className="mt-6 w-full py-3.5 text-base">
-            ✓ Confirm my clean
+          <MGButton onClick={submit} loading={busy} size="lg" className="mt-6 w-full">
+            <span aria-hidden>✓</span> Confirm my clean
           </MGButton>
 
           <p className="mt-4 text-center text-xs leading-relaxed text-slate-500">

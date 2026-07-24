@@ -638,12 +638,16 @@ function TimeTab({ data }: { data: ReportsData }) {
   const toast = useToast();
   const [history, setHistory] = useState<TimeHistory | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   const load = useCallback(async () => {
     try {
       setHistory(await reportsApi.history());
+      setError('');
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not load time entries', 'danger');
+      const msg = e instanceof Error ? e.message : 'Could not load time entries';
+      setError(msg);
+      toast(msg, 'danger');
     } finally {
       setLoading(false);
     }
@@ -664,6 +668,7 @@ function TimeTab({ data }: { data: ReportsData }) {
 
   return (
     <div className="space-y-5">
+      {loading && !history ? <SkeletonList count={4} /> : (
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile label="Clocked today"
           value={history ? `${history.summary.total_hours}h` : '—'}
@@ -681,6 +686,7 @@ function TimeTab({ data }: { data: ReportsData }) {
           icon="balance"
           accent={variance === null ? '#8B96A8' : variance > 0 ? '#F43F5E' : '#22C55E'} delay={180} />
       </div>
+      )}
 
       {history && history.by_crew.length > 0 && (
         <div>
@@ -711,7 +717,10 @@ function TimeTab({ data }: { data: ReportsData }) {
           Today&rsquo;s entries
         </SectionTitle>
         <Card className="p-2">
-          {loading ? <SkeletonList count={3} className="p-1" />
+          {error ? (
+            <EmptyState icon="error" accent="#F43F5E" title="Could not load time entries" hint={error}
+              action={<Button icon="refresh" onClick={load}>Try again</Button>} />
+          ) : loading ? <SkeletonList count={3} className="p-1" />
             : !history || history.logs.length === 0 ? (
               <EmptyState icon="schedule" title="No time logged today"
                 hint="Crew clock in and out from the time clock at /timeclock." />
@@ -761,6 +770,7 @@ function ActivityTab() {
   const toast = useToast();
   const [feed, setFeed] = useState<ActivityFeed | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [actorType, setActorType] = useState('');
   const [action, setAction] = useState('');
   const [day, setDay] = useState('');
@@ -776,8 +786,11 @@ function ActivityTab() {
     setLoading(true);
     try {
       setFeed(await reportsApi.activity({ ...filters, limit: 300 }));
+      setError('');
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not load activity', 'danger');
+      const msg = e instanceof Error ? e.message : 'Could not load activity';
+      setError(msg);
+      toast(msg, 'danger');
     } finally {
       setLoading(false);
     }
@@ -794,6 +807,7 @@ function ActivityTab() {
 
   return (
     <div className="space-y-5">
+      {loading && !feed ? <SkeletonList count={4} /> : (
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile label="Events shown" value={String(feed?.count ?? 0)}
           sub={day ? dayLabel(day) : 'most recent first'} icon="history" delay={0} />
@@ -806,6 +820,7 @@ function ActivityTab() {
           value={feed?.activity[0] ? timeAgo(feed.activity[0].created_at) : '—'}
           sub={feed?.activity[0]?.actor_name || ''} icon="bolt" accent="#F59E0B" delay={180} />
       </div>
+      )}
 
       <Card className="flex flex-wrap items-end gap-3 p-3.5">
         <Field label="Who" className="min-w-[9rem] flex-1">
@@ -869,7 +884,10 @@ function ActivityTab() {
       <div>
         <SectionTitle count={feed?.count} accent="#A78BFA">Timeline</SectionTitle>
         <Card className="p-2">
-          {loading ? <SkeletonList count={5} className="p-1" />
+          {error ? (
+            <EmptyState icon="error" accent="#F43F5E" title="Could not load activity" hint={error}
+              action={<Button icon="refresh" onClick={load}>Try again</Button>} />
+          ) : loading ? <SkeletonList count={5} className="p-1" />
             : !feed || feed.activity.length === 0 ? (
               <EmptyState icon="history" title="No activity"
                 hint="Nothing matches these filters. Clock-ins, completed jobs, sign-offs and alerts all land here." />
@@ -936,6 +954,7 @@ function AlertsTab() {
   const [preview, setPreview] = useState<AlertPreview | null>(null);
   const [history, setHistory] = useState<AlertLogRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [busy, setBusy] = useState<'dry' | 'live' | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [confirmLive, setConfirmLive] = useState(false);
@@ -945,8 +964,11 @@ function AlertsTab() {
       const [p, h] = await Promise.all([reportsApi.alerts(), reportsApi.alertHistory(50)]);
       setPreview(p);
       setHistory(h.alerts);
+      setError('');
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not load alerts', 'danger');
+      const msg = e instanceof Error ? e.message : 'Could not load alerts';
+      setError(msg);
+      toast(msg, 'danger');
     } finally {
       setLoading(false);
     }
@@ -974,6 +996,7 @@ function AlertsTab() {
 
   return (
     <div className="space-y-5">
+      {loading && !preview ? <SkeletonList count={4} /> : (
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile label="Firing now" value={String(firing)}
           sub={`${preview?.alerts.length ?? 0} rules matched`} icon="notifications_active"
@@ -988,6 +1011,7 @@ function AlertsTab() {
         <StatTile label="Schedule" value="Mon–Fri 07:30"
           sub="maxgleam-alerts.timer" icon="alarm" accent="#A78BFA" delay={180} />
       </div>
+      )}
 
       <Card className="flex flex-wrap items-center gap-3 p-3.5">
         <div className="min-w-0 flex-1">
@@ -1015,7 +1039,12 @@ function AlertsTab() {
 
       <div>
         <SectionTitle count={preview?.alerts.length} accent="#F59E0B">Firing now</SectionTitle>
-        {loading ? <SkeletonList count={3} />
+        {error ? (
+            <Card className="p-2">
+              <EmptyState icon="error" accent="#F43F5E" title="Could not load alerts" hint={error}
+                action={<Button icon="refresh" onClick={load}>Try again</Button>} />
+            </Card>
+          ) : loading ? <SkeletonList count={3} />
           : !preview || preview.alerts.length === 0 ? (
             <Card className="p-2">
               <EmptyState icon="verified" accent="#22C55E" title="Nothing to report"
@@ -1062,7 +1091,8 @@ function AlertsTab() {
       <div>
         <SectionTitle count={history.length} accent="#A78BFA">Alert history</SectionTitle>
         <Card className="p-2">
-          {history.length === 0 ? (
+          {loading ? <SkeletonList count={3} className="p-1" />
+            : history.length === 0 ? (
             <EmptyState icon="outgoing_mail" title="Nothing sent yet"
               hint="The sweep runs weekday mornings. Anything it emails is logged here." />
           ) : (
@@ -1131,14 +1161,18 @@ function TaxTab() {
   const [to, setTo] = useState(thisMonth());
   const [data, setData] = useState<TaxReport | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [downloading, setDownloading] = useState(false);
 
   const load = useCallback(async (f: string, t: string) => {
     setLoading(true);
     try {
       setData(await invoicesApi.tax(f, t));
+      setError('');
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not load the tax report', 'danger');
+      const msg = e instanceof Error ? e.message : 'Could not load the tax report';
+      setError(msg);
+      toast(msg, 'danger');
     } finally {
       setLoading(false);
     }
@@ -1204,7 +1238,10 @@ function TaxTab() {
         </Card>
       )}
 
-      {loading && !data ? <SkeletonList count={3} /> : (
+      {error ? (
+        <EmptyState icon="error" accent="#F43F5E" title="Could not load the tax report" hint={error}
+          action={<Button icon="refresh" onClick={() => load(from, to)}>Try again</Button>} />
+      ) : loading && !data ? <SkeletonList count={3} /> : (
         <>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatTile label="Revenue (gross)" icon="payments"
@@ -1261,7 +1298,7 @@ function TaxTab() {
                       <th className="px-1 pb-2 text-right font-semibold">Net</th>
                       <th className="px-1 pb-2 text-right font-semibold">VAT</th>
                       <th className="px-1 pb-2 text-right font-semibold">Gross</th>
-                      <th className="px-1 pb-2 text-right font-semibold">Status</th>
+                      <th className="px-1 pb-2 text-center font-semibold">Status</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1279,7 +1316,7 @@ function TaxTab() {
                         <td className="px-1 py-2 text-right font-semibold tabular-nums text-ink">
                           {gbp(i.amount_pence)}
                         </td>
-                        <td className="px-1 py-2 text-right">
+                        <td className="px-1 py-2 text-center">
                           <Badge tone={i.display_status === 'paid' ? 'ok'
                             : i.display_status === 'overdue' ? 'danger' : 'warn'}>
                             {i.display_status}
@@ -1309,14 +1346,18 @@ function ExportsTab() {
   const [iso, setIso] = useState(false);
   const [summary, setSummary] = useState<TaxSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [busy, setBusy] = useState<ExportKind | null>(null);
 
   const load = useCallback(async (f: string, t: string) => {
     setLoading(true);
     try {
       setSummary(await exportsApi.taxSummary(f, t));
+      setError('');
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not load the tax summary', 'danger');
+      const msg = e instanceof Error ? e.message : 'Could not load the tax summary';
+      setError(msg);
+      toast(msg, 'danger');
     } finally {
       setLoading(false);
     }
@@ -1340,6 +1381,7 @@ function ExportsTab() {
 
   return (
     <div className="space-y-5">
+      {loading && !summary ? <SkeletonList count={4} /> : (
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile label="Revenue (gross)" value={gbp(t?.revenue_gross_pence ?? 0)}
           sub={`${t?.invoice_count ?? 0} invoices, voids excluded`} icon="payments"
@@ -1353,6 +1395,7 @@ function ExportsTab() {
           sub={`${t?.overdue_count ?? 0} overdue past ${summary?.overdue_days ?? 30}d`}
           icon="schedule" accent={t?.overdue_count ? '#F59E0B' : '#8B96A8'} delay={180} />
       </div>
+      )}
 
       <Card className="space-y-3 p-3.5">
         <div className="flex flex-wrap items-end gap-3">
@@ -1433,7 +1476,12 @@ function ExportsTab() {
 
       <div>
         <SectionTitle count={summary?.by_month.length} accent="#A78BFA">Tax summary by month</SectionTitle>
-        {loading ? <SkeletonList count={3} />
+        {error ? (
+            <Card className="p-2">
+              <EmptyState icon="error" accent="#F43F5E" title="Could not load the tax summary" hint={error}
+                action={<Button icon="refresh" onClick={() => load(from, to)}>Try again</Button>} />
+            </Card>
+          ) : loading ? <SkeletonList count={3} />
           : !summary || summary.by_month.length === 0 ? (
             <Card className="p-2">
               <EmptyState icon="receipt_long" title="Nothing in this range"
@@ -1497,6 +1545,7 @@ function CommissionsTab() {
   const [list, setList] = useState<CommissionList | null>(null);
   const [summary, setSummary] = useState<CommissionSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [paying, setPaying] = useState<number | null>(null);
   const [crewId, setCrewId] = useState<number | null>(null);
   const [status, setStatus] = useState('');
@@ -1511,8 +1560,11 @@ function CommissionsTab() {
       ]);
       setList(l);
       setSummary(s);
+      setError('');
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not load commissions', 'danger');
+      const msg = e instanceof Error ? e.message : 'Could not load commissions';
+      setError(msg);
+      toast(msg, 'danger');
     } finally {
       setLoading(false);
     }
@@ -1542,6 +1594,7 @@ function CommissionsTab() {
 
   return (
     <div className="space-y-5">
+      {loading && !summary ? <SkeletonList count={4} /> : (
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile label="Pending" value={gbp(summary?.pending_pence ?? 0)}
           sub={`${summary?.pending_count ?? 0} awaiting payment`} icon="hourglass_top"
@@ -1557,6 +1610,7 @@ function CommissionsTab() {
           icon="event_busy"
           accent={(summary?.oldest_pending_days ?? 0) > 30 ? '#F43F5E' : '#8B96A8'} delay={180} />
       </div>
+      )}
 
       {underwater > 0 && (
         <Card className="flex items-start gap-3 p-3.5"
@@ -1652,7 +1706,12 @@ function CommissionsTab() {
           )}>
           Commissions
         </SectionTitle>
-        {loading ? <SkeletonList count={4} />
+        {error ? (
+            <Card className="p-2">
+              <EmptyState icon="error" accent="#F43F5E" title="Could not load commissions" hint={error}
+                action={<Button icon="refresh" onClick={() => load()}>Try again</Button>} />
+            </Card>
+          ) : loading ? <SkeletonList count={4} />
           : rows.length === 0 ? (
             <Card className="p-2">
               <EmptyState icon="handshake" title="No commissions yet"
@@ -1727,6 +1786,7 @@ function ReviewsTab() {
   const [list, setList] = useState<ReviewList | null>(null);
   const [avg, setAvg] = useState<ReviewAverage | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [minRating, setMinRating] = useState('');
 
   const load = useCallback(async () => {
@@ -1738,8 +1798,11 @@ function ReviewsTab() {
       ]);
       setList(l);
       setAvg(a);
+      setError('');
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not load reviews', 'danger');
+      const msg = e instanceof Error ? e.message : 'Could not load reviews';
+      setError(msg);
+      toast(msg, 'danger');
     } finally {
       setLoading(false);
     }
@@ -1752,6 +1815,7 @@ function ReviewsTab() {
 
   return (
     <div className="space-y-5">
+      {loading && !avg ? <SkeletonList count={4} /> : (
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile label="Average rating"
           value={avg?.average !== null && avg?.average !== undefined ? `${avg.average} / 5` : '—'}
@@ -1767,11 +1831,13 @@ function ReviewsTab() {
           sub={avg?.by_crew[0]?.name || 'no rated crew yet'}
           icon="workspace_premium" accent="#A78BFA" delay={180} />
       </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div>
           <SectionTitle accent="#F59E0B">Rating spread</SectionTitle>
           <Card className="space-y-2 p-4 sm:p-5">
+            {loading ? <SkeletonList count={5} /> : (<>
             {[5, 4, 3, 2, 1].map(n => {
               const count = avg?.distribution?.[String(n)] ?? 0;
               return (
@@ -1783,7 +1849,8 @@ function ReviewsTab() {
                     <div className="h-full rounded-full transition-all duration-500"
                       style={{
                         width: `${(count / maxBucket) * 100}%`,
-                        background: n >= 4 ? 'linear-gradient(90deg,#22C55E,#F59E0B)'
+                        background: n === 5 ? '#22C55E'
+                          : n === 4 ? 'linear-gradient(90deg,#22C55E,#F59E0B)'
                           : n === 3 ? '#F59E0B' : '#F43F5E',
                       }} />
                   </div>
@@ -1799,13 +1866,15 @@ function ReviewsTab() {
                 page after each clean.
               </p>
             )}
+            </>)}
           </Card>
         </div>
 
         <div>
           <SectionTitle accent="#A78BFA" count={avg?.by_crew.length}>Rating by crew</SectionTitle>
           <Card className="p-2">
-            {!avg?.by_crew.length ? (
+            {loading ? <SkeletonList count={3} className="p-1" />
+              : !avg?.by_crew.length ? (
               <EmptyState icon="groups" title="No rated crew yet"
                 hint="Ratings attach to whoever was assigned the job." />
             ) : (
@@ -1838,7 +1907,7 @@ function ReviewsTab() {
                 <Icon name="format_quote" size={40}
                   className="pointer-events-none absolute -right-1 -top-1 text-white/5" />
                 <Stars value={t.rating} />
-                <p className="mt-2 text-sm leading-relaxed text-ink">&ldquo;{t.comment}&rdquo;</p>
+                <p className="mt-2 line-clamp-4 text-sm leading-relaxed text-ink">&ldquo;{t.comment}&rdquo;</p>
                 <div className="mt-3 flex items-center gap-2 text-[11px] text-muted">
                   <span className="font-medium text-ink/80">{t.customer_name || 'Customer'}</span>
                   <span>·</span>
@@ -1863,7 +1932,10 @@ function ReviewsTab() {
             </Select>
           }>All reviews</SectionTitle>
         <Card className="p-2">
-          {loading ? <SkeletonList count={4} className="p-1" />
+          {error ? (
+            <EmptyState icon="error" accent="#F43F5E" title="Could not load reviews" hint={error}
+              action={<Button icon="refresh" onClick={() => load()}>Try again</Button>} />
+          ) : loading ? <SkeletonList count={4} className="p-1" />
             : !list?.reviews.length ? (
               <EmptyState icon="reviews" title="No reviews yet"
                 hint="Ratings arrive from the customer sign-off page — a 1–5 star pick and an optional comment." />

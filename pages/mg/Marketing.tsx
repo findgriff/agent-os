@@ -392,12 +392,16 @@ function Invoicing() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<'dry' | 'live' | null>(null);
   const [confirmLive, setConfirmLive] = useState(false);
+  const [error, setError] = useState('');
 
   const load = useCallback(async () => {
     try {
       setStatus(await recurringApi.status());
+      setError('');
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not load invoicing status', 'danger');
+      const msg = e instanceof Error ? e.message : 'Could not load invoicing status';
+      setError(msg);
+      toast(msg, 'danger');
     } finally {
       setLoading(false);
     }
@@ -423,6 +427,10 @@ function Invoicing() {
   };
 
   if (loading) return <SkeletonList count={4} />;
+  if (error && !status) return (
+    <EmptyState icon="error" accent="#F43F5E" title="Couldn't load invoicing status"
+      hint={error} action={<Button icon="refresh" onClick={load}>Try again</Button>} />
+  );
 
   return (
     <div className="space-y-5">
@@ -532,12 +540,16 @@ export default function Marketing() {
   const [list, setList] = useState<CampaignList | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState('');
 
   const load = useCallback(async () => {
     try {
       setList(await marketingApi.campaigns());
+      setError('');
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not load campaigns', 'danger');
+      const msg = e instanceof Error ? e.message : 'Could not load campaigns';
+      setError(msg);
+      toast(msg, 'danger');
     } finally {
       setLoading(false);
     }
@@ -588,7 +600,10 @@ export default function Marketing() {
         : tab === 'newsletter' ? <Newsletter onChanged={load} />
         : tab === 'invoicing' ? <Invoicing />
         : loading ? <SkeletonList count={4} />
-        : !list?.campaigns.length ? (
+        : error && !list ? (
+          <EmptyState icon="error" accent="#F43F5E" title="Couldn't load campaigns"
+            hint={error} action={<Button icon="refresh" onClick={load}>Try again</Button>} />
+        ) : !list?.campaigns.length ? (
           <EmptyState icon="campaign" title="No campaigns yet"
             hint="Write a subject line and a plain-text body, pick who gets it, preview, then send."
             action={<Button icon="edit_note" onClick={() => setTab('compose')}>Compose one</Button>} />
