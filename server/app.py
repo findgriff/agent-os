@@ -20,7 +20,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, parse_qs, unquote
 
 from server import db as db_module
-from server import auth, agents, vault, bridges, metrics, inference, studio, omi, features, oracle_search, apollo, video_editor, auto_caption, transitions, speed_change, clip_split, audio_track, overlay, video_effects, export_presets, suno_bridge, investments_api, partner, ks, ks_attendance, ks_progress, ks_billing, maxgleam_portal, maxgleam_invoicing, maxgleam_ops, maxgleam_crew, maxgleam_inventory, maxgleam_reports, maxgleam_activity, maxgleam_alerts, maxgleam_referrals, maxgleam_notify, maxgleam_accounting, maxgleam_commissions, maxgleam_booking, maxgleam_gps, maxgleam_marketing, maxgleam_reviews, maxgleam_quotes, maxgleam_customers, hermes
+from server import auth, agents, vault, bridges, metrics, inference, studio, omi, features, oracle_search, apollo, video_editor, auto_caption, transitions, speed_change, clip_split, audio_track, overlay, video_effects, export_presets, suno_bridge, investments_api, partner, ks, ks_attendance, ks_progress, ks_billing, maxgleam_portal, maxgleam_invoicing, maxgleam_ops, maxgleam_crew, maxgleam_inventory, maxgleam_reports, maxgleam_activity, maxgleam_alerts, maxgleam_referrals, maxgleam_notify, maxgleam_accounting, maxgleam_commissions, maxgleam_booking, maxgleam_gps, maxgleam_marketing, maxgleam_reviews, maxgleam_quotes, maxgleam_customers, maxgleam_crew_admin, hermes
 
 log = logging.getLogger("agentos")
 
@@ -2458,6 +2458,52 @@ def h_maxgleam_customer_note(req: Request, customer_id: str):
     return maxgleam_customers.add_note(int(customer_id), req.body or {}, tenant_id, company_id)
 
 
+# ── Max Gleam crew management (HQ office roster) ─────────────────────
+# HQ-only: subcontractors belong to the tenant, so these gate on an HQ session
+# (_require 401s a partner token) rather than the partner-scoped helper.
+
+def h_maxgleam_crew_admin_list(req: Request):
+    """GET /api/maxgleam/crew-admin — the roster + summary."""
+    _require(req)
+    return maxgleam_crew_admin.list_crews()
+
+
+def h_maxgleam_crew_admin_detail(req: Request, crew_id: str):
+    """GET /api/maxgleam/crew-admin/<id> — one crew member's full record."""
+    _require(req)
+    return maxgleam_crew_admin.crew_detail(int(crew_id))
+
+
+def h_maxgleam_crew_admin_create(req: Request):
+    """POST /api/maxgleam/crew-admin/create — add a crew member."""
+    _require(req)
+    return maxgleam_crew_admin.create_crew(req.body or {})
+
+
+def h_maxgleam_crew_admin_update(req: Request, crew_id: str):
+    """POST /api/maxgleam/crew-admin/<id>/update — edit a crew member."""
+    _require(req)
+    return maxgleam_crew_admin.update_crew(int(crew_id), req.body or {})
+
+
+def h_maxgleam_crew_leave_add(req: Request, crew_id: str):
+    """POST /api/maxgleam/crew-admin/<id>/availability — book leave."""
+    _require(req)
+    return maxgleam_crew_admin.add_leave(int(crew_id), req.body or {})
+
+
+def h_maxgleam_crew_leave_delete(req: Request, leave_id: str):
+    """POST /api/maxgleam/crew-admin/availability/<id>/delete — remove leave."""
+    _require(req)
+    return maxgleam_crew_admin.delete_leave(int(leave_id))
+
+
+def h_maxgleam_crew_pay(req: Request, crew_id: str):
+    """POST /api/maxgleam/crew-admin/<id>/pay — record a payroll payment."""
+    _require(req)
+    return maxgleam_crew_admin.record_pay(int(crew_id), req.body or {})
+
+
 def h_maxgleam_referral_sweep(req: Request):
     """POST /api/maxgleam/referrals/sweep — promote sign-ups and apply credits.
     HQ only: it edits invoices."""
@@ -3510,6 +3556,13 @@ ROUTES = [
     ("GET",  re.compile(r"^/api/maxgleam/customers/(\d+)$"), h_maxgleam_customer_detail),
     ("POST", re.compile(r"^/api/maxgleam/customers/(\d+)/update$"), h_maxgleam_customer_update),
     ("POST", re.compile(r"^/api/maxgleam/customers/(\d+)/note$"), h_maxgleam_customer_note),
+    ("GET",  re.compile(r"^/api/maxgleam/crew-admin$"), h_maxgleam_crew_admin_list),
+    ("POST", re.compile(r"^/api/maxgleam/crew-admin/create$"), h_maxgleam_crew_admin_create),
+    ("POST", re.compile(r"^/api/maxgleam/crew-admin/availability/(\d+)/delete$"), h_maxgleam_crew_leave_delete),
+    ("GET",  re.compile(r"^/api/maxgleam/crew-admin/(\d+)$"), h_maxgleam_crew_admin_detail),
+    ("POST", re.compile(r"^/api/maxgleam/crew-admin/(\d+)/update$"), h_maxgleam_crew_admin_update),
+    ("POST", re.compile(r"^/api/maxgleam/crew-admin/(\d+)/availability$"), h_maxgleam_crew_leave_add),
+    ("POST", re.compile(r"^/api/maxgleam/crew-admin/(\d+)/pay$"), h_maxgleam_crew_pay),
     ("GET",  re.compile(r"^/api/maxgleam/notifications/settings$"), h_maxgleam_notification_settings),
     ("POST", re.compile(r"^/api/maxgleam/notifications/settings$"), h_maxgleam_notification_settings),
     ("POST", re.compile(r"^/api/maxgleam/notifications/test$"), h_maxgleam_notification_test),

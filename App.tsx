@@ -46,6 +46,7 @@ import Marketing from './pages/mg/Marketing';
 import Invoices from './pages/mg/Invoices';
 import Quotes from './pages/mg/Quotes';
 import Customers from './pages/mg/Customers';
+import CrewManage from './pages/mg/CrewManage';
 import TimeClock from './pages/mg/TimeClock';
 import BookOnline from './pages/mg/BookOnline';
 import CrewTracking from './pages/mg/CrewTracking';
@@ -116,6 +117,7 @@ function Shell() {
         <Route path="/maxgleam/invoices" element={<Invoices />} />
         <Route path="/maxgleam/quotes" element={<Quotes />} />
         <Route path="/maxgleam/customers" element={<Customers />} />
+        <Route path="/maxgleam/crew" element={<CrewManage />} />
         <Route path="/tracking" element={<CrewTracking />} />
         <Route path="/inventory" element={<Inventory />} />
         <Route path="/comms" element={<Comms />} />
