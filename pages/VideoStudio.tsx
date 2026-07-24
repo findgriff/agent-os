@@ -1,9 +1,12 @@
 // Video Studio — full editor with multi-track timeline, trimming, and render.
 // Upload clips, trim, arrange, add captions, render with baked-in captions.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Card, Input, Select, Textarea, Toggle, Icon, Modal, EmptyState, useToast } from '../components/ui';
+import { Button, Card, Field, Input, Select, Textarea, Toggle, Icon, Modal, EmptyState, useToast } from '../components/ui';
 import { api } from '../lib/api';
 import type { StudioVideo } from '../lib/types';
+
+// Compact caption/trim editor label — smaller than the Field default.
+const CAP_LABEL = 'mb-0.5 block text-[10px] font-semibold uppercase tracking-wider text-muted';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface VideoClip {
@@ -510,18 +513,16 @@ export default function VideoStudio() {
           <div className="space-y-3">
             <p className="text-xs text-muted">{trimClip.name} — {trimClip.duration.toFixed(1)}s total</p>
             <div className="space-y-2">
-              <div>
-                <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wider text-muted">Start ({trimClip.trimStart.toFixed(1)}s)</label>
+              <Field label={`Start (${trimClip.trimStart.toFixed(1)}s)`} labelClassName={CAP_LABEL}>
                 <input type="range" min={0} max={trimClip.duration} step={0.1} value={trimClip.trimStart}
                   onChange={e => setTrimClip({ ...trimClip, trimStart: Number(e.target.value) })}
                   className="w-full h-1.5 rounded-full bg-white/10 appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent" />
-              </div>
-              <div>
-                <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wider text-muted">End ({trimClip.trimEnd.toFixed(1)}s)</label>
+              </Field>
+              <Field label={`End (${trimClip.trimEnd.toFixed(1)}s)`} labelClassName={CAP_LABEL}>
                 <input type="range" min={0} max={trimClip.duration} step={0.1} value={trimClip.trimEnd}
                   onChange={e => setTrimClip({ ...trimClip, trimEnd: Number(e.target.value) })}
                   className="w-full h-1.5 rounded-full bg-white/10 appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent" />
-              </div>
+              </Field>
               <p className="text-[10px] text-muted/60">Duration: {(trimClip.trimEnd - trimClip.trimStart).toFixed(1)}s</p>
             </div>
             <div className="flex justify-end gap-2">
@@ -536,36 +537,31 @@ export default function VideoStudio() {
       <Modal open={showAddCaption} onClose={() => setShowAddCaption(false)} title="Add Caption" width="max-w-sm">
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wider text-muted">Start (s)</label>
+            <Field label="Start (s)" labelClassName={CAP_LABEL}>
               <Input type="number" min={0} max={30} step={0.1} value={captionDraft.start}
                 onChange={e => setCaptionDraft(c => ({ ...c, start: Number(e.target.value) }))} />
-            </div>
-            <div>
-              <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wider text-muted">End (s)</label>
+            </Field>
+            <Field label="End (s)" labelClassName={CAP_LABEL}>
               <Input type="number" min={0} max={30} step={0.1} value={captionDraft.end}
                 onChange={e => setCaptionDraft(c => ({ ...c, end: Number(e.target.value) }))} />
-            </div>
+            </Field>
           </div>
-          <div>
-            <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wider text-muted">Text</label>
+          <Field label="Text" labelClassName={CAP_LABEL}>
             <Input value={captionDraft.text} onChange={e => setCaptionDraft(c => ({ ...c, text: e.target.value }))} placeholder="Caption text…" />
-          </div>
+          </Field>
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wider text-muted">Position</label>
+            <Field label="Position" labelClassName={CAP_LABEL}>
               <Select value={captionDraft.position} onChange={e => setCaptionDraft(c => ({ ...c, position: e.target.value as any }))}>
                 <option value="top">Top</option>
                 <option value="middle">Middle</option>
                 <option value="bottom">Bottom</option>
               </Select>
-            </div>
-            <div>
-              <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wider text-muted">Font size</label>
+            </Field>
+            <Field label="Font size" labelClassName={CAP_LABEL}>
               <Select value={captionDraft.fontSize} onChange={e => setCaptionDraft(c => ({ ...c, fontSize: Number(e.target.value) }))}>
                 {[16, 18, 20, 24, 28, 32, 36].map(s => <option key={s} value={s}>{s}px</option>)}
               </Select>
-            </div>
+            </Field>
           </div>
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="ghost" onClick={() => setShowAddCaption(false)}>Cancel</Button>
@@ -579,36 +575,31 @@ export default function VideoStudio() {
         {editCaption && (
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wider text-muted">Start (s)</label>
+              <Field label="Start (s)" labelClassName={CAP_LABEL}>
                 <Input type="number" min={0} max={30} step={0.1} value={editCaption.start}
                   onChange={e => setEditCaption(c => ({ ...c!, start: Number(e.target.value) }))} />
-              </div>
-              <div>
-                <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wider text-muted">End (s)</label>
+              </Field>
+              <Field label="End (s)" labelClassName={CAP_LABEL}>
                 <Input type="number" min={0} max={30} step={0.1} value={editCaption.end}
                   onChange={e => setEditCaption(c => ({ ...c!, end: Number(e.target.value) }))} />
-              </div>
+              </Field>
             </div>
-            <div>
-              <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wider text-muted">Text</label>
+            <Field label="Text" labelClassName={CAP_LABEL}>
               <Input value={editCaption.text} onChange={e => setEditCaption(c => ({ ...c!, text: e.target.value }))} />
-            </div>
+            </Field>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wider text-muted">Position</label>
+              <Field label="Position" labelClassName={CAP_LABEL}>
                 <Select value={editCaption.position} onChange={e => setEditCaption(c => ({ ...c!, position: e.target.value as any }))}>
                   <option value="top">Top</option>
                   <option value="middle">Middle</option>
                   <option value="bottom">Bottom</option>
                 </Select>
-              </div>
-              <div>
-                <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wider text-muted">Font size</label>
+              </Field>
+              <Field label="Font size" labelClassName={CAP_LABEL}>
                 <Select value={editCaption.fontSize} onChange={e => setEditCaption(c => ({ ...c!, fontSize: Number(e.target.value) }))}>
                   {[16, 18, 20, 24, 28, 32, 36].map(s => <option key={s} value={s}>{s}px</option>)}
                 </Select>
-              </div>
+              </Field>
             </div>
             <div className="flex justify-end gap-2 pt-1">
               <Button variant="ghost" onClick={() => setEditCaption(null)}>Cancel</Button>
