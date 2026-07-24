@@ -2901,6 +2901,10 @@ def h_ks_students_add(req: Request):
     return ks.students_add(_ks_coach(req), req.body)
 
 
+def h_ks_route(req: Request):
+    return ks.coach_route(_ks_coach(req), req.query.get("date"))
+
+
 def h_ks_leads(req: Request):
     return ks.leads_list(_ks_coach(req))
 
@@ -3492,6 +3496,7 @@ ROUTES = [
 
     ("GET",  re.compile(r"^/api/ks/students$"), h_ks_students),
     ("POST", re.compile(r"^/api/ks/students/add$"), h_ks_students_add),
+    ("GET",  re.compile(r"^/api/ks/coach/route$"), h_ks_route),
     ("GET",  re.compile(r"^/api/ks/leads$"), h_ks_leads),
     ("POST", re.compile(r"^/api/ks/leads/add$"), h_ks_lead_add),
     ("POST", re.compile(r"^/api/ks/leads/(\d+)$"), h_ks_lead_update),

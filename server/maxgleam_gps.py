@@ -134,6 +134,17 @@ def update(crew: dict, body: dict) -> tuple[int, dict]:
             and UK_BOUNDS["lng"][0] <= lng <= UK_BOUNDS["lng"][1]):
         return 400, {"error": "that position is outside the service area"}
 
+    # A position is only meaningful against a job this crew is actually on, so
+    # settle that first: a fix for a job that is not open must be rejected
+    # whatever its quality, not quietly accepted-and-dropped as poor accuracy.
+    job = maxgleam_crew._crew_job(crew, body.get("job_id"))
+    if not job:
+        return 404, {"error": "that job is not on your round"}
+    if job["status"] == "done" or job["completed_at"]:
+        return 409, {"error": "that clean is already complete — tracking has stopped"}
+    if not job["started_at"]:
+        return 409, {"error": "start the job before tracking begins"}
+
     accuracy = body.get("accuracy")
     if accuracy is not None:
         try:
@@ -143,15 +154,6 @@ def update(crew: dict, body: dict) -> tuple[int, dict]:
                 return 200, {"ok": True, "stored": False, "reason": "poor_accuracy"}
         except (TypeError, ValueError):
             pass
-
-    # A position is only meaningful against a job this crew is actually on.
-    job = maxgleam_crew._crew_job(crew, body.get("job_id"))
-    if not job:
-        return 404, {"error": "that job is not on your round"}
-    if job["status"] == "done" or job["completed_at"]:
-        return 409, {"error": "that clean is already complete — tracking has stopped"}
-    if not job["started_at"]:
-        return 409, {"error": "start the job before tracking begins"}
 
     now = int(time.time())
     with _last_write_lock:

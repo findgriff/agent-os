@@ -252,8 +252,13 @@ function CrewRound({ crew, onSignOut }: { crew: Crew; onSignOut: () => void }) {
 
   useEffect(() => { load(date || undefined); }, [load, date]);
 
-  // The job the crew is stood on: started, not finished. Tracking follows it.
-  const activeJob = data?.jobs.find(j => j.started_at && !j.completed_at && j.status !== 'done')
+  // The job the crew is stood on: started, not finished. When more than one is
+  // open at once, follow the most recently started — the office map keys the
+  // live pin and its on-site check off that same "latest started" job, so both
+  // sides must agree or a fix logged for one job gets judged against another.
+  const activeJob = (data?.jobs ?? [])
+    .filter(j => j.started_at && !j.completed_at && j.status !== 'done')
+    .sort((a, b) => (b.started_at ?? 0) - (a.started_at ?? 0))[0]
     ?? null;
   const [shareLocation, setShareLocation] = useState(
     () => localStorage.getItem(TRACKING_KEY) === '1');

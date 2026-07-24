@@ -1114,6 +1114,70 @@ def lead_update(coach: dict, lead_id: int, body: dict) -> tuple[int, dict]:
     return 200, {"lead": _lead_dto(_one("SELECT * FROM ks_leads WHERE id = ?", (lead_id,)))}
 
 
+# ---------------------------------------------------------------- route --
+# The coach's driving day: real bookings for a date, placed on the map from
+# the student's postcode. Bookings hold no address, so we join through the
+# student record; coordinates come from postcodes.io (free, keyless).
+
+# Where the coach starts and ends the day. A constant for now — a settings
+# field later — matching the seeded home base the UI already shows.
+ROUTE_HOME = {"venue": "Home base", "postcode": "CH2 1BX", "lat": 53.2040, "lng": -2.8850}
+
+# Process-lifetime postcode → (lat, lng) cache. A postcode the API says is
+# invalid caches as None so it isn't looked up again; a network failure caches
+# nothing, so the next route load retries.
+_geo_cache: dict[str, tuple[float, float] | None] = {}
+
+
+def _geocode(postcodes: list[str]) -> dict[str, tuple[float, float]]:
+    norm = [p.strip().upper() for p in postcodes if p and p.strip()]
+    want = sorted({p for p in norm if p not in _geo_cache})
+    if want:
+        try:
+            body = json.dumps({"postcodes": want}).encode()
+            req = urllib.request.Request(
+                "https://api.postcodes.io/postcodes", data=body,
+                headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=6) as r:
+                data = json.load(r)
+            for entry in data.get("result", []):
+                q = (entry.get("query") or "").strip().upper()
+                res = entry.get("result")
+                _geo_cache[q] = (res["latitude"], res["longitude"]) if res else None
+        except Exception:
+            log.warning("ks: postcode geocode failed", exc_info=True)
+    return {p: _geo_cache[p] for p in set(norm) if _geo_cache.get(p)}
+
+
+def coach_route(coach: dict, date_str: str | None) -> tuple[int, dict]:
+    date_str = date_str or datetime.now(UK).date().isoformat()
+    try:
+        datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        return 400, {"error": "invalid date"}
+    rows = _rows(
+        "SELECT b.id, b.child_name, b.service_name, b.start_time, b.end_time, b.status, "
+        "       s.address AS address, s.postcode AS postcode "
+        "FROM bookings b "
+        "LEFT JOIN parents p ON lower(p.email) = lower(b.parent_email) "
+        "LEFT JOIN students s ON s.parent_id = p.id AND lower(s.name) = lower(b.child_name) "
+        "WHERE b.coach_id = ? AND b.date = ? AND b.status != 'cancelled' "
+        "ORDER BY b.start_time",
+        (coach["id"], date_str))
+    coords = _geocode([r["postcode"] for r in rows])
+    stops = []
+    for r in rows:
+        pc = (r["postcode"] or "").strip().upper()
+        c = coords.get(pc)
+        stops.append({
+            "id": r["id"], "child_name": r["child_name"], "service_name": r["service_name"],
+            "start_time": r["start_time"], "end_time": r["end_time"], "status": r["status"],
+            "address": r["address"] or "", "postcode": pc,
+            "lat": c[0] if c else None, "lng": c[1] if c else None,
+        })
+    return 200, {"date": date_str, "home": ROUTE_HOME, "stops": stops}
+
+
 # ------------------------------------------------------ coach booking CRUD --
 
 def _coach_day_conflicts(coach_id: int, date_str: str, start: str, end: str,

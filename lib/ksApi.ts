@@ -145,6 +145,19 @@ export interface KsLead {
   added: string;
 }
 
+export interface KsRouteStop {
+  id: number; child_name: string; service_name: string;
+  start_time: string; end_time: string; status: string;
+  address: string; postcode: string;
+  lat: number | null; lng: number | null;   // null when the stop can't be mapped
+}
+
+export interface KsRoute {
+  date: string;
+  home: { venue: string; postcode: string; lat: number; lng: number };
+  stops: KsRouteStop[];
+}
+
 export interface NewStudent {
   child_name: string; dob?: string; age?: number | string;
   parent_name: string; parent_email: string; parent_phone: string;
@@ -358,6 +371,10 @@ export const ksApi = {
 
   updateLead: (id: number, status: KsLead['status']) =>
     req<{ lead: KsLead }>('POST', `/api/ks/leads/${id}`, { status }, getCoachToken()),
+
+  // ── Route (a day's real bookings, mapped by student postcode) ────────
+  route: (date: string) =>
+    req<KsRoute>('GET', `/api/ks/coach/route?date=${date}`, undefined, getCoachToken()),
 
   // ── Coach booking CRUD ───────────────────────────────────────────────
   coachCreateBooking: (data: NewCoachBooking) =>
