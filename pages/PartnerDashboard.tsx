@@ -1,10 +1,10 @@
 // Partner portal dashboard — jobs, work requests and payment status for a
 // single partner company. Standalone shell (no AGENT OS sidebar): partners
 // only ever see their own estate.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Badge, Button, Card, EmptyState, Icon, Input, Select, SkeletonList, Textarea, useToast,
+  Badge, Button, Card, EmptyState, Field, Icon, Input, Select, SkeletonList, Textarea, useToast,
 } from '../components/ui';
 import {
   partnerApi, clearPartnerToken, gbp, prettyDate, titleCase,
@@ -238,11 +238,10 @@ function JobRow({ job, tone, crews, onChanged }: {
 
       {panel === 'reschedule' && (
         <div className="flex flex-col gap-3 border-t border-white/6 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-end">
-          <div className="w-full sm:w-auto">
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">New date</label>
+          <Field label="New date" className="w-full sm:w-auto">
             <Input type="date" value={date} min={new Date().toISOString().slice(0, 10)}
               onChange={e => setDate(e.target.value)} className="w-full sm:!w-auto" />
-          </div>
+          </Field>
           <div className="flex w-full gap-2 sm:w-auto">
             <Button variant="primary" icon="event_available" loading={busy}
               disabled={!date || date === job.scheduled_date}
@@ -258,13 +257,12 @@ function JobRow({ job, tone, crews, onChanged }: {
 
       {panel === 'assign' && (
         <div className="flex flex-col gap-3 border-t border-white/6 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-end">
-          <div className="w-full sm:w-auto">
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">Crew</label>
+          <Field label="Crew" className="w-full sm:w-auto">
             <Select value={crewId} onChange={e => setCrewId(e.target.value)} className="w-full sm:w-auto">
               <option value="">Unassign</option>
               {(crews || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select>
-          </div>
+          </Field>
           <div className="flex w-full gap-2 sm:w-auto">
             <Button variant="primary" icon="group" loading={busy}
               onClick={() => run(
@@ -359,6 +357,7 @@ function WorkRequestForm({ properties, serviceTypes, priorities, onSubmitted }: 
   const [priority, setPriority] = useState('normal');
   const [filter, setFilter] = useState('');
   const [busy, setBusy] = useState(false);
+  const propertyFieldId = useId();
 
   const shortlist = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -398,12 +397,14 @@ function WorkRequestForm({ properties, serviceTypes, priorities, onSubmitted }: 
       <SectionTitle accent="#22C55E">Submit a work request</SectionTitle>
       <form onSubmit={submit} className="space-y-3.5">
         <div>
-          <label className="mb-1.5 block text-xs font-semibold text-muted">Property</label>
+          {/* Two controls (optional filter + the picker), so associate the
+              label with the Select by hand rather than via Field. */}
+          <label htmlFor={propertyFieldId} className="mb-1.5 block text-xs font-semibold text-muted">Property</label>
           {properties.length > 8 && (
             <Input value={filter} onChange={e => setFilter(e.target.value)}
               placeholder="Filter by address, postcode or customer" className="mb-2" />
           )}
-          <Select value={propertyId} onChange={e => setPropertyId(e.target.value)} className="w-full py-2">
+          <Select id={propertyFieldId} value={propertyId} onChange={e => setPropertyId(e.target.value)} className="w-full py-2">
             <option value="">No specific property (general request)</option>
             {shortlist.map(p => (
               <option key={p.id} value={p.id}>
@@ -418,32 +419,28 @@ function WorkRequestForm({ properties, serviceTypes, priorities, onSubmitted }: 
           )}
         </div>
 
-        <div>
-          <label className="mb-1.5 block text-xs font-semibold text-muted">Title</label>
+        <Field label="Title" labelClassName="mb-1.5 block text-xs font-semibold text-muted">
           <Input value={title} onChange={e => setTitle(e.target.value)}
             placeholder="e.g. Full exterior clean before reopening" maxLength={120} />
-        </div>
+        </Field>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-muted">Service</label>
+          <Field label="Service" labelClassName="mb-1.5 block text-xs font-semibold text-muted">
             <Select value={serviceType} onChange={e => setServiceType(e.target.value)} className="w-full py-2">
               {serviceTypes.map(s => <option key={s} value={s}>{titleCase(s)}</option>)}
             </Select>
-          </div>
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-muted">Priority</label>
+          </Field>
+          <Field label="Priority" labelClassName="mb-1.5 block text-xs font-semibold text-muted">
             <Select value={priority} onChange={e => setPriority(e.target.value)} className="w-full py-2">
               {priorities.map(p => <option key={p} value={p}>{titleCase(p)}</option>)}
             </Select>
-          </div>
+          </Field>
         </div>
 
-        <div>
-          <label className="mb-1.5 block text-xs font-semibold text-muted">Describe the work</label>
+        <Field label="Describe the work" labelClassName="mb-1.5 block text-xs font-semibold text-muted">
           <Textarea rows={4} value={description} onChange={e => setDescription(e.target.value)}
             placeholder="Access arrangements, scope, deadlines, anything the crew should know." />
-        </div>
+        </Field>
 
         <Button type="submit" variant="primary" icon="send" loading={busy} className="w-full sm:w-auto">
           Submit request
@@ -646,24 +643,18 @@ function RouteTab({ colour }: { colour: string }) {
         <div className="flex flex-wrap items-end gap-2">
           <div className="flex items-end gap-1">
             <Button variant="ghost" icon="chevron_left" onClick={() => shiftDay(-1)} />
-            <div>
-              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">
-                Date
-              </label>
+            <Field label="Date">
               <Input type="date" value={date} onChange={e => setDate(e.target.value)}
                 className="[color-scheme:dark]" />
-            </div>
+            </Field>
             <Button variant="ghost" icon="chevron_right" onClick={() => shiftDay(1)} />
           </div>
-          <div className="min-w-[10rem] flex-1">
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">
-              Crew
-            </label>
+          <Field label="Crew" className="min-w-[10rem] flex-1">
             <Select value={crewId} onChange={e => setCrewId(e.target.value)}>
               <option value="">All crews</option>
               {crews.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select>
-          </div>
+          </Field>
           <Button variant="secondary" icon="refresh" onClick={loadRoute} loading={busy}>
             Optimise
           </Button>
@@ -804,24 +795,21 @@ function ReferralCard() {
       </p>
 
       <form onSubmit={submit} className="space-y-3">
-        <div>
-          <label className="mb-1.5 block text-xs font-semibold text-muted">Referred by</label>
+        <Field label="Referred by" labelClassName="mb-1.5 block text-xs font-semibold text-muted">
           <Select value={customerId} onChange={e => setCustomerId(e.target.value)}>
             {(data?.referrers || []).map(r => (
               <option key={r.id} value={r.id}>{r.name}</option>
             ))}
           </Select>
-        </div>
+        </Field>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-muted">Friend's name</label>
+          <Field label="Friend's name" labelClassName="mb-1.5 block text-xs font-semibold text-muted">
             <Input value={name} onChange={e => setName(e.target.value)} placeholder="Optional" />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-muted">Friend's email</label>
+          </Field>
+          <Field label="Friend's email" labelClassName="mb-1.5 block text-xs font-semibold text-muted">
             <Input type="email" value={email} onChange={e => setEmail(e.target.value)}
               placeholder="friend@example.com" />
-          </div>
+          </Field>
         </div>
         <Button type="submit" variant="primary" icon="card_giftcard" loading={busy}
           className="w-full sm:w-auto">
