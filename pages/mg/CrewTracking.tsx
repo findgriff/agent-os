@@ -24,15 +24,18 @@ const CREW_COLOURS = ['#19C3E6', '#A78BFA', '#34D399', '#FBBF24', '#F472B6', '#6
 
 const colourFor = (crewId: number) => CREW_COLOURS[crewId % CREW_COLOURS.length];
 
-/** Resolve once Leaflet's CDN script has finished loading. */
-function useLeaflet(): boolean {
+/** Resolve once Leaflet's CDN script has finished loading. Gives up after
+ *  ~12s so a blocked/failed CDN surfaces an error instead of spinning forever. */
+function useLeaflet(): { ready: boolean; failed: boolean } {
   const [ready, setReady] = useState(() => typeof window !== 'undefined' && !!window.L);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
     if (ready) return;
-    const t = setInterval(() => { if (window.L) { setReady(true); clearInterval(t); } }, 120);
-    return () => clearInterval(t);
+    const poll = setInterval(() => { if (window.L) { setReady(true); clearInterval(poll); } }, 120);
+    const giveUp = setTimeout(() => { if (!window.L) setFailed(true); }, 12_000);
+    return () => { clearInterval(poll); clearTimeout(giveUp); };
   }, [ready]);
-  return ready;
+  return { ready, failed };
 }
 
 /** A van pin: crew initials in their colour, dimmed when the fix is stale.
@@ -76,7 +79,7 @@ function stopIcon(done: boolean): any {
 }
 
 export default function CrewTracking() {
-  const leafletReady = useLeaflet();
+  const { ready: leafletReady, failed: leafletFailed } = useLeaflet();
   const [data, setData] = useState<GpsActive | null>(null);
   const [history, setHistory] = useState<GpsHistory | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
@@ -203,11 +206,11 @@ export default function CrewTracking() {
         <Button icon="refresh" onClick={load}>Refresh</Button>
       </div>
 
-      {error && (
-        <Card className="border-red-500/30 bg-red-500/5 p-4 text-sm text-red-300">{error}</Card>
+      {error && data && (
+        <Card className="border-rose/25 bg-rose/5 p-4 text-sm text-rose">{error}</Card>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Tracking now" value={data?.summary.tracking ?? 0} icon="my_location" accent={ACCENT} />
         <Stat label="On site" value={data?.summary.on_site ?? 0} icon="where_to_vote" accent="#34D399" />
         <Stat label="Seen today" value={data?.summary.seen_today ?? 0} icon="groups" accent="#A78BFA" />
@@ -219,6 +222,9 @@ export default function CrewTracking() {
         <div className="space-y-2.5">
           {loading && !data ? (
             <Card className="p-6 text-center text-sm text-muted">Loading crews…</Card>
+          ) : error && !data ? (
+            <EmptyState icon="error" accent="#F43F5E" title="Couldn't load crew positions" hint={error}
+              action={<Button icon="refresh" onClick={() => load()}>Try again</Button>} />
           ) : crews.length === 0 ? (
             <EmptyState icon="location_off" title="Nobody tracking yet"
               hint="A crew appears here the moment they start a job in the crew app with location switched on." />
@@ -280,7 +286,15 @@ export default function CrewTracking() {
 
         {/* Map */}
         <Card className="overflow-hidden p-0">
-          {!leafletReady ? (
+          {leafletFailed ? (
+            <div className="grid h-[60vh] min-h-[360px] place-items-center px-6 text-sm text-muted lg:h-[540px]">
+              <div className="max-w-xs text-center">
+                <Icon name="wrong_location" size={30} className="mb-2 text-rose" />
+                <p className="text-ink">Map couldn't load</p>
+                <p className="mt-1 text-[12px]">The map library didn't load — check the connection. The crew list on the left is still live.</p>
+              </div>
+            </div>
+          ) : !leafletReady ? (
             <div className="grid h-[60vh] min-h-[360px] place-items-center text-sm text-muted lg:h-[540px]">
               <div className="text-center">
                 <Icon name="map" size={30} className="mb-2 animate-pulse text-accent" />

@@ -1597,7 +1597,7 @@ function CommissionsTab() {
           </Button>
         )}
         <div className="ml-auto">
-          <Button variant="secondary" icon="refresh" onClick={() => load()}>Refresh</Button>
+          <Button variant="secondary" icon="refresh" loading={loading} onClick={() => load()}>Refresh</Button>
         </div>
       </Card>
 

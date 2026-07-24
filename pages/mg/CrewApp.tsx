@@ -170,6 +170,7 @@ function CrewLogin({ onAuthed }: { onAuthed: (c: Crew) => void }) {
     try {
       const r = await crewApi.verifyCode(phone, code);
       if (r.token && r.crew) { setCrewToken(r.token); onAuthed(r.crew); }
+      else setError('That code is not right');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'That code is not right');
     } finally { setBusy(false); }

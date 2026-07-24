@@ -131,14 +131,17 @@ function CustomerDrawer({ id, onClose, onChanged }: {
   const toast = useToast();
   const [d, setD] = useState<CustomerDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [note, setNote] = useState('');
   const [savingNote, setSavingNote] = useState(false);
 
   const load = () => {
     setLoading(true);
+    setLoadErr(null);
     customersApi.get(id)
-      .then(setD).catch(() => toast('Could not load customer', 'danger'))
+      .then(d => { setD(d); setLoadErr(null); })
+      .catch(() => { setLoadErr('Could not load customer'); toast('Could not load customer', 'danger'); })
       .finally(() => setLoading(false));
   };
   useEffect(load, [id]);
@@ -174,8 +177,13 @@ function CustomerDrawer({ id, onClose, onChanged }: {
         </div>
       </div>
 
-      {loading || !d || !c || !s ? (
+      {loading ? (
         <div className="p-5"><SkeletonList count={5} /></div>
+      ) : loadErr || !d || !c || !s ? (
+        <div className="p-5">
+          <EmptyState icon="error" accent="#F43F5E" title="Couldn't load this customer"
+            hint={loadErr || undefined} action={<Button icon="refresh" onClick={load}>Try again</Button>} />
+        </div>
       ) : (
         <div className="space-y-6 p-5">
           {/* Tags */}

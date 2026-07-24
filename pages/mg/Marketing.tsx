@@ -173,7 +173,7 @@ function Compose({ meta, onCreated }: { meta: CampaignList | null; onCreated: ()
       <div className="space-y-4">
         <Card className="space-y-3 p-4">
           <SectionTitle>Audience</SectionTitle>
-          <Select value={kind} onChange={e => setKind(e.target.value as AudienceKind)}>
+          <Select value={kind} onChange={e => setKind(e.target.value as AudienceKind)} className="w-full">
             {(meta?.audiences || Object.keys(AUDIENCE_LABEL) as AudienceKind[]).map(k => (
               <option key={k} value={k}>{AUDIENCE_LABEL[k] || k}</option>
             ))}
@@ -544,6 +544,7 @@ export default function Marketing() {
   const [tab, setTab] = useState<Tab>('campaigns');
   const [list, setList] = useState<CampaignList | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -578,7 +579,10 @@ export default function Marketing() {
           {list?.dry_run_default && (
             <Badge tone="warn" dot>dry-run default</Badge>
           )}
-          <Button variant="secondary" icon="refresh" onClick={load}>Refresh</Button>
+          <Button variant="secondary" icon="refresh" loading={refreshing}
+            onClick={async () => { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } }}>
+            Refresh
+          </Button>
         </div>
       </header>
 
