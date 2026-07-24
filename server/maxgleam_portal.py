@@ -499,10 +499,13 @@ def customer_jobs(customer: dict) -> tuple[int, dict]:
 _INVOICE_SELECT = """
   SELECT i.id, i.number, i.amount_pence, i.vat_pence, i.status, i.method,
          i.issued_at, i.paid_at, i.sumup_checkout_id, i.sumup_checkout_url,
-         i.tenant_id, j.scheduled_date, p.address
+         i.tenant_id, j.scheduled_date, p.address,
+         COALESCE(pay.paid, 0) AS ledger_paid
     FROM invoices i
     LEFT JOIN jobs j ON j.id = i.job_id
     LEFT JOIN properties p ON p.id = j.property_id
+    LEFT JOIN (SELECT invoice_id, SUM(amount_pence) AS paid
+                 FROM invoice_payments GROUP BY invoice_id) pay ON pay.invoice_id = i.id
 """
 
 
@@ -513,12 +516,24 @@ def customer_payments(customer: dict) -> tuple[int, dict]:
     coming back from the SumUp page sees "Paid" rather than being invited to
     pay a second time.
     """
+    from server import maxgleam_invoicing
+    maxgleam_invoicing._payments_conn()   # the ledger JOIN needs the table
     synced = _sync_checkouts(customer)
 
     rs = _rows(_INVOICE_SELECT +
                " WHERE i.customer_id = ? AND i.status != 'void'"
                " ORDER BY i.issued_at DESC LIMIT 200", (customer["id"],))
-    due = [r for r in rs if r["status"] == "unpaid"]
+    for r in rs:
+        # Balance-aware view: a part-paid invoice still owes the remainder, and
+        # the portal must show (and charge) that, never the full figure again.
+        paid = r["amount_pence"] if r["status"] == "paid" else min(
+            r["amount_pence"] or 0, r.get("ledger_paid") or 0)
+        r["paid_pence"] = paid
+        r["outstanding_pence"] = 0 if r["status"] == "paid" else max(
+            0, (r["amount_pence"] or 0) - paid)
+    # 'due' is everything still owing — an unpaid invoice or one part-paid
+    # offline (status 'partial'); 'history' is fully-settled invoices.
+    due = [r for r in rs if r["outstanding_pence"] > 0]
     history = [r for r in rs if r["status"] == "paid"]
 
     # Cleans that are booked but not yet invoiced — what is coming, and what
@@ -540,8 +555,9 @@ def customer_payments(customer: dict) -> tuple[int, dict]:
         "history": history,
         "upcoming": upcoming,
         "summary": {
-            "paid_pence": sum(r["amount_pence"] for r in history),
-            "unpaid_pence": sum(r["amount_pence"] for r in due),
+            # Money received (part-payments included) vs money still owed.
+            "paid_pence": sum(r["paid_pence"] for r in rs),
+            "unpaid_pence": sum(r["outstanding_pence"] for r in due),
             "upcoming_pence": sum(r["price_pence"] or 0 for r in upcoming),
             "count": len(rs),
             "newly_paid": synced,
@@ -584,10 +600,10 @@ def _sync_checkouts(customer: dict) -> list[str]:
         return []
     pending = _rows(
         "SELECT id, number, sumup_checkout_id FROM invoices "
-        " WHERE customer_id = ? AND status = 'unpaid' "
+        " WHERE customer_id = ? AND status IN ('unpaid', 'partial') "
         "   AND sumup_checkout_id IS NOT NULL LIMIT 10", (customer["id"],))
+    from server import maxgleam_invoicing
     flipped = []
-    conn = _conn()
     for inv in pending:
         try:
             ck = sumup.checkout_status(api_key=tenant["sumup_api_key"],
@@ -596,12 +612,12 @@ def _sync_checkouts(customer: dict) -> list[str]:
             # SumUp being down must not stop the page rendering.
             log.warning("maxgleam: sumup status failed for %s: %s", inv["number"], e)
             continue
-        if ck.get("status") == "PAID":
-            conn.execute("UPDATE invoices SET status = 'paid', method = 'sumup_online', "
-                         "paid_at = strftime('%s','now') WHERE id = ?", (inv["id"],))
+        # settle_online records the outstanding balance in the ledger and flips
+        # the invoice to paid — correct for a part-paid invoice, not just unpaid.
+        if ck.get("status") == "PAID" and maxgleam_invoicing.settle_online(
+                inv["id"], tenant["id"]):
             flipped.append(inv["number"])
     if flipped:
-        conn.commit()
         log.info("maxgleam: %d invoice(s) marked paid from SumUp", len(flipped))
     return flipped
 
@@ -612,6 +628,8 @@ def customer_checkout(customer: dict, invoice_id: int) -> tuple[int, dict]:
     Scoped to the signed-in customer's own invoices; the id in the request is
     never trusted on its own.
     """
+    from server import maxgleam_invoicing
+    maxgleam_invoicing._payments_conn()   # the ledger JOIN needs the table
     inv = _one(_INVOICE_SELECT + " WHERE i.id = ? AND i.customer_id = ?",
                (invoice_id, customer["id"]))
     if not inv:
@@ -620,6 +638,12 @@ def customer_checkout(customer: dict, invoice_id: int) -> tuple[int, dict]:
         return 409, {"error": "this invoice is already paid", "invoice": inv}
     if inv["status"] == "void":
         return 409, {"error": "this invoice has been cancelled"}
+
+    # Charge only what is still owed: an invoice part-paid offline (cash/transfer)
+    # has a smaller balance, and billing the full figure again would overcharge.
+    outstanding = max(0, (inv["amount_pence"] or 0) - (inv.get("ledger_paid") or 0))
+    if outstanding <= 0:
+        return 409, {"error": "this invoice is already paid", "invoice": inv}
 
     tenant = _tenant_of(customer)
     if not tenant or not tenant.get("sumup_api_key"):
@@ -634,12 +658,13 @@ def customer_checkout(customer: dict, invoice_id: int) -> tuple[int, dict]:
         except sumup.SumUpError:
             ck = {}
         if ck.get("status") == "PAID":
-            conn = _conn()
-            conn.execute("UPDATE invoices SET status = 'paid', method = 'sumup_online', "
-                         "paid_at = strftime('%s','now') WHERE id = ?", (inv["id"],))
-            conn.commit()
+            maxgleam_invoicing.settle_online(inv["id"], tenant["id"])
             return 409, {"error": "this invoice is already paid"}
-        if ck.get("status") == "PENDING" and inv["sumup_checkout_url"]:
+        # A live link is only safe to reuse while it still bills the right
+        # amount — a payment recorded since it was minted changes the balance,
+        # so that link is stale and a fresh one for the remainder is issued.
+        if (ck.get("status") == "PENDING" and inv["sumup_checkout_url"]
+                and not inv.get("ledger_paid")):
             return 200, {"checkout_url": inv["sumup_checkout_url"],
                          "invoice": {"id": inv["id"], "number": inv["number"],
                                      "amount_pence": inv["amount_pence"]}}
@@ -662,7 +687,7 @@ def customer_checkout(customer: dict, invoice_id: int) -> tuple[int, dict]:
     try:
         ck = sumup.create_hosted_checkout(
             api_key=tenant["sumup_api_key"], merchant_code=code,
-            amount_pence=inv["amount_pence"], currency=tenant["currency"] or "GBP",
+            amount_pence=outstanding, currency=tenant["currency"] or "GBP",
             reference=reference,
             description=f"{tenant['name']} — {inv['number']}",
             redirect_url=redirect)
@@ -679,10 +704,10 @@ def customer_checkout(customer: dict, invoice_id: int) -> tuple[int, dict]:
     conn.execute("UPDATE invoices SET sumup_checkout_id = ?, sumup_checkout_url = ? "
                  "WHERE id = ?", (ck.get("id"), url, inv["id"]))
     conn.commit()
-    log.info("maxgleam: created SumUp checkout for %s", inv["number"])
+    log.info("maxgleam: created SumUp checkout for %s (£%.2f)", inv["number"], outstanding / 100)
     return 200, {"checkout_url": url,
                  "invoice": {"id": inv["id"], "number": inv["number"],
-                             "amount_pence": inv["amount_pence"]}}
+                             "amount_pence": outstanding}}
 
 
 def customer_contact(customer: dict) -> tuple[int, dict]:

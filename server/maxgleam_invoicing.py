@@ -945,7 +945,7 @@ def reconcile_payments(tenant_id: int = DEFAULT_TENANT_ID,
            "  FROM invoices i "
            "  LEFT JOIN jobs j ON j.id = i.job_id "
            "  LEFT JOIN properties p ON p.id = j.property_id "
-           " WHERE i.status = 'unpaid' AND i.tenant_id = ? "
+           " WHERE i.status IN ('unpaid', 'partial') AND i.tenant_id = ? "
            "   AND i.sumup_checkout_id IS NOT NULL AND i.sumup_checkout_id != ''")
     args: list = [tenant_id]
     if company_id is not None:
@@ -970,17 +970,13 @@ def reconcile_payments(tenant_id: int = DEFAULT_TENANT_ID,
             continue
         if ck.get("status") != "PAID":
             continue
-        # The status guard keeps the flip idempotent under a concurrent portal
-        # sync — whichever writer gets there first wins, the other is a no-op.
-        cur = conn.execute(
-            "UPDATE invoices SET status = 'paid', method = 'sumup_online', "
-            "paid_at = strftime('%s','now') WHERE id = ? AND status = 'unpaid'",
-            (inv["id"],))
-        if cur.rowcount:
+        # settle_online is idempotent under a concurrent portal sync — whichever
+        # writer gets there first wins — and records the outstanding balance in
+        # the ledger, so a part-paid invoice settles for the remainder only.
+        if settle_online(inv["id"], tenant_id):
             reconciled.append({"id": inv["id"], "number": inv["number"],
                                "amount_pence": inv["amount_pence"]})
     if reconciled:
-        conn.commit()
         log.info("maxgleam: reconciled %d invoice(s) as paid from SumUp: %s",
                  len(reconciled), ", ".join(r["number"] for r in reconciled))
 
@@ -1180,6 +1176,39 @@ def payment_history(invoice_id: int, tenant_id: int = DEFAULT_TENANT_ID,
         "paid_pence": dto["paid_pence"],
         "outstanding_pence": dto["outstanding_pence"],
     }
+
+
+def settle_online(invoice_id: int, tenant_id: int = DEFAULT_TENANT_ID) -> bool:
+    """Mark an invoice paid from a completed SumUp checkout, ledger-consistent.
+
+    Records whatever is still outstanding as a 'sumup_online' ledger row and
+    flips the invoice to paid, so the ledger stays authoritative even when the
+    invoice was already part-paid offline (status 'partial'). The status guard
+    on the UPDATE makes it idempotent: whichever writer (portal sync, cron
+    reconcile) gets there first settles it, the rest are no-ops. Returns True
+    only if this call is the one that flipped it.
+    """
+    conn = _payments_conn()
+    row = _one(_INVOICE_SELECT + " WHERE i.id = ? AND i.tenant_id = ?",
+               (invoice_id, tenant_id))
+    if not row or row["status"] in ("paid", "void"):
+        return False
+    outstanding = _outstanding(row)
+    when = int(time.time())
+    cur = conn.execute(
+        "UPDATE invoices SET status = 'paid', method = 'sumup_online', paid_at = ? "
+        "WHERE id = ? AND status IN ('unpaid', 'partial')", (when, invoice_id))
+    if not cur.rowcount:                       # someone else settled it first
+        conn.rollback()
+        return False
+    if outstanding > 0:
+        conn.execute(
+            "INSERT INTO invoice_payments (tenant_id, invoice_id, amount_pence, method, note, paid_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (tenant_id, invoice_id, outstanding, "sumup_online", "SumUp online", when))
+    conn.commit()
+    log.info("maxgleam: invoice %s settled online (+£%.2f)", row["number"], outstanding / 100)
+    return True
 
 
 # ─────────────────────────────────────────────────────────────────────────

@@ -112,8 +112,8 @@ export default function CustomerPayments() {
           </div>
         ) : !data ? null : (
           <div className="space-y-8">
-            {/* Totals */}
-            <div className="grid grid-cols-3 gap-2.5">
+            {/* Totals — stack on narrow phones so £ amounts never clip */}
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
               <Total label="Due now" value={gbp(s!.unpaid_pence)}
                 tone={s!.unpaid_pence > 0 ? 'amber' : 'slate'} />
               <Total label="Coming up" value={gbp(s!.upcoming_pence)} tone="slate" />
@@ -225,7 +225,7 @@ export function PayButton({ invoice, className = '' }:
     <div className={`mt-3 ${className}`}>
       <MGButton onClick={pay} loading={busy}
         className="min-h-[52px] w-full text-base">
-        {busy ? 'Opening secure checkout…' : `Pay ${gbp(invoice.amount_pence)} now`}
+        {busy ? 'Opening secure checkout…' : `Pay ${gbp(invoice.outstanding_pence ?? invoice.amount_pence)} now`}
       </MGButton>
       {error && <div className="mt-2"><MGAlert>{error}</MGAlert></div>}
     </div>
@@ -260,6 +260,8 @@ function SectionHead({ title, hint }: { title: string; hint?: string }) {
 function InvoiceCard({ invoice, children }:
   { invoice: MgInvoice; children?: React.ReactNode }) {
   const paid = invoice.status === 'paid';
+  const partPaid = !paid && (invoice.paid_pence ?? 0) > 0;
+  const owed = invoice.outstanding_pence ?? invoice.amount_pence;
   return (
     <MGCard className="p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -274,11 +276,18 @@ function InvoiceCard({ invoice, children }:
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           <span className="text-lg font-extrabold tabular-nums">
-            {gbp(invoice.amount_pence)}
+            {gbp(paid ? invoice.amount_pence : owed)}
           </span>
-          <MGPill tone={paid ? 'green' : 'amber'}>{paid ? 'Paid' : 'Unpaid'}</MGPill>
+          <MGPill tone={paid ? 'green' : 'amber'}>
+            {paid ? 'Paid' : partPaid ? 'Part-paid' : 'Unpaid'}
+          </MGPill>
         </div>
       </div>
+      {partPaid && (
+        <p className="mt-1 text-xs text-slate-400">
+          {gbp(invoice.paid_pence)} of {gbp(invoice.amount_pence)} already paid
+        </p>
+      )}
       {invoice.vat_pence > 0 && (
         <p className="mt-1 text-xs text-slate-400">
           Includes {gbp(invoice.vat_pence)} VAT

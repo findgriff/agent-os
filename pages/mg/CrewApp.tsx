@@ -79,7 +79,7 @@ function TrackingBar({ enabled, onToggle, state, lastFix, address }: {
   const look = !enabled ? { tone: 'slate' as const, text: 'Location sharing off' }
     : state === 'live' ? { tone: 'green' as const, text: 'Sharing your location' }
     : state === 'starting' ? { tone: 'amber' as const, text: 'Finding your location…' }
-    : state === 'denied' ? { tone: 'red' as const, text: 'Location blocked in your browser' }
+    : state === 'denied' ? { tone: 'red' as const, text: 'Location blocked' }
     : state === 'error' ? { tone: 'red' as const, text: 'Location unavailable' }
     : { tone: 'slate' as const, text: 'Location sharing off' };
 

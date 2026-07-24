@@ -95,11 +95,11 @@ function Confirmed({ result, onAgain }: { result: BookResult; onAgain: () => voi
               Quote <span className="font-mono font-bold text-slate-900">{result.ref}</span> if you
               need to get in touch.
             </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <a href="/customer/login" className="flex-1">
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              <a href="/customer/login" className="sm:flex-1">
                 <MGButton className="w-full">Track it in your account</MGButton>
               </a>
-              <MGButton tone="secondary" onClick={onAgain}>Book another</MGButton>
+              <MGButton tone="secondary" onClick={onAgain} className="w-full sm:w-auto">Book another</MGButton>
             </div>
           </div>
         </MGCard>

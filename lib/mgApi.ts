@@ -71,6 +71,9 @@ export interface MgInvoice {
   sumup_checkout_url: string | null;
   scheduled_date: string | null;
   address: string | null;
+  // Balance-aware view from the customer portal (part-payments included).
+  paid_pence?: number;
+  outstanding_pence?: number;
 }
 
 /** A booked clean that has not been invoiced yet. */
