@@ -23,7 +23,7 @@ export function MGShell({ children, compact }:
   return (
     <div className="min-h-screen bg-[#F6FAFC] font-sans text-[#0F2733] antialiased">
       <header className="border-b border-slate-200 bg-white">
-        <div className={`mx-auto flex items-center gap-2.5 px-4 py-3.5 ${compact ? 'max-w-xl' : 'max-w-4xl'} sm:px-6`}>
+        <div className={`mx-auto flex items-center gap-2.5 px-4 pb-3.5 pt-[max(0.875rem,env(safe-area-inset-top))] ${compact ? 'max-w-xl' : 'max-w-4xl'} sm:px-6`}>
           <MGMark />
           <div className="min-w-0">
             <div className="truncate text-[15px] font-bold leading-tight tracking-tight">Max Gleam</div>
@@ -32,7 +32,7 @@ export function MGShell({ children, compact }:
         </div>
       </header>
       {children}
-      <footer className="mt-12 border-t border-slate-200 bg-white py-6 text-center text-xs text-slate-500">
+      <footer className="mt-12 border-t border-slate-200 bg-white pt-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] text-center text-xs text-slate-500">
         Max Gleam · Professional window cleaning
       </footer>
     </div>
