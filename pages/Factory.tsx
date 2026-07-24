@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Button, Card, Icon, Select, Input, Badge, EmptyState, useToast } from '../components/ui';
+import { Button, Card, Field, Icon, Select, Input, Badge, EmptyState, useToast } from '../components/ui';
 import { api } from '../lib/api';
 import { useApp } from '../lib/store';
 import type { Agent } from '../lib/types';
@@ -63,45 +63,40 @@ export default function Factory() {
       {/* Setup form */}
       <Card glass className="p-5 animate-fadeInUp">
         <div className="space-y-4">
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Goal</label>
+          <Field label="Goal">
             <textarea value={goal} onChange={e => setGoal(e.target.value)} rows={2}
               placeholder="e.g. Write a 500-word blog post about AI agents for small businesses..."
               className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-base text-ink placeholder:text-muted/60 focus:border-accent/50 focus:outline-none resize-none" />
-          </div>
+          </Field>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Builder Agent</label>
+            <Field label="Builder Agent">
               <Select value={builderId} onChange={e => setBuilderId(e.target.value ? Number(e.target.value) : '')} className="w-full">
                 <option value="">Select builder…</option>
                 {revenueAgents.map(a => <option key={a.id} value={a.id}>{a.real_name || a.name} (Revenue & Ops)</option>)}
                 {creativeAgents.map(a => <option key={a.id} value={a.id}>{a.real_name || a.name} (Creative & Systems)</option>)}
               </Select>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Judge Agent</label>
+            </Field>
+            <Field label="Judge Agent">
               <Select value={judgeId} onChange={e => setJudgeId(e.target.value ? Number(e.target.value) : '')} className="w-full">
                 <option value="">Select judge…</option>
                 {creativeAgents.map(a => <option key={a.id} value={a.id}>{a.real_name || a.name} (Creative & Systems)</option>)}
                 {revenueAgents.map(a => <option key={a.id} value={a.id}>{a.real_name || a.name} (Revenue & Ops)</option>)}
               </Select>
-            </div>
+            </Field>
           </div>
 
           <div className="flex flex-wrap gap-4">
-            <div className="w-32">
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Max rounds</label>
+            <Field label="Max rounds" className="w-32">
               <Select value={maxRounds} onChange={e => setMaxRounds(Number(e.target.value))}>
                 {[3,5,10,15,20].map(n => <option key={n} value={n}>{n}</option>)}
               </Select>
-            </div>
-            <div className="w-32">
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Pass threshold</label>
+            </Field>
+            <Field label="Pass threshold" className="w-32">
               <Select value={threshold} onChange={e => setThreshold(Number(e.target.value))}>
                 {[60,70,75,80,85,90,95].map(n => <option key={n} value={n}>{n}%</option>)}
               </Select>
-            </div>
+            </Field>
           </div>
 
           <Button variant="primary" icon="play_arrow" loading={running} onClick={run}

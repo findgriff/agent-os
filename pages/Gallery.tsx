@@ -4,7 +4,7 @@
 // placeholders, a rich preview modal and an "add to workspace" composer.
 import { useState, useEffect, useMemo } from 'react';
 import {
-  Icon, Button, Card, Badge, Input, Select, Modal,
+  Icon, Button, Card, Badge, Field, Input, Select, Modal,
   EmptyState, SkeletonList, useToast, Stat, useCountUp,
 } from '../components/ui';
 import { Avatar } from '../components/Avatar';
@@ -611,48 +611,40 @@ function AddItemModal({ agents, tenantId, onClose, onSaved }:
   return (
     <Modal open onClose={onClose} title="Add to workspace" width="max-w-lg">
       <div className="space-y-3">
-        <div>
-          <label className={fieldCls}>Title</label>
+        <Field label="Title" labelClassName={fieldCls}>
           <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Launch hero banner" autoFocus />
-        </div>
+        </Field>
         <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className={fieldCls}>Type</label>
+          <Field label="Type" labelClassName={fieldCls}>
             <Select value={type} onChange={e => setType(e.target.value)} className="w-full">
               {TYPE_ORDER.map(t => <option key={t} value={t}>{typeMeta(t).label}</option>)}
             </Select>
-          </div>
-          <div>
-            <label className={fieldCls}>Project</label>
+          </Field>
+          <Field label="Project" labelClassName={fieldCls}>
             <Input value={project} onChange={e => setProject(e.target.value)} placeholder="Optional" />
-          </div>
+          </Field>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className={fieldCls}>Model</label>
+          <Field label="Model" labelClassName={fieldCls}>
             <Input value={model} onChange={e => setModel(e.target.value)} placeholder="Optional" />
-          </div>
-          <div>
-            <label className={fieldCls}>Agent</label>
+          </Field>
+          <Field label="Agent" labelClassName={fieldCls}>
             <Select value={agentId} onChange={e => setAgentId(e.target.value)} className="w-full">
               <option value="">Unassigned</option>
               {agents.map(a => <option key={a.id} value={a.id}>{a.real_name || a.name}</option>)}
             </Select>
-          </div>
+          </Field>
         </div>
-        <div>
-          <label className={fieldCls}>URL</label>
+        <Field label="URL" labelClassName={fieldCls}>
           <Input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://… (used as the thumbnail)" />
-        </div>
-        <div>
-          <label className={fieldCls}>Tags</label>
+        </Field>
+        <Field label="Tags" labelClassName={fieldCls}>
           <Input value={tags} onChange={e => setTags(e.target.value)} placeholder="comma, separated, tags" />
-        </div>
-        <div>
-          <label className={fieldCls}>Description</label>
+        </Field>
+        <Field label="Description" labelClassName={fieldCls}>
           <textarea value={description} rows={2} onChange={e => setDescription(e.target.value)}
             placeholder="Optional notes about this asset…" className={textareaCls} />
-        </div>
+        </Field>
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button variant="primary" icon="add" loading={saving} onClick={save}

@@ -3,7 +3,7 @@
 // message with reply / mark / archive actions. Talks to /api/email/*.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Icon, Button, Badge, Input, Textarea, Select, Modal,
+  Icon, Button, Badge, Field, Input, Textarea, Select, Modal,
   EmptyState, SkeletonList, useToast, useCountUp,
 } from '../components/ui';
 import { Avatar } from '../components/Avatar';
@@ -433,12 +433,10 @@ export default function Email() {
       <Modal open={composeOpen} onClose={() => setComposeOpen(false)}
         title={replyToId != null ? 'Reply' : 'New message'} width="max-w-xl">
         <div className="space-y-3">
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">To</label>
+          <Field label="To">
             <Input value={to} type="email" placeholder="name@company.com" onChange={e => setTo(e.target.value)} />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">From</label>
+          </Field>
+          <Field label="From">
             <Select className="w-full" value={fromAgentId == null ? '' : String(fromAgentId)}
               onChange={e => setFromAgentId(e.target.value ? Number(e.target.value) : null)}>
               <option value="">Default mailbox</option>
@@ -446,16 +444,14 @@ export default function Email() {
                 <option key={a.id} value={a.id}>{(a.real_name || a.name)} · {mailbox(a)}</option>
               ))}
             </Select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Subject</label>
+          </Field>
+          <Field label="Subject">
             <Input value={subject} placeholder="Subject line" onChange={e => setSubject(e.target.value)} />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Message</label>
+          </Field>
+          <Field label="Message">
             <Textarea value={body} rows={8} placeholder="Write your message…"
               className="resize-none" onChange={e => setBody(e.target.value)} />
-          </div>
+          </Field>
           <div className="flex items-center justify-end gap-2 pt-1">
             <Button variant="ghost" onClick={() => setComposeOpen(false)}>Cancel</Button>
             <Button variant="primary" icon="send" loading={sending} onClick={send} style={composeBtnStyle}>
@@ -471,19 +467,17 @@ export default function Email() {
           <p className="text-sm text-muted">
             Link an external inbox so agents can send and receive from it. This is a preview — no live connection is made.
           </p>
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Provider</label>
+          <Field label="Provider">
             <Select className="w-full" value={connectProvider} onChange={e => setConnectProvider(e.target.value)}>
               <option value="gmail">Gmail</option>
               <option value="outlook">Outlook</option>
               <option value="imap">IMAP / SMTP</option>
             </Select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">Email address</label>
+          </Field>
+          <Field label="Email address">
             <Input value={connectAddr} type="email" placeholder="you@company.com"
               onChange={e => setConnectAddr(e.target.value)} />
-          </div>
+          </Field>
           <div className="flex items-center justify-end gap-2 pt-1">
             <Button variant="ghost" onClick={() => setConnectOpen(false)}>Cancel</Button>
             <Button variant="primary" icon="link" style={{ background: TEAL, color: '#04222b' }}
