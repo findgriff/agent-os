@@ -6,13 +6,11 @@ live under /var/lib/agent-os/videos/ and are served at /generated/videos/.
 from __future__ import annotations
 import json
 import logging
-import os
 import re
 import subprocess
 import time
 import uuid
 from pathlib import Path
-from urllib.parse import unquote
 
 log = logging.getLogger("agentos.video")
 

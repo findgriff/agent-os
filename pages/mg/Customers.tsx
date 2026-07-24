@@ -2,7 +2,7 @@
 // per-customer record: properties, job history, invoices, notes, and the
 // numbers that matter (lifetime value, balance owed, next clean). Backed by
 // lib/customersApi.ts.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Icon, Button, Card, Badge, Input, Textarea, Modal, Drawer,
   EmptyState, SkeletonList, useToast, Stat,

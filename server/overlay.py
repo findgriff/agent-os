@@ -124,7 +124,7 @@ def add_overlay(config: dict) -> dict:
         "top-right": f"W-w-{padding}:{padding}",
         "bottom-left": f"{padding}:H-h-{padding}",
         "bottom-right": f"W-w-{padding}:H-h-{padding}",
-        "center": f"(W-w)/2:(H-h)/2",
+        "center": "(W-w)/2:(H-h)/2",
     }
     overlay_pos = pos_map[position]
 

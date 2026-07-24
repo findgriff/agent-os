@@ -429,7 +429,6 @@ function PayChip({ label, value, total, colour }:
 }
 
 function ProfitTab({ range }: { range: DateRange | null }) {
-  const toast = useToast();
   const [data, setData] = useState<ProfitData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -1904,7 +1903,6 @@ function ReviewsTab() {
 const RANGE_TABS: Tab[] = ['overview', 'profit', 'crew', 'time'];
 
 export default function Reports() {
-  const toast = useToast();
   const [tab, setTab] = useState<Tab>('overview');
   const [data, setData] = useState<ReportsData | null>(null);
   const [range, setRange] = useState<DateRange | null>(null);   // null → default 30d

@@ -3,10 +3,7 @@ Fetches live stock prices, news, and dividend data via yfinance.
 All data cached to avoid hitting Yahoo rate limits.
 """
 from __future__ import annotations
-import json
-import os
 import time
-from dataclasses import dataclass, asdict
 from typing import Any
 
 # Cache: {cache_key: (timestamp, data)}

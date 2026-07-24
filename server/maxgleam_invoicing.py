@@ -972,7 +972,6 @@ def reconcile_payments(tenant_id: int = DEFAULT_TENANT_ID,
     args.append(limit)
 
     pending = _rows(sql, tuple(args))
-    conn = _conn()
     reconciled: list[dict] = []
     errors: list[dict] = []
     for inv in pending:

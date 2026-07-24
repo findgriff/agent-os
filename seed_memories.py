@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Seed the Obsidian vault with real memories from agent_logs."""
-import json, sqlite3, os
+import sqlite3, os
 from datetime import datetime
 
 VAULT_DIR = os.path.expanduser('~/.superbrain/vault/memories')
@@ -118,4 +118,4 @@ created_at: 1784000000
 conn.commit()
 conn.close()
 
-print(f'\n✅ Vault seeded. Run memory_sync() via API to reconcile.')
+print('\n✅ Vault seeded. Run memory_sync() via API to reconcile.')

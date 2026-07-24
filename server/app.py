@@ -778,7 +778,7 @@ def h_studio_generate(req: Request):
 
 def h_studio_video_generate(req: Request):
     """Submit a video generation job — currently Fal.ai Kling is default."""
-    user = _require(req)
+    _require(req)
     b = req.body
     prompt = (b.get("prompt") or "").strip()
     if not prompt:
@@ -1014,7 +1014,7 @@ def h_suno_styles(req: Request):
 
 def h_suno_status(req: Request, clip_id: str):
     """Check generation status for a Suno clip."""
-    user = _require(req)
+    _require(req)
     r = suno_bridge.check_status({"clip_id": clip_id})
     return (502, {"error": r["error"]}) if r.get("error") else (200, r)
 
@@ -1974,8 +1974,6 @@ def h_factory_run(req: Request):
     judge = db_module.one(conn, "SELECT * FROM agents WHERE id=?", (judge_id,))
     if not builder or not judge:
         return 404, {"error": "agent not found"}
-    cert_b = json.loads(builder.get("certificate_json") or "{}")
-    cert_j = json.loads(judge.get("certificate_json") or "{}")
     from server import factory
     result = factory.run_loop(
         goal,

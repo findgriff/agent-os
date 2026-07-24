@@ -265,7 +265,6 @@ def memory_galaxy(tenant_id=None) -> dict:
             "_links": links, "connected_to": [],
         })
 
-    star_by_id = {s["id"]: s for s in stars}
     for s in stars:
         connected = set()
         # topic siblings

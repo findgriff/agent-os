@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Seed the vault with 200+ memories so the galaxy shines bright."""
-import json, sqlite3, os, random, time
-from datetime import datetime, timedelta
+import sqlite3, os, random, time
 
 VAULT = os.path.expanduser('~/.superbrain/vault/memories')
 os.makedirs(VAULT, exist_ok=True)

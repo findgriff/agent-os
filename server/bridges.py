@@ -9,9 +9,7 @@ Platforms: hermes | chatgpt | fal | claude_sdk | kimi | omi
 from __future__ import annotations
 import json
 import os
-import random
 import sqlite3
-import time
 import urllib.request
 
 from server import inference
@@ -261,7 +259,7 @@ def gemini_run(config, prompt: str, system: str = "") -> str | None:
             return None
         parts = candidates[0].get("content", {}).get("parts", [])
         return "".join(p.get("text", "") for p in parts) or None
-    except Exception as e:
+    except Exception:
         return None
 
 

@@ -162,8 +162,6 @@ def apply_auto_enhance(config: dict) -> dict:
 
     Config keys: session_id, source, mode ('warm','cool','vibrant','cinematic','soft')
     """
-    session_id = config.get("session_id", "default")
-    source = config.get("source", "")
     mode = config.get("mode", "vibrant")
 
     if mode not in _VALID_MODES:
