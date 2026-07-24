@@ -39,14 +39,15 @@ export default function CrewManage() {
   const [crews, setCrews] = useState<CrewRow[]>([]);
   const [summary, setSummary] = useState<CrewSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [openId, setOpenId] = useState<number | null>(null);
   const [adding, setAdding] = useState(false);
 
   const load = () => {
     setLoading(true);
     crewAdminApi.list()
-      .then(r => { setCrews(r.crews); setSummary(r.summary); })
-      .catch(() => toast('Could not load crew', 'danger'))
+      .then(r => { setCrews(r.crews); setSummary(r.summary); setError(''); })
+      .catch(e => { setError(e instanceof Error ? e.message : 'Could not load crew'); toast('Could not load crew', 'danger'); })
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
@@ -71,7 +72,10 @@ export default function CrewManage() {
       )}
 
       {loading ? <SkeletonList count={5} />
-        : crews.length === 0 ? (
+        : error && crews.length === 0 ? (
+          <EmptyState icon="error" accent="#F43F5E" title="Couldn't load crew" hint={error}
+            action={<Button icon="refresh" onClick={load}>Try again</Button>} />
+        ) : crews.length === 0 ? (
           <EmptyState icon="engineering" title="No crew yet"
             hint="Add your first cleaner or subcontractor to start." />
         ) : (
@@ -122,18 +126,23 @@ function CrewDrawer({ id, onClose, onChanged }: { id: number; onClose: () => voi
   const [editing, setEditing] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
+  const [loadErr, setLoadErr] = useState('');
+  const [deletingLeave, setDeletingLeave] = useState<number | null>(null);
 
   const load = () => {
     setLoading(true);
-    crewAdminApi.get(id).then(setD)
-      .catch(() => toast('Could not load crew', 'danger'))
+    crewAdminApi.get(id).then(r => { setD(r); setLoadErr(''); })
+      .catch(e => { setLoadErr(e instanceof Error ? e.message : 'Could not load crew'); toast('Could not load crew', 'danger'); })
       .finally(() => setLoading(false));
   };
   useEffect(load, [id]);
 
   const removeLeave = async (l: Leave) => {
-    try { await crewAdminApi.deleteLeave(l.id); load(); toast('Leave removed', 'ok'); }
+    if (deletingLeave !== null) return;
+    setDeletingLeave(l.id);
+    try { await crewAdminApi.deleteLeave(l.id); toast('Leave removed', 'ok'); load(); }
     catch { toast('Could not remove leave', 'danger'); }
+    finally { setDeletingLeave(null); }
   };
 
   const c = d?.crew;
@@ -148,14 +157,19 @@ function CrewDrawer({ id, onClose, onChanged }: { id: number; onClose: () => voi
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {c && <Button variant="ghost" icon="edit" onClick={() => setEditing(true)}>Edit</Button>}
-          <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-lg text-muted hover:bg-white/6 hover:text-ink">
+          <button onClick={onClose} className="grid h-11 w-11 place-items-center rounded-lg text-muted hover:bg-white/6 hover:text-ink">
             <Icon name="close" size={20} />
           </button>
         </div>
       </div>
 
-      {loading || !d || !c || !s ? (
+      {loading ? (
         <div className="p-5"><SkeletonList count={5} /></div>
+      ) : loadErr || !d || !c || !s ? (
+        <div className="p-5">
+          <EmptyState icon="error" accent="#F43F5E" title="Couldn't load this crew member"
+            hint={loadErr || undefined} action={<Button icon="refresh" onClick={load}>Try again</Button>} />
+        </div>
       ) : (
         <div className="space-y-6 p-5">
           <div className="flex flex-wrap gap-1.5">
@@ -188,9 +202,10 @@ function CrewDrawer({ id, onClose, onChanged }: { id: number; onClose: () => voi
                       <span className="truncate text-sm text-ink">{fmtDate(l.date_from)} – {fmtDate(l.date_to)}</span>
                       {l.notes && <span className="truncate text-xs text-muted">· {l.notes}</span>}
                     </div>
-                    <button onClick={() => removeLeave(l)} title="Remove"
-                      className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-muted hover:bg-rose/10 hover:text-rose">
-                      <Icon name="delete" size={16} />
+                    <button onClick={() => removeLeave(l)} title="Remove" disabled={deletingLeave !== null}
+                      className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-muted hover:bg-rose/10 hover:text-rose disabled:opacity-40">
+                      <Icon name={deletingLeave === l.id ? 'progress_activity' : 'delete'} size={16}
+                        className={deletingLeave === l.id ? 'animate-spin' : ''} />
                     </button>
                   </div>
                 ))}
@@ -199,7 +214,7 @@ function CrewDrawer({ id, onClose, onChanged }: { id: number; onClose: () => voi
           </Section>
 
           {/* Jobs */}
-          <Section icon="cleaning_services" title={`Recent jobs (${d.jobs.length})`}>
+          <Section icon="cleaning_services" title="Recent jobs">
             {d.jobs.length === 0 ? <Empty text="No jobs assigned yet." /> : (
               <div className="space-y-1">
                 {d.jobs.slice(0, 10).map(j => (
@@ -208,9 +223,12 @@ function CrewDrawer({ id, onClose, onChanged }: { id: number; onClose: () => voi
                       <Badge tone={JOB_TONE[j.status] || 'neutral'}>{j.status}</Badge>
                       <span className="truncate text-muted">{fmtDate(j.scheduled_date)} · {j.address}</span>
                     </div>
-                    <span className="shrink-0 text-ink">{gbp2(j.price_pence)}</span>
+                    <span className="shrink-0 text-ink tabular-nums">{gbp2(j.price_pence)}</span>
                   </div>
                 ))}
+                {d.jobs.length > 10 && (
+                  <p className="px-1 pt-1 text-xs text-muted/50">Showing the 10 most recent of {d.jobs.length}.</p>
+                )}
               </div>
             )}
           </Section>
@@ -225,7 +243,7 @@ function CrewDrawer({ id, onClose, onChanged }: { id: number; onClose: () => voi
                     <span className="truncate text-muted">
                       {fmtDate(p.date_from)}–{fmtDate(p.date_to)}{p.jobs_done ? ` · ${p.jobs_done} cleans` : ''} · {fmtTs(p.paid_at)}
                     </span>
-                    <span className="shrink-0 font-medium text-emerald">{gbp2(p.amount_pence)}</span>
+                    <span className="shrink-0 font-medium text-emerald tabular-nums">{gbp2(p.amount_pence)}</span>
                   </div>
                 ))}
               </div>
@@ -254,7 +272,7 @@ function MiniStat({ label, value, tone }: { label: string; value: string; tone: 
   return (
     <div className="rounded-xl border border-white/6 bg-white/[0.02] p-3">
       <div className="text-[10px] uppercase tracking-wide text-muted/60">{label}</div>
-      <div className={`mt-0.5 text-lg font-bold ${tone}`}>{value}</div>
+      <div className={`mt-0.5 text-lg font-bold tabular-nums ${tone}`}>{value}</div>
     </div>
   );
 }

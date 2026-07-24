@@ -151,9 +151,14 @@ def crew_detail(crew_id: int, tenant_id: int = DEFAULT_TENANT_ID) -> tuple[int, 
         "FROM payroll_payments WHERE subcontractor_id = ? ORDER BY paid_at DESC LIMIT 24",
         (crew_id,))
 
-    done = sum(1 for j in jobs if j["status"] == "done")
-    upcoming = sum(1 for j in jobs if j["status"] == "scheduled" and j["scheduled_date"] >= today)
-    total_paid = sum(p["amount_pence"] for p in payroll)
+    # Stats come from full aggregates, not the truncated preview lists above —
+    # a crew with >40 jobs or >24 payments would otherwise show totals that
+    # silently disagree with the roster card and the page summary.
+    roll = _jobs_rollup([crew_id]).get(crew_id, {})
+    pay = _pay_rollup([crew_id]).get(crew_id, {})
+    done = roll.get("done", 0)
+    upcoming = roll.get("upcoming", 0)
+    total_paid = pay.get("paid", 0)
     return 200, {
         "crew": {
             "id": c["id"], "name": c["name"], "phone": c["phone"], "email": c["email"],
